@@ -1,6 +1,6 @@
 # IDP MVP
 
-Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation plus a governed, idempotent data bootstrap. Document upload and processing remain unavailable in this increment.
+Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, and secure PDF intake with deterministic duplicate detection. Parsing and extraction are not included.
 
 ## Prerequisites
 
@@ -27,7 +27,9 @@ Start FastAPI and Vite together:
 make dev-mock
 ```
 
-The UI is available at <http://localhost:5173>. Vite proxies the safe health endpoint at <http://localhost:5173/api/health> to FastAPI. Press `Ctrl+C` once to stop both processes.
+The UI is available at <http://localhost:5173>. Vite proxies API requests to FastAPI, including <http://localhost:5173/api/health> and the document registry. Press `Ctrl+C` once to stop both processes.
+
+Mock mode stores source PDFs beneath `.local/idp/source_volume/incoming/` and registry metadata in `.local/idp/registry.sqlite3`. Both are ignored by Git. It uses no Databricks credentials, CLI, or runtime network access. Remove local mock data only when you intentionally want a fresh local demonstration; application startup never deletes it.
 
 ## Tests and checks
 
@@ -53,6 +55,9 @@ Server settings use the `IDP_` environment prefix:
 | `IDP_WAREHOUSE_ID` | SQL warehouse identifier |
 | `IDP_VALIDATION_ENDPOINT` | Future validation endpoint |
 | `IDP_APP_NAME` | Application display name |
+| `IDP_LOCAL_DATA_DIR` | Ignored local mock storage root |
+| `IDP_MAX_UPLOAD_BYTES` | Maximum size of each streamed PDF |
+| `IDP_MAX_UPLOAD_FILES` | Maximum PDFs in one multipart request |
 
 Databricks mode validates all required settings before application startup and does not attempt a connection when configuration is incomplete. Catalog, schema, prefix, and volume values must each be one simple identifier containing only ASCII letters, numbers, and underscores.
 
@@ -70,6 +75,20 @@ The deployment identity must have:
 - Permission to use the configured SQL warehouse and create/run the bootstrap Job.
 
 Object ownership remains with the approved deployment identity. Application runtime grants should be limited to `USE CATALOG`, `USE SCHEMA`, volume file access, and the table operations required by the implemented capability.
+
+For document intake, the Databricks App service principal additionally needs `READ VOLUME` and `WRITE VOLUME` on the configured source volume, `SELECT` and `MODIFY` on the prefixed documents table, and `CAN USE` on the SQL warehouse. The backend uses Databricks unified authentication, writes only under the server-owned `incoming/` directory, and records the trusted forwarded user identity. Tokens, internal credential-bearing URLs, and volume paths are never returned to the browser.
+
+## Document API
+
+```text
+POST /api/documents
+GET  /api/documents
+GET  /api/documents/{document_id}
+```
+
+`POST /api/documents` accepts one or more multipart `files` fields plus optional `case_id`; the server fixes the current profile to `invoice_v1`. Files must have a `.pdf` extension, `application/pdf` media type, and `%PDF-` signature. Uploads are streamed and hashed with SHA-256. Duplicate content is rejected before another active registry row is created, even when the filename changes.
+
+Stable errors include `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `DOCUMENT_DUPLICATE`, `FILE_STORAGE_FAILED`, and `REGISTRY_WRITE_FAILED`. A mixed multi-file result uses HTTP 207 and reports each rejected file explicitly. No route accepts a volume or table path.
 
 In an authenticated environment, supply the required bundle variables through the approved deployment configuration and run:
 

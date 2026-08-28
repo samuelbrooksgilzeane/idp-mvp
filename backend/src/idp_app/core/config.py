@@ -1,8 +1,9 @@
 import re
 from enum import Enum
+from pathlib import Path
 from typing import Any, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
@@ -29,6 +30,9 @@ class Settings(BaseSettings):
     warehouse_id: str | None = None
     validation_endpoint: str | None = None
     app_name: str = "IDP MVP"
+    local_data_dir: Path = Path(".local/idp")
+    max_upload_bytes: PositiveInt = 25 * 1024 * 1024
+    max_upload_files: PositiveInt = 10
 
     @field_validator(
         "catalog",

@@ -1,11 +1,13 @@
 [project]
 name = "idp-app"
 version = "0.1.0"
-description = "Backend foundation for the IDP MVP."
+description = "Backend services for the IDP MVP."
 requires-python = ">=3.11"
 dependencies = [
+  "databricks-sdk==0.133.0",
   "fastapi==0.116.1",
   "pydantic-settings==2.10.1",
+  "python-multipart==0.0.32",
   "uvicorn[standard]==0.35.0",
 ]
 
