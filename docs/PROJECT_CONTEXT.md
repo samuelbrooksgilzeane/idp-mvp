@@ -9,7 +9,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
 - Current implementation branch: `feat/05-parsed-document-viewer`
-- Commit 5 is implemented and deployed for verification, but is not yet committed or tagged.
+- Commit 5 is implemented, deployed, visually accepted, and committed. The Parsing MVP is ready for the `mvp-parsing` acceptance tag.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -21,7 +21,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 2: data foundation | `feat/02-data-foundation` | `e75b7ee` | Pushed |
 | Commit 3: upload and registry | `feat/03-upload-and-registry` | `c9043a8` | Pushed |
 | Commit 4: parsing pipeline | `feat/04-parsing-pipeline` | `9ce5f16` | Pushed |
-| Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | — | In progress; implementation and dev deployment verified |
+| Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | `91e111c` | Pushed and accepted |
 
 ## Implemented capabilities
 
@@ -141,14 +141,12 @@ Additional live hardening checks remain:
   artifact-volume page images.
 - Malformed-PDF failure behavior in the deployed environment.
 
-Capabilities 2, 3, and 4 are `COMPLETE`. Capability 5 is `IN PROGRESS`: its
-implementation, automated checks, local visual interaction, and live backend
-deployment pass, while representative-template visual acceptance, the Git
-commit, and the `mvp-parsing` tag remain.
+Capabilities 2, 3, 4, and 5 are `COMPLETE`. The Parsing MVP implementation,
+automated checks, local visual interaction, live backend deployment, and
+stakeholder visual acceptance pass.
 
 ## Next review boundary
 
-1. Open the deployed App while signed in and visually accept the overlay alignment on each representative invoice template.
-2. Commit Commit 5, update its tracker SHA, and tag the verified commit `mvp-parsing` once that acceptance passes.
-3. Perform the additional live hardening checks above when practical.
-4. Start `docs/implementation/07_COMMIT_SCHEMA_REGISTRY_AND_VIEWER.md` only after the Parsing MVP review.
+1. Tag the accepted Parsing MVP state `mvp-parsing`.
+2. Perform the additional live hardening checks above when practical.
+3. Start `docs/implementation/07_COMMIT_SCHEMA_REGISTRY_AND_VIEWER.md` on its own feature branch.
