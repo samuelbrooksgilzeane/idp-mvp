@@ -1,6 +1,7 @@
 import { Clock3, FileSearch, LoaderCircle, Play, RotateCcw } from "lucide-react";
 
 import type { DocumentRecord, ParseRun } from "../App";
+import { DocumentViewer } from "./DocumentViewer";
 
 type DocumentDetailProps = {
   document: DocumentRecord | null;
@@ -61,6 +62,11 @@ export function DocumentDetail({
         <div><dt>Profile</dt><dd>{document.template_id}</dd></div>
         <div><dt>Uploaded by</dt><dd>{document.uploaded_by}</dd></div>
       </dl>
+
+      <DocumentViewer
+        documentId={document.document_id}
+        documentStatus={document.status}
+      />
 
       <div className="history-heading">
         <div><Clock3 size={16} aria-hidden="true" /><h3>Parse history</h3></div>

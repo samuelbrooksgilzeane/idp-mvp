@@ -1,6 +1,6 @@
 # IDP MVP
 
-Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, and an idempotent document parsing workflow. Extraction is not included.
+Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, an idempotent document parsing workflow, and an authenticated parsed-page viewer. Extraction is not included.
 
 ## Prerequisites
 
@@ -100,6 +100,16 @@ GET  /api/runs/{parse_run_id}
 ```
 
 The manual trigger accepts only a registered document identifier. Eligible documents move through `UPLOADED` or a retry state to `PARSING`, then `PARSED` or `PARSE_FAILED`. Every retry creates a new immutable parse run using the identity inputs `document_id`, source SHA-256, and parser version. The API returns status and run metadata but does not expose source paths, artifact paths, or raw parser output.
+
+## Parsed-document viewer API
+
+```text
+GET /api/documents/{document_id}/pages
+GET /api/documents/{document_id}/pages/{page_id}/image
+GET /api/documents/{document_id}/elements?page_id={page_id}&type={optional_type}
+```
+
+The viewer reads only the latest successful parse for the requested registered document. Page-image bytes are streamed through the authenticated backend, and responses never expose internal artifact paths or tokens. The React viewer supports page navigation, zoom, accessible element-type filters, scaled labelled overlays, and an element inspector with confidence and extracted content. Image loading remains incremental, one selected page at a time.
 
 The Databricks Job reads only the server-registered source path, pins `ai_parse_document` to version `2.0`, leaves `descriptionElementTypes` empty, and renders images under the configured artifacts volume. It retains the complete `VARIANT` response before deriving text, page count, image references, and parse errors. Source PDFs are never moved or deleted. The App service principal needs `CAN MANAGE RUN` on the parser Job in addition to its intake grants. The Job run identity needs `READ VOLUME` on the source volume, `READ VOLUME` and `WRITE VOLUME` on the artifacts volume, and `SELECT` plus `MODIFY` on the documents and parsed-documents tables.
 

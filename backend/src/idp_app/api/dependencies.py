@@ -19,6 +19,11 @@ from idp_app.services.parse_runs import (
     SQLiteParseRunRepository,
 )
 from idp_app.services.parsing import ParsingService
+from idp_app.services.viewer import (
+    DatabricksPageImageStorage,
+    LocalPageImageStorage,
+    ViewerService,
+)
 
 
 def get_document_service(request: Request) -> DocumentService:
@@ -125,6 +130,68 @@ def build_parsing_service(settings: Settings) -> ParsingService:
         databricks_documents,
         databricks_parse_runs,
         databricks_jobs,
+    )
+
+
+def get_viewer_service(request: Request) -> ViewerService:
+    existing = getattr(request.app.state, "viewer_service", None)
+    if isinstance(existing, ViewerService):
+        return existing
+
+    settings = cast(Settings, request.app.state.settings)
+    service = build_viewer_service(settings)
+    request.app.state.viewer_service = service
+    return service
+
+
+def build_viewer_service(settings: Settings) -> ViewerService:
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    if settings.mode is IdpMode.MOCK:
+        return ViewerService(
+            SQLiteDocumentRegistry(database_path),
+            SQLiteParseRunRepository(database_path),
+            LocalPageImageStorage(
+                settings.local_data_dir / "artifacts_volume" / "page_images"
+            ),
+        )
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    artifacts_volume_name = _required(
+        settings.artifacts_volume_name,
+        "IDP_ARTIFACTS_VOLUME_NAME",
+    )
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    documents = DatabricksDocumentRegistry(
+        client,
+        warehouse_id,
+        catalog,
+        project_schema,
+        table_prefix,
+    )
+    return ViewerService(
+        documents,
+        DatabricksParseRunRepository(
+            documents,
+            catalog,
+            project_schema,
+            table_prefix,
+        ),
+        DatabricksPageImageStorage(
+            client,
+            catalog,
+            project_schema,
+            artifacts_volume_name,
+        ),
     )
 
 

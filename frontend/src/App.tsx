@@ -240,8 +240,8 @@ export function App() {
         <section className="page-heading" aria-labelledby="page-title">
           <div>
             <p className="eyebrow">Document processing</p>
-            <h1 id="page-title">Parse workspace</h1>
-            <p>Register PDFs and create retained layout-aware parse runs.</p>
+            <h1 id="page-title">Parse and inspect</h1>
+            <p>Register PDFs, run layout parsing, and inspect every detected region.</p>
           </div>
           <dl className="runtime-summary" aria-label="Runtime status">
             <div><dt>Runtime</dt><dd>{runtimeMode}</dd></div>
@@ -275,7 +275,7 @@ export function App() {
       </main>
       <footer>
         <span>Retained parser contract 2.0</span>
-        <span>Page inspection follows in the next increment</span>
+        <span>Authenticated page inspection enabled</span>
       </footer>
     </div>
   );

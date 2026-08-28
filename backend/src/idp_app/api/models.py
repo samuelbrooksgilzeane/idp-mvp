@@ -72,3 +72,28 @@ class ParseRunResponse(BaseModel):
     requested_by: str
     started_at: datetime
     completed_at: datetime | None
+
+
+class BoundingBoxResponse(BaseModel):
+    page_id: int
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+class ElementResponse(BaseModel):
+    element_id: int
+    element_type: str
+    content: str
+    confidence: float | None
+    description: str | None
+    boxes: list[BoundingBoxResponse]
+
+
+class PageResponse(BaseModel):
+    page_id: int
+    page_number: int
+    element_count: int
+    element_types: list[str]
+    image_url: str

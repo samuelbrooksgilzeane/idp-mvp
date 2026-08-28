@@ -21,7 +21,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 | 2 | Data foundation | COMPLETE | `e75b7ee` + parsing migration in `9ce5f16` | Prefixed volumes, tables and views exist | Dev bundle validation passed; bootstrap runs `885944253718670` and `571208438976540` succeeded; `workspace.idp_mvp` contains two volumes, seven managed tables and three views |
 | 3 | Upload and registry | COMPLETE | `c9043a8` + App deployment in `551bd1b` | PDFs can be uploaded and tracked | Two representative invoices uploaded through the deployed App and appeared in the SQL-backed registry; duplicate, identity and failure-path tests pass |
 | 4 | Parsing pipeline | COMPLETE | `9ce5f16` + runtime fix in `627625c` | PDFs become page and element data | Dev Job run `585474568087236` succeeded with `ai_parse_document` 2.0; the invoice reached `PARSED` with one page after a visible, retryable failure; parsing tests pass |
-| 5 | Parsed-document viewer | NOT STARTED | — | Parsed pages and overlays are inspectable | — |
+| 5 | Parsed-document viewer | IN PROGRESS | — | Parsed pages and labelled overlays are inspectable | `make check` passes with 44 backend and 8 frontend tests; local browser QA covered zoom, filtering and element inspection; the deployed API returned one page, 11 elements and a 204,525-byte JPEG. Commit, tag and representative-template visual acceptance remain. |
 | 6 | Schema registry and viewer | NOT STARTED | — | Exact extraction schema is visible | — |
 | 7 | Extraction pipeline | NOT STARTED | — | Typed fields, confidence and citations exist | — |
 | 8 | Extraction evidence UI | NOT STARTED | — | Fields link to supporting PDF regions | — |
@@ -33,7 +33,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 
 | Milestone | Required commits | Acceptance tag | Status |
 |---|---|---|---|
-| Parsing MVP | 1–5 | `mvp-parsing` | NOT STARTED |
+| Parsing MVP | 1–5 | `mvp-parsing` | IN PROGRESS |
 | Extraction MVP | 6–8 | `mvp-extraction` | NOT STARTED |
 | Validated MVP | 9–11 | `mvp-validation` | NOT STARTED |
 

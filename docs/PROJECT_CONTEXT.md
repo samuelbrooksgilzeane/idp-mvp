@@ -8,8 +8,8 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/04-parsing-pipeline`
-- Commit 5 has not started.
+- Current implementation branch: `feat/05-parsed-document-viewer`
+- Commit 5 is implemented and deployed for verification, but is not yet committed or tagged.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -21,6 +21,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 2: data foundation | `feat/02-data-foundation` | `e75b7ee` | Pushed |
 | Commit 3: upload and registry | `feat/03-upload-and-registry` | `c9043a8` | Pushed |
 | Commit 4: parsing pipeline | `feat/04-parsing-pipeline` | `9ce5f16` | Pushed |
+| Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | — | In progress; implementation and dev deployment verified |
 
 ## Implemented capabilities
 
@@ -66,19 +67,30 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Source-path and artifact-path confinement checks.
 - Source PDFs are not moved or deleted after success or failure.
 - React document detail, parse/retry controls, status polling, and run history.
-- No parsed-page viewer, extraction schema, extraction, or validation functionality yet.
+
+### Parsed-document viewer
+
+- Authenticated page metadata, page-image streaming, and filtered element APIs.
+- Latest-successful-parse selection and document/run/artifact path confinement.
+- Incremental loading of the selected page image rather than returning all image bytes.
+- Page navigation, zoom, reset, element-type filtering, and labelled overlays.
+- Bounding boxes rescale against the rendered image after resize and zoom.
+- Element inspector with type, confidence, region count, and extracted content.
+- Explicit unparsed, missing-image, loading, and API-error states.
+- No extraction schema, extraction, or validation functionality yet.
 
 ## Local verification
 
 The following passed on 2026-08-28:
 
-- `make test`: 40 backend tests and 4 frontend tests.
+- `make test`: 44 backend tests and 8 frontend tests.
 - `make check`: tests, Ruff, mypy, ESLint, TypeScript checking, frontend production build, and offline configuration/YAML validation.
 - `make dev-mock`: FastAPI and Vite started together and stopped cleanly.
 - `GET http://localhost:5173/api/health`: returned HTTP 200 in mock mode through the Vite proxy.
 - A generated PDF uploaded through the Vite proxy and reached `UPLOADED`.
 - Its parse attempt moved from `RUNNING` to `SUCCESS` with one retained page.
-- Failure, retry, concurrent-state, immutable-history, raw-result, image-confinement, trigger-failure, and polling-failure paths have automated coverage.
+- The parsed-page viewer rendered two labelled elements; zoom, filtering, overlay selection, and inspector content were exercised in the browser.
+- Failure, retry, concurrent-state, immutable-history, raw-result, image-confinement, cross-run access, missing-image, trigger-failure, polling-failure, scaling, navigation, filtering, and partial-state paths have automated coverage.
 
 The local servers are not intentionally left running. Start them with:
 
@@ -115,6 +127,12 @@ Authenticated dev-workspace verification completed on 2026-08-28 against the
 - Parser Job run `585474568087236` succeeded with `ai_parse_document` version
   `2.0`; the invoice reached `PARSED` with a retained page count of one and no
   parse error.
+- The Commit 5 application source was deployed and the `idp-mvp-dev` App restarted successfully.
+- The authenticated viewer API returned one page and 11 elements spanning
+  `text`, `table`, `figure`, and `footnote` types for document
+  `d0ed9896-da45-560a-8ddb-5b88d20dea1e`.
+- The authenticated page-image endpoint returned HTTP 200, `image/jpeg`, and
+  204,525 streamed bytes without exposing its internal volume path.
 
 Additional live hardening checks remain:
 
@@ -123,14 +141,14 @@ Additional live hardening checks remain:
   artifact-volume page images.
 - Malformed-PDF failure behavior in the deployed environment.
 
-Capabilities 2, 3, and 4 are now `COMPLETE`: their automated checks pass and
-their principal user journeys have been demonstrated in the dev workspace.
+Capabilities 2, 3, and 4 are `COMPLETE`. Capability 5 is `IN PROGRESS`: its
+implementation, automated checks, local visual interaction, and live backend
+deployment pass, while representative-template visual acceptance, the Git
+commit, and the `mvp-parsing` tag remain.
 
 ## Next review boundary
 
-1. Review the completed upload and parsing increments through Commit 4.
-2. Perform the additional live hardening checks above when practical.
-3. Start `docs/implementation/06_COMMIT_PARSED_DOCUMENT_VIEWER.md` only after
-   the review authorizes the next increment.
-
-Do not begin Commit 5 until that review authorizes the next increment.
+1. Open the deployed App while signed in and visually accept the overlay alignment on each representative invoice template.
+2. Commit Commit 5, update its tracker SHA, and tag the verified commit `mvp-parsing` once that acceptance passes.
+3. Perform the additional live hardening checks above when practical.
+4. Start `docs/implementation/07_COMMIT_SCHEMA_REGISTRY_AND_VIEWER.md` only after the Parsing MVP review.
