@@ -97,33 +97,39 @@ def main() -> None:
     parse_runs = qualified(parameters, "parsed_documents")
 
     try:
-        spark.sql(  # type: ignore[name-defined]  # Databricks injects SparkSession.
+        parse_result = spark.sql(  # type: ignore[name-defined]  # Databricks injects SparkSession.
             """
-            CREATE OR REPLACE TEMP VIEW current_document_parse AS
-            SELECT ai_parse_document(
-              content,
-              map(
-                'version', '2.0',
-                'imageOutputPath', :image_output_path,
-                'descriptionElementTypes', ''
+            SELECT to_json(
+              ai_parse_document(
+                content,
+                map(
+                  'version', '2.0',
+                  'imageOutputPath', :image_output_path,
+                  'descriptionElementTypes', ''
+                )
               )
-            ) AS parsed
+            ) AS parsed_json
             FROM READ_FILES(:source_path, format => 'binaryFile')
             """,
             args={
                 "source_path": parameters.source_path,
                 "image_output_path": parameters.image_output_path,
             },
-        )
+        ).first()
+        if parse_result is None or parse_result["parsed_json"] is None:
+            raise RuntimeError("ai_parse_document returned no result")
 
         # Retain the complete parser contract before any derived fields are written.
         spark.sql(  # type: ignore[name-defined]
             f"""
             UPDATE {parse_runs}
-            SET parsed = (SELECT parsed FROM current_document_parse)
+            SET parsed = parse_json(:parsed_json)
             WHERE parse_run_id = :parse_run_id AND status = 'RUNNING'
             """,
-            args={"parse_run_id": parameters.parse_run_id},
+            args={
+                "parse_run_id": parameters.parse_run_id,
+                "parsed_json": parse_result["parsed_json"],
+            },
         )
 
         spark.sql(  # type: ignore[name-defined]
