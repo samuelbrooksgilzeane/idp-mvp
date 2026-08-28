@@ -17,6 +17,13 @@ TRUSTED_VARIABLES = {
     "evaluation_experiment",
     "app_name",
 }
+EXPECTED_BOOTSTRAP_PARAMETERS = {
+    "catalog": "${var.catalog}",
+    "project_schema": "${var.project_schema}",
+    "table_prefix": "${var.table_prefix}",
+    "source_volume_name": "${var.source_volume_name}",
+    "artifacts_volume_name": "${var.artifacts_volume_name}",
+}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -57,10 +64,42 @@ def validate_bundle_config() -> None:
     if "workspace:" in serialized or "host:" in serialized:
         raise ValueError("databricks.yml must not hardcode workspace configuration")
 
+    includes = config.get("include")
+    if includes != ["resources/*.yml"]:
+        raise ValueError("databricks.yml must include the reviewed bundle resources")
+
+
+def validate_data_bootstrap() -> None:
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml")
+    jobs = resource.get("resources", {}).get("jobs", {})
+    bootstrap = jobs.get("governed_data_bootstrap")
+    if not isinstance(bootstrap, dict):
+        raise ValueError("Bundle must define the governed_data_bootstrap job")
+
+    tasks = bootstrap.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != 1:
+        raise ValueError("Governed data bootstrap must contain exactly one reviewed SQL task")
+    sql_task = tasks[0].get("sql_task", {})
+    if sql_task.get("warehouse_id") != "${var.warehouse_id}":
+        raise ValueError("Governed data bootstrap must use the trusted warehouse variable")
+    if sql_task.get("parameters") != EXPECTED_BOOTSTRAP_PARAMETERS:
+        raise ValueError("Governed data bootstrap parameters must match the trusted contract")
+
+    sql = (ROOT / "databricks_etl" / "sql" / "create_objects.sql").read_text(
+        encoding="utf-8"
+    )
+    normalized = " ".join(sql.upper().split())
+    for forbidden in ("CREATE CATALOG", " DROP ", " TRUNCATE "):
+        if forbidden in f" {normalized} ":
+            raise ValueError(f"Data bootstrap contains destructive or forbidden SQL: {forbidden}")
+    if ".DEFAULT." in normalized:
+        raise ValueError("Data bootstrap must not create objects in the default schema")
+
 
 def main() -> None:
     validate_app_config()
     validate_bundle_config()
+    validate_data_bootstrap()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
         raise ValueError("Default local application mode must be mock")
     print("Configuration and YAML validation passed.")

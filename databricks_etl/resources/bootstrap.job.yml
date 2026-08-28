@@ -1,0 +1,17 @@
+resources:
+  jobs:
+    governed_data_bootstrap:
+      name: ${var.app_name}-${bundle.target}-governed-data-bootstrap
+      description: Idempotently creates the IDP project schema, volumes, tables, and views.
+      tasks:
+        - task_key: create_governed_objects
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/create_objects.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
+              source_volume_name: ${var.source_volume_name}
+              artifacts_volume_name: ${var.artifacts_volume_name}

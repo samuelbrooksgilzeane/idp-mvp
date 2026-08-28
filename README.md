@@ -1,6 +1,6 @@
 # IDP MVP
 
-Project-foundation increment for an Intelligent Document Processing application. The current repository provides a deployable FastAPI and React shell, strict trusted configuration, and Databricks Asset Bundle metadata. It does not create storage or connect to Databricks.
+Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation plus a governed, idempotent data bootstrap. Document upload and processing remain unavailable in this increment.
 
 ## Prerequisites
 
@@ -56,15 +56,29 @@ Server settings use the `IDP_` environment prefix:
 
 Databricks mode validates all required settings before application startup and does not attempt a connection when configuration is incomplete. Catalog, schema, prefix, and volume values must each be one simple identifier containing only ASCII letters, numbers, and underscores.
 
-## Databricks handoff
+## Governed data bootstrap
 
-`app.yaml` contains the application entry point and no secrets. This foundation increment deploys in mock mode and makes no Databricks connections. `databricks_etl/databricks.yml` defines dev and prod targets in the same configured project schema, using `idp_dev` and `idp` table prefixes respectively. It deliberately contains no workspace hostname.
+`databricks_etl/sql/create_objects.sql` creates the configured project schema, source and artifacts volumes, seven governed Delta tables, and three views. All table and view names use the target-specific prefix. The migration uses `IF NOT EXISTS`, never creates a catalog, and contains no `DROP` or `TRUNCATE` operation. Reverting application code does not remove persisted objects.
+
+The bundle defines dev and prod targets in the same project schema, using `idp_dev` and `idp` table prefixes respectively. It deliberately contains no workspace hostname or credentials.
+
+The deployment identity must have:
+
+- `USE CATALOG` on the configured existing catalog.
+- `CREATE SCHEMA` on that catalog only when the project schema does not already exist.
+- `USE SCHEMA`, `CREATE TABLE`, and `CREATE VOLUME` on the project schema.
+- Permission to use the configured SQL warehouse and create/run the bootstrap Job.
+
+Object ownership remains with the approved deployment identity. Application runtime grants should be limited to `USE CATALOG`, `USE SCHEMA`, volume file access, and the table operations required by the implemented capability.
 
 In an authenticated environment, supply the required bundle variables through the approved deployment configuration and run:
 
 ```bash
 cd databricks_etl
 databricks bundle validate -t dev
+databricks bundle deploy -t dev
+databricks bundle run -t dev governed_data_bootstrap
+databricks bundle run -t dev governed_data_bootstrap
 ```
 
-The local `make check` validation is intentionally credential-free. No catalog, schema, volume, table, Job, serving endpoint, or external connection is created in this increment.
+Running the bootstrap twice is the live idempotency check. After both runs, inspect the configured project schema in Catalog Explorer and confirm that both volumes, all prefixed tables, and the latest-successful-run views exist with no document rows. The local `make check` validation remains credential-free and validates the reviewed bundle structure and non-destructive SQL contract.
