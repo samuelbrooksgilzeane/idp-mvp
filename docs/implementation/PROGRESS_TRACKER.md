@@ -17,7 +17,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 
 | Order | Capability | Status | Git SHA | Demonstrable result | Evidence / blocker |
 |---:|---|---|---|---|---|
-| 1 | Project foundation | NOT STARTED | — | App and bundle build and validate | — |
+| 1 | Project foundation | COMPLETE | — | App and bundle build and validate | `chore(idp): scaffold deployable app and asset bundle`; `make check`; mock UI and proxied health verified locally |
 | 2 | Data foundation | NOT STARTED | — | Prefixed volumes, tables and views exist | — |
 | 3 | Upload and registry | NOT STARTED | — | PDFs can be uploaded and tracked | — |
 | 4 | Parsing pipeline | NOT STARTED | — | PDFs become page and element data | — |
@@ -64,4 +64,3 @@ Record actual rollbacks; do not rewrite history in this file.
 ## Example stakeholder statement
 
 > We have completed Commit 5, so the Parsing MVP is demonstrable: a user can upload a PDF, run parsing and inspect every page and detected element. Extraction has not started. The next increment makes the extraction schema visible before any fields are produced.
-

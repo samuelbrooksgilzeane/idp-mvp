@@ -1,0 +1,36 @@
+bundle:
+  name: idp-mvp
+
+include: []
+
+variables:
+  catalog:
+    description: Existing permitted Unity Catalog catalog
+  project_schema:
+    description: Project schema shared by development and production targets
+  table_prefix:
+    description: Prefix applied to all project data objects
+  source_volume_name:
+    description: Existing or future source-document volume name
+  artifacts_volume_name:
+    description: Existing or future derived-artifact volume name
+  warehouse_id:
+    description: SQL warehouse identifier
+  validation_endpoint:
+    description: Model serving endpoint used by a future validation increment
+  evaluation_experiment:
+    description: MLflow experiment used by a future evaluation increment
+  app_name:
+    description: Databricks App name
+    default: idp-mvp
+
+targets:
+  dev:
+    default: true
+    mode: development
+    variables:
+      table_prefix: idp_dev
+  prod:
+    mode: production
+    variables:
+      table_prefix: idp
