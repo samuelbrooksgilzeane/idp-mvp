@@ -1,0 +1,93 @@
+resources:
+  apps:
+    idp_app:
+      name: ${var.app_name}-${bundle.target}
+      description: Governed IDP application for PDF intake and parsing.
+      source_code_path: ../..
+      resources:
+        - name: sql-warehouse
+          description: SQL warehouse used by the document and parse-run registries.
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: document-parser
+          description: Document parsing Job triggered by the application.
+          job:
+            id: ${resources.jobs.document_parser.id}
+            permission: CAN_MANAGE_RUN
+        - name: source-volume-read
+          description: Read access to registered source PDFs.
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.source_volume_name}
+            permission: READ_VOLUME
+        - name: source-volume-write
+          description: Write access for secure PDF intake.
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.source_volume_name}
+            permission: WRITE_VOLUME
+        - name: artifacts-volume-read
+          description: Read access to retained page images and parsing artifacts.
+          uc_securable:
+            securable_type: VOLUME
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.artifacts_volume_name}
+            permission: READ_VOLUME
+        - name: documents-table-select
+          description: Read access to the document registry.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_documents
+            permission: SELECT
+        - name: documents-table-modify
+          description: Write access to the document registry and workflow state.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_documents
+            permission: MODIFY
+        - name: parsed-documents-table-select
+          description: Read access to immutable parse-run history.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_parsed_documents
+            permission: SELECT
+        - name: parsed-documents-table-modify
+          description: Write access to parse-run status and Job identifiers.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_parsed_documents
+            permission: MODIFY
+      config:
+        command:
+          - uv
+          - run
+          - --project
+          - backend
+          - uvicorn
+          - idp_app.main:create_app
+          - --factory
+          - --host
+          - 0.0.0.0
+          - --port
+          - "8000"
+        env:
+          - name: IDP_MODE
+            value: databricks
+          - name: IDP_CATALOG
+            value: ${var.catalog}
+          - name: IDP_PROJECT_SCHEMA
+            value: ${var.project_schema}
+          - name: IDP_TABLE_PREFIX
+            value: ${var.table_prefix}
+          - name: IDP_SOURCE_VOLUME_NAME
+            value: ${var.source_volume_name}
+          - name: IDP_ARTIFACTS_VOLUME_NAME
+            value: ${var.artifacts_volume_name}
+          - name: IDP_WAREHOUSE_ID
+            value_from: sql-warehouse
+          - name: IDP_PARSE_JOB_ID
+            value_from: document-parser
+          - name: IDP_VALIDATION_ENDPOINT
+            value: ${var.validation_endpoint}
+          - name: IDP_APP_NAME
+            value: IDP MVP (${bundle.target})

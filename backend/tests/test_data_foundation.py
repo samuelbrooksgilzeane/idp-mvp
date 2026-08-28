@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "databricks_etl" / "sql" / "create_objects.sql"
 PARSING_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql"
 BUNDLE_RESOURCE = ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml"
+APP_RESOURCE = ROOT / "databricks_etl" / "resources" / "application.app.yml"
+BUNDLE_CONFIG = ROOT / "databricks_etl" / "databricks.yml"
 
 
 def test_object_names_resolve_only_to_configured_namespace() -> None:
@@ -97,3 +99,42 @@ def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:
     assert " DROP " not in f" {sql} "
     assert " TRUNCATE " not in f" {sql} "
     assert " DELETE " not in f" {sql} "
+
+
+def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> None:
+    resource = yaml.safe_load(APP_RESOURCE.read_text(encoding="utf-8"))
+    app = resource["resources"]["apps"]["idp_app"]
+
+    assert app["source_code_path"] == "../.."
+    assert app["name"] == "${var.app_name}-${bundle.target}"
+
+    env = {item["name"]: item for item in app["config"]["env"]}
+    assert env["IDP_MODE"]["value"] == "databricks"
+    assert env["IDP_CATALOG"]["value"] == "${var.catalog}"
+    assert env["IDP_PROJECT_SCHEMA"]["value"] == "${var.project_schema}"
+    assert env["IDP_TABLE_PREFIX"]["value"] == "${var.table_prefix}"
+    assert env["IDP_WAREHOUSE_ID"]["value_from"] == "sql-warehouse"
+    assert env["IDP_PARSE_JOB_ID"]["value_from"] == "document-parser"
+
+    bindings = {item["name"]: item for item in app["resources"]}
+    assert bindings["sql-warehouse"]["sql_warehouse"] == {
+        "id": "${var.warehouse_id}",
+        "permission": "CAN_USE",
+    }
+    assert bindings["document-parser"]["job"] == {
+        "id": "${resources.jobs.document_parser.id}",
+        "permission": "CAN_MANAGE_RUN",
+    }
+    assert bindings["source-volume-write"]["uc_securable"]["permission"] == (
+        "WRITE_VOLUME"
+    )
+    assert bindings["documents-table-modify"]["uc_securable"]["permission"] == (
+        "MODIFY"
+    )
+
+
+def test_bundle_sync_includes_app_source_and_built_frontend() -> None:
+    config = yaml.safe_load(BUNDLE_CONFIG.read_text(encoding="utf-8"))
+
+    assert config["sync"]["paths"] == [".."]
+    assert config["sync"]["include"] == ["../frontend/dist/**"]

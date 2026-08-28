@@ -121,6 +121,7 @@ Databricks Asset Bundle resources and governed processing tasks. Browser input m
 |---|---|
 | `bootstrap.job.yml` | Runs governed object creation followed by the guarded parsing-column migration. |
 | `parsing.job.yml` | Defines the parameterized serverless document-parser Job. |
+| `application.app.yml` | Creates the Databricks App and binds trusted runtime configuration plus least-privilege Job, warehouse, volume, and table resources. |
 
 ### `databricks_etl/sql/`
 

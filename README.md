@@ -111,8 +111,15 @@ databricks bundle validate -t dev
 databricks bundle deploy -t dev
 databricks bundle run -t dev governed_data_bootstrap
 databricks bundle run -t dev governed_data_bootstrap
+databricks bundle run -t dev idp_app
 databricks bundle run -t dev document_parser \
   --params document_id=<registered-uuid>,parse_run_id=<new-uuid>,source_path=<registered-volume-path>,image_output_path=<trusted-artifacts-path>
 ```
 
 Running the bootstrap twice is the live idempotency check. After both runs, inspect the configured project schema in Catalog Explorer and confirm that both volumes, all prefixed tables, and the latest-successful-run views exist. Then parse a representative registered invoice through the UI, confirm the document reaches `PARSED`, and inspect its raw `VARIANT`, derived text, page count, and artifact-volume page images. Also verify a malformed PDF reaches `PARSE_FAILED` without changing its source file. The local `make check` validation remains credential-free and validates the reviewed bundle structure, non-destructive SQL contract, and parser task configuration.
+
+The bundle also creates the Databricks App and binds its service principal to the
+configured SQL warehouse, parser Job, source/artifact volumes, documents table,
+and parsed-documents table with capability-specific permissions. The deployed App
+runs with `IDP_MODE=databricks`; resource IDs are injected from App resource
+bindings rather than copied into browser requests or committed configuration.

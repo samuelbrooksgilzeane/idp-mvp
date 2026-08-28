@@ -4,6 +4,12 @@ bundle:
 include:
   - resources/*.yml
 
+sync:
+  paths:
+    - ..
+  include:
+    - ../frontend/dist/**
+
 variables:
   catalog:
     description: Existing permitted Unity Catalog catalog

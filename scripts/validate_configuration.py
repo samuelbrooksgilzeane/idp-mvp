@@ -73,6 +73,12 @@ def validate_bundle_config() -> None:
     if includes != ["resources/*.yml"]:
         raise ValueError("databricks.yml must include the reviewed bundle resources")
 
+    sync = config.get("sync")
+    if not isinstance(sync, dict) or sync.get("paths") != [".."]:
+        raise ValueError("Bundle sync must include the repository application source")
+    if sync.get("include") != ["../frontend/dist/**"]:
+        raise ValueError("Bundle sync must include the built production frontend")
+
 
 def validate_data_bootstrap() -> None:
     resource = load_yaml(ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml")
@@ -150,11 +156,59 @@ def validate_parsing_job() -> None:
         raise ValueError("Parsing task must not delete or move source documents")
 
 
+def validate_application_resource() -> None:
+    resource = load_yaml(
+        ROOT / "databricks_etl" / "resources" / "application.app.yml"
+    )
+    apps = resource.get("resources", {}).get("apps", {})
+    app = apps.get("idp_app")
+    if not isinstance(app, dict):
+        raise ValueError("Bundle must define the idp_app Databricks App resource")
+    if app.get("source_code_path") != "../..":
+        raise ValueError("Databricks App must deploy the reviewed repository source")
+
+    config = app.get("config", {})
+    command = config.get("command")
+    if not isinstance(command, list) or "idp_app.main:create_app" not in command:
+        raise ValueError("Databricks App must start the IDP FastAPI application factory")
+    env = {
+        item.get("name"): item
+        for item in config.get("env", [])
+        if isinstance(item, dict) and isinstance(item.get("name"), str)
+    }
+    if env.get("IDP_MODE", {}).get("value") != "databricks":
+        raise ValueError("Deployed Databricks App must use databricks mode")
+    if env.get("IDP_WAREHOUSE_ID", {}).get("value_from") != "sql-warehouse":
+        raise ValueError("Databricks App must use its bound SQL warehouse")
+    if env.get("IDP_PARSE_JOB_ID", {}).get("value_from") != "document-parser":
+        raise ValueError("Databricks App must use its bound parsing Job")
+
+    bindings = app.get("resources")
+    if not isinstance(bindings, list):
+        raise ValueError("Databricks App must declare least-privilege resources")
+    binding_names = {
+        item.get("name") for item in bindings if isinstance(item, dict)
+    }
+    required_bindings = {
+        "sql-warehouse",
+        "document-parser",
+        "source-volume-read",
+        "source-volume-write",
+        "documents-table-select",
+        "documents-table-modify",
+        "parsed-documents-table-select",
+        "parsed-documents-table-modify",
+    }
+    if not required_bindings.issubset(binding_names):
+        raise ValueError("Databricks App resource bindings are incomplete")
+
+
 def main() -> None:
     validate_app_config()
     validate_bundle_config()
     validate_data_bootstrap()
     validate_parsing_job()
+    validate_application_resource()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
         raise ValueError("Default local application mode must be mock")
     print("Configuration and YAML validation passed.")
