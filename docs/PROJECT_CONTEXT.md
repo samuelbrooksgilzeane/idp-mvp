@@ -32,6 +32,8 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Mock mode that requires no Databricks credentials, CLI, or runtime network access.
 - `make setup`, `make dev-mock`, `make test`, and `make check` entry points.
 - Asset Bundle baseline with dev and prod targets and no hardcoded workspace hostname.
+- Bundle-managed Databricks App resource with trusted Databricks-mode configuration
+  and least-privilege Job, warehouse, volume, and table bindings.
 
 ### Governed data foundation
 
@@ -70,7 +72,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 The following passed on 2026-08-28:
 
-- `make test`: 38 backend tests and 4 frontend tests.
+- `make test`: 40 backend tests and 4 frontend tests.
 - `make check`: tests, Ruff, mypy, ESLint, TypeScript checking, frontend production build, and offline configuration/YAML validation.
 - `make dev-mock`: FastAPI and Vite started together and stopped cleanly.
 - `GET http://localhost:5173/api/health`: returned HTTP 200 in mock mode through the Vite proxy.
@@ -89,30 +91,46 @@ Then use:
 - UI: `http://localhost:5173`
 - Health: `http://localhost:5173/api/health`
 
-## Databricks verification gap
+## Databricks verification
 
-An official Databricks CLI v1.14.0 binary was used to load the bundle. Bundle validation reached the authentication phase and reported only that default Databricks credentials were not configured.
+Authenticated dev-workspace verification completed on 2026-08-28 against the
+`workspace` catalog and serverless SQL warehouse `647704f77f24020a`:
 
-Without authenticated workspace access, the following have not been verified:
+- `databricks bundle validate -t dev` passed.
+- The bundle deployed the governed bootstrap and document-parser Jobs.
+- Bootstrap runs `885944253718670` and `571208438976540` both succeeded.
+- `workspace.idp_mvp` contains the two configured managed volumes, seven
+  `idp_dev_*` managed Delta tables, and three `idp_dev_*` views.
+- The parsed-documents table contains the guarded `content_sha256`,
+  `requested_by`, and `job_run_id` migration columns.
+- The bundle-managed `idp-mvp-dev` Databricks App deployed and started.
+- The deployed App serves the production React build at `/`.
+- `/api/health` returned `status=ok`, `mode=databricks`, and confirmed every
+  required runtime setting is present.
+- Two representative invoice PDFs uploaded through the deployed App, were
+  written beneath the governed source volume, and appeared in the SQL-backed
+  document registry.
+- A parse failure was surfaced in the registry and successfully retried after
+  correcting the serverless environment and deterministic raw-result write.
+- Parser Job run `585474568087236` succeeded with `ai_parse_document` version
+  `2.0`; the invoice reached `PARSED` with a retained page count of one and no
+  parse error.
 
-- Authenticated `databricks bundle validate` completion.
-- Bundle deployment to the dev workspace.
-- Repeated governed bootstrap and parsing-column migration runs.
-- Runtime grants for the App and Job identities.
-- The deployed parser Job and `ai_parse_document` execution.
-- Representative invoice parsing in the dev workspace.
-- Retained `VARIANT`, derived text, page count, and artifact-volume page images in Unity Catalog.
+Additional live hardening checks remain:
+
+- Duplicate re-upload messaging in the deployed UI.
+- Direct Catalog Explorer inspection of retained `VARIANT`, derived text, and
+  artifact-volume page images.
 - Malformed-PDF failure behavior in the deployed environment.
 
-Accordingly, capabilities 2, 3, and 4 remain `IN PROGRESS` in `docs/implementation/PROGRESS_TRACKER.md`. They must not be marked `COMPLETE` until their target-development-environment definitions of done are demonstrated.
+Capabilities 2, 3, and 4 are now `COMPLETE`: their automated checks pass and
+their principal user journeys have been demonstrated in the dev workspace.
 
 ## Next review boundary
 
-1. Authenticate the Databricks CLI using the environment's normal authentication flow without storing credentials in the repository.
-2. Validate and deploy the dev bundle.
-3. Run the governed bootstrap twice and verify the expected Unity Catalog objects.
-4. Exercise upload and parsing with representative and malformed PDFs in the dev workspace.
-5. Record evidence and update capability statuses only where the definitions of done are satisfied.
-6. Review the work through Commit 4 before starting `docs/implementation/06_COMMIT_PARSED_DOCUMENT_VIEWER.md`.
+1. Review the completed upload and parsing increments through Commit 4.
+2. Perform the additional live hardening checks above when practical.
+3. Start `docs/implementation/06_COMMIT_PARSED_DOCUMENT_VIEWER.md` only after
+   the review authorizes the next increment.
 
 Do not begin Commit 5 until that review authorizes the next increment.

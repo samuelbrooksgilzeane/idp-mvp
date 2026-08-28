@@ -18,9 +18,9 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 | Order | Capability | Status | Git SHA | Demonstrable result | Evidence / blocker |
 |---:|---|---|---|---|---|
 | 1 | Project foundation | COMPLETE | — | App and bundle build and validate | `chore(idp): scaffold deployable app and asset bundle`; `make check`; mock UI and proxied health verified locally |
-| 2 | Data foundation | IN PROGRESS | — | Prefixed volumes, tables and views exist | Offline migration and bundle smoke checks implemented; live bundle validation, repeated bootstrap and Catalog Explorer evidence require Databricks access |
-| 3 | Upload and registry | IN PROGRESS | — | PDFs can be uploaded and tracked | Mock API/UI, duplicate, identity and failure-path tests implemented; live Files API, SQL registry and deployed-app demonstration require Databricks access |
-| 4 | Parsing pipeline | IN PROGRESS | — | PDFs become page and element data | Mock parse API/UI, status transitions, immutable retries, retained raw result and failure tests pass; live `ai_parse_document` Job and representative dev-workspace demonstration require authenticated Databricks access |
+| 2 | Data foundation | COMPLETE | `e75b7ee` + parsing migration in `9ce5f16` | Prefixed volumes, tables and views exist | Dev bundle validation passed; bootstrap runs `885944253718670` and `571208438976540` succeeded; `workspace.idp_mvp` contains two volumes, seven managed tables and three views |
+| 3 | Upload and registry | COMPLETE | `c9043a8` + App deployment in `551bd1b` | PDFs can be uploaded and tracked | Two representative invoices uploaded through the deployed App and appeared in the SQL-backed registry; duplicate, identity and failure-path tests pass |
+| 4 | Parsing pipeline | COMPLETE | `9ce5f16` + runtime fix in `627625c` | PDFs become page and element data | Dev Job run `585474568087236` succeeded with `ai_parse_document` 2.0; the invoice reached `PARSED` with one page after a visible, retryable failure; parsing tests pass |
 | 5 | Parsed-document viewer | NOT STARTED | — | Parsed pages and overlays are inspectable | — |
 | 6 | Schema registry and viewer | NOT STARTED | — | Exact extraction schema is visible | — |
 | 7 | Extraction pipeline | NOT STARTED | — | Typed fields, confidence and citations exist | — |
