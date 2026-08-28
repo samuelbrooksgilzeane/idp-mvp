@@ -5,7 +5,9 @@ import type { DocumentRecord } from "../App";
 type DocumentListProps = {
   documents: DocumentRecord[];
   loading: boolean;
+  selectedDocumentId: string | null;
   onRefresh: () => void;
+  onSelect: (document: DocumentRecord) => void;
 };
 
 const formatter = new Intl.DateTimeFormat(undefined, {
@@ -18,7 +20,13 @@ function formatBytes(bytes: number) {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export function DocumentList({ documents, loading, onRefresh }: DocumentListProps) {
+export function DocumentList({
+  documents,
+  loading,
+  selectedDocumentId,
+  onRefresh,
+  onSelect,
+}: DocumentListProps) {
   return (
     <section className="registry" aria-labelledby="registry-title">
       <div className="registry-header">
@@ -56,9 +64,18 @@ export function DocumentList({ documents, loading, onRefresh }: DocumentListProp
             </thead>
             <tbody>
               {documents.map((document) => (
-                <tr key={document.document_id}>
+                <tr
+                  className={document.document_id === selectedDocumentId ? "selected-row" : undefined}
+                  key={document.document_id}
+                >
                   <td>
-                    <strong>{document.file_name}</strong>
+                    <button
+                      className="document-link"
+                      type="button"
+                      onClick={() => onSelect(document)}
+                    >
+                      {document.file_name}
+                    </button>
                     <span className="document-id">{document.document_id.slice(0, 8)}</span>
                   </td>
                   <td>{document.case_id ?? "-"}</td>

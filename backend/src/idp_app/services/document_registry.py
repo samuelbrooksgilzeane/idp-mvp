@@ -35,6 +35,13 @@ class DuplicateDocumentError(Exception):
         self.document = document
 
 
+class InvalidDocumentStateError(Exception):
+    def __init__(self, document: DocumentRecord, expected_statuses: set[str]) -> None:
+        super().__init__(document.status)
+        self.document = document
+        self.expected_statuses = expected_statuses
+
+
 class DocumentRegistry(Protocol):
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None: ...
 
@@ -43,6 +50,13 @@ class DocumentRegistry(Protocol):
     def list_documents(self) -> list[DocumentRecord]: ...
 
     def get(self, document_id: str) -> DocumentRecord | None: ...
+
+    def update_status(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        new_status: str,
+    ) -> DocumentRecord: ...
 
 
 class SQLiteDocumentRegistry:
@@ -118,6 +132,32 @@ class SQLiteDocumentRegistry:
             ).fetchone()
         return _sqlite_row_to_document(row) if row else None
 
+    def update_status(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        new_status: str,
+    ) -> DocumentRecord:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM documents WHERE document_id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            document = _sqlite_row_to_document(row)
+            if document.status not in expected_statuses:
+                raise InvalidDocumentStateError(document, expected_statuses)
+            connection.execute(
+                "UPDATE documents SET status = ?, updated_at = ? WHERE document_id = ?",
+                (new_status, now, document_id),
+            )
+        updated = self.get(document_id)
+        if updated is None:
+            raise RuntimeError("Document status update did not produce a readable row")
+        return updated
+
 
 class DatabricksDocumentRegistry:
     def __init__(
@@ -135,7 +175,7 @@ class DatabricksDocumentRegistry:
         self._table = f"{catalog}.{project_schema}.{table_prefix}_documents"
 
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None:
-        rows = self._execute(
+        rows = self.execute_sql(
             f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
             "WHERE content_sha256 = :content_sha256 "
             "ORDER BY uploaded_at DESC, document_id DESC LIMIT 1",
@@ -164,7 +204,7 @@ class DatabricksDocumentRegistry:
             f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})"
         )
         values = dict(zip(DOCUMENT_COLUMNS, _document_values(document), strict=True))
-        self._execute(statement, {name: values[name] for name in parameter_names})
+        self.execute_sql(statement, {name: values[name] for name in parameter_names})
 
         registered = self.find_by_hash(document.content_sha256)
         if registered is None:
@@ -173,21 +213,60 @@ class DatabricksDocumentRegistry:
             raise DuplicateDocumentError(registered)
 
     def list_documents(self) -> list[DocumentRecord]:
-        rows = self._execute(
+        rows = self.execute_sql(
             f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
             "ORDER BY uploaded_at DESC, document_id DESC LIMIT 500"
         )
         return [_databricks_row_to_document(row) for row in rows]
 
     def get(self, document_id: str) -> DocumentRecord | None:
-        rows = self._execute(
+        rows = self.execute_sql(
             f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
             "WHERE document_id = :document_id LIMIT 1",
             {"document_id": document_id},
         )
         return _databricks_row_to_document(rows[0]) if rows else None
 
-    def _execute(
+    def update_status(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        new_status: str,
+    ) -> DocumentRecord:
+        existing = self.get(document_id)
+        if existing is None:
+            raise KeyError(document_id)
+        if existing.status not in expected_statuses:
+            raise InvalidDocumentStateError(existing, expected_statuses)
+
+        expected_markers = ", ".join(
+            f":expected_status_{index}" for index, _ in enumerate(sorted(expected_statuses))
+        )
+        values: dict[str, object] = {
+            "document_id": document_id,
+            "new_status": new_status,
+            "updated_at": datetime.now(UTC),
+        }
+        values.update(
+            {
+                f"expected_status_{index}": status
+                for index, status in enumerate(sorted(expected_statuses))
+            }
+        )
+        self.execute_sql(
+            f"UPDATE {self._table} SET status = :new_status, "
+            "updated_at = CAST(:updated_at AS TIMESTAMP) "
+            f"WHERE document_id = :document_id AND status IN ({expected_markers})",
+            values,
+        )
+        updated = self.get(document_id)
+        if updated is None:
+            raise RuntimeError("Document status update did not produce a readable row")
+        if updated.status != new_status:
+            raise InvalidDocumentStateError(updated, expected_statuses)
+        return updated
+
+    def execute_sql(
         self, statement: str, values: dict[str, object] | None = None
     ) -> list[list[str]]:
         parameters = [

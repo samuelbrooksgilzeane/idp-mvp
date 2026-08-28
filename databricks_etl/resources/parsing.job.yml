@@ -1,0 +1,53 @@
+resources:
+  jobs:
+    document_parser:
+      name: ${var.app_name}-${bundle.target}-document-parser
+      description: Parses one registered PDF into retained layout data and page images.
+      max_concurrent_runs: 4
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: project_schema
+          default: ${var.project_schema}
+        - name: table_prefix
+          default: ${var.table_prefix}
+        - name: source_volume_name
+          default: ${var.source_volume_name}
+        - name: artifacts_volume_name
+          default: ${var.artifacts_volume_name}
+        - name: document_id
+          default: ""
+        - name: parse_run_id
+          default: ""
+        - name: source_path
+          default: ""
+        - name: image_output_path
+          default: ""
+      tasks:
+        - task_key: parse_registered_document
+          spark_python_task:
+            python_file: ../src/parse_document.py
+            parameters:
+              - --catalog
+              - "{{job.parameters.catalog}}"
+              - --project-schema
+              - "{{job.parameters.project_schema}}"
+              - --table-prefix
+              - "{{job.parameters.table_prefix}}"
+              - --source-volume-name
+              - "{{job.parameters.source_volume_name}}"
+              - --artifacts-volume-name
+              - "{{job.parameters.artifacts_volume_name}}"
+              - --document-id
+              - "{{job.parameters.document_id}}"
+              - --parse-run-id
+              - "{{job.parameters.parse_run_id}}"
+              - --source-path
+              - "{{job.parameters.source_path}}"
+              - --image-output-path
+              - "{{job.parameters.image_output_path}}"
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            client: "1"

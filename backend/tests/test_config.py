@@ -14,6 +14,7 @@ def test_valid_databricks_configuration_is_accepted() -> None:
         source_volume_name="source_documents",
         artifacts_volume_name="idp_artifacts",
         warehouse_id="abc123",
+        parse_job_id=123,
         validation_endpoint="idp-validation-endpoint",
     )
 
@@ -51,6 +52,7 @@ def test_databricks_mode_reports_all_missing_configuration() -> None:
     message = str(error.value)
     assert "IDP_MODE=databricks requires configuration" in message
     assert "IDP_CATALOG" in message
+    assert "IDP_PARSE_JOB_ID" in message
     assert "IDP_VALIDATION_ENDPOINT" in message
 
 

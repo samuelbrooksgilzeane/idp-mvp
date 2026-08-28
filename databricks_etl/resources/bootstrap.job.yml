@@ -15,3 +15,14 @@ resources:
               table_prefix: ${var.table_prefix}
               source_volume_name: ${var.source_volume_name}
               artifacts_volume_name: ${var.artifacts_volume_name}
+        - task_key: migrate_parsing_columns
+          depends_on:
+            - task_key: create_governed_objects
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_parsing.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}

@@ -24,6 +24,11 @@ EXPECTED_BOOTSTRAP_PARAMETERS = {
     "source_volume_name": "${var.source_volume_name}",
     "artifacts_volume_name": "${var.artifacts_volume_name}",
 }
+EXPECTED_PARSING_MIGRATION_PARAMETERS = {
+    "catalog": "${var.catalog}",
+    "project_schema": "${var.project_schema}",
+    "table_prefix": "${var.table_prefix}",
+}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -77,13 +82,22 @@ def validate_data_bootstrap() -> None:
         raise ValueError("Bundle must define the governed_data_bootstrap job")
 
     tasks = bootstrap.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 1:
-        raise ValueError("Governed data bootstrap must contain exactly one reviewed SQL task")
+    if not isinstance(tasks, list) or len(tasks) != 2:
+        raise ValueError("Governed data bootstrap must contain two reviewed SQL tasks")
     sql_task = tasks[0].get("sql_task", {})
     if sql_task.get("warehouse_id") != "${var.warehouse_id}":
         raise ValueError("Governed data bootstrap must use the trusted warehouse variable")
     if sql_task.get("parameters") != EXPECTED_BOOTSTRAP_PARAMETERS:
         raise ValueError("Governed data bootstrap parameters must match the trusted contract")
+
+    migration_task = tasks[1]
+    migration_sql = migration_task.get("sql_task", {})
+    if migration_task.get("depends_on") != [{"task_key": "create_governed_objects"}]:
+        raise ValueError("Parsing migration must run after governed object creation")
+    if migration_sql.get("file", {}).get("path") != "../sql/migrate_parsing.sql":
+        raise ValueError("Bootstrap must use the reviewed parsing migration")
+    if migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
+        raise ValueError("Parsing migration parameters must match the trusted contract")
 
     sql = (ROOT / "databricks_etl" / "sql" / "create_objects.sql").read_text(
         encoding="utf-8"
@@ -95,11 +109,52 @@ def validate_data_bootstrap() -> None:
     if ".DEFAULT." in normalized:
         raise ValueError("Data bootstrap must not create objects in the default schema")
 
+    migration = (ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql").read_text(
+        encoding="utf-8"
+    )
+    migration_normalized = " ".join(migration.upper().split())
+    if "IF NOT EXISTS" not in migration_normalized:
+        raise ValueError("Parsing migration must guard existing columns")
+    for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
+        if forbidden in f" {migration_normalized} ":
+            raise ValueError(f"Parsing migration contains forbidden SQL: {forbidden}")
+
+
+def validate_parsing_job() -> None:
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "parsing.job.yml")
+    jobs = resource.get("resources", {}).get("jobs", {})
+    parsing = jobs.get("document_parser")
+    if not isinstance(parsing, dict):
+        raise ValueError("Bundle must define the document_parser job")
+    tasks = parsing.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != 1:
+        raise ValueError("Document parser must contain exactly one reviewed task")
+    python_task = tasks[0].get("spark_python_task", {})
+    if python_task.get("python_file") != "../src/parse_document.py":
+        raise ValueError("Document parser must use the reviewed parsing task")
+
+    source = (ROOT / "databricks_etl" / "src" / "parse_document.py").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "ai_parse_document",
+        "'version', '2.0'",
+        "'descriptionElementTypes', ''",
+        "imageOutputPath",
+        "READ_FILES",
+    )
+    if any(value not in source for value in required):
+        raise ValueError("Parsing task does not retain the reviewed parser contract")
+    deletion_calls = (".unlink(", "os.remove(", "dbutils.fs.rm(", "shutil.move(")
+    if any(call in source for call in deletion_calls):
+        raise ValueError("Parsing task must not delete or move source documents")
+
 
 def main() -> None:
     validate_app_config()
     validate_bundle_config()
     validate_data_bootstrap()
+    validate_parsing_job()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
         raise ValueError("Default local application mode must be mock")
     print("Configuration and YAML validation passed.")

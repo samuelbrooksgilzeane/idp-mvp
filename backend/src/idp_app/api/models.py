@@ -13,6 +13,7 @@ class ConfigurationPresence(BaseModel):
     source_volume_name: bool
     artifacts_volume_name: bool
     warehouse_id: bool
+    parse_job_id: bool
     validation_endpoint: bool
 
 
@@ -33,7 +34,7 @@ class DocumentResponse(BaseModel):
     file_name: str
     file_size: int
     content_sha256: str
-    status: Literal["UPLOADED"]
+    status: Literal["UPLOADED", "PARSING", "PARSED", "PARSE_FAILED"]
     uploaded_by: str
     uploaded_at: datetime
     updated_at: datetime
@@ -59,3 +60,15 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+class ParseRunResponse(BaseModel):
+    parse_run_id: str
+    document_id: str
+    parser_version: Literal["2.0"]
+    status: Literal["RUNNING", "SUCCESS", "FAILED"]
+    page_count: int | None
+    parse_error: dict[str, object] | list[object] | None
+    requested_by: str
+    started_at: datetime
+    completed_at: datetime | None

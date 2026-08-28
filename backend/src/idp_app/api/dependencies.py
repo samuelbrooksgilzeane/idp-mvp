@@ -13,6 +13,12 @@ from idp_app.services.document_storage import (
     LocalVolumeStorage,
 )
 from idp_app.services.documents import DocumentService, DocumentServiceError
+from idp_app.services.parse_jobs import DatabricksParseJobRunner, MockParseJobRunner
+from idp_app.services.parse_runs import (
+    DatabricksParseRunRepository,
+    SQLiteParseRunRepository,
+)
+from idp_app.services.parsing import ParsingService
 
 
 def get_document_service(request: Request) -> DocumentService:
@@ -63,6 +69,62 @@ def build_document_service(settings: Settings) -> DocumentService:
         databricks_storage,
         databricks_registry,
         settings.max_upload_bytes,
+    )
+
+
+def get_parsing_service(request: Request) -> ParsingService:
+    existing = getattr(request.app.state, "parsing_service", None)
+    if isinstance(existing, ParsingService):
+        return existing
+
+    settings = cast(Settings, request.app.state.settings)
+    service = build_parsing_service(settings)
+    request.app.state.parsing_service = service
+    return service
+
+
+def build_parsing_service(settings: Settings) -> ParsingService:
+    if settings.mode is IdpMode.MOCK:
+        database_path = settings.local_data_dir / "registry.sqlite3"
+        mock_documents = SQLiteDocumentRegistry(database_path)
+        mock_parse_runs = SQLiteParseRunRepository(database_path)
+        mock_jobs = MockParseJobRunner(mock_parse_runs, mock_documents)
+        return ParsingService(settings, mock_documents, mock_parse_runs, mock_jobs)
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    if settings.parse_job_id is None:
+        raise RuntimeError("Required trusted setting is absent: IDP_PARSE_JOB_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+
+    databricks_documents = DatabricksDocumentRegistry(
+        client,
+        warehouse_id,
+        catalog,
+        project_schema,
+        table_prefix,
+    )
+    databricks_parse_runs = DatabricksParseRunRepository(
+        databricks_documents,
+        catalog,
+        project_schema,
+        table_prefix,
+    )
+    databricks_jobs = DatabricksParseJobRunner(client, settings.parse_job_id)
+    return ParsingService(
+        settings,
+        databricks_documents,
+        databricks_parse_runs,
+        databricks_jobs,
     )
 
 

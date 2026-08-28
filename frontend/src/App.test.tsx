@@ -18,7 +18,7 @@ const document = {
   file_name: "invoice-1042.pdf",
   file_size: 2048,
   content_sha256: "a".repeat(64),
-  status: "UPLOADED",
+  status: "UPLOADED" as const,
   uploaded_by: "analyst@example.com",
   uploaded_at: "2026-08-28T09:00:00Z",
   updated_at: "2026-08-28T09:00:00Z",
@@ -39,7 +39,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Document intake" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Parse workspace" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "MVP workflow" })).toHaveTextContent("Ingest");
     await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
@@ -104,5 +104,63 @@ describe("App", () => {
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     expect(post?.[1]?.body).toBeInstanceOf(FormData);
     expect(Array.from((post?.[1]?.body as FormData).keys())).not.toContain("storage_path");
+  });
+
+  it("starts parsing, polls the run, and shows immutable history", async () => {
+    const runningRun = {
+      parse_run_id: "2db4e559-76d0-4e9e-a0de-d17e84699fca",
+      document_id: document.document_id,
+      parser_version: "2.0",
+      status: "RUNNING",
+      page_count: null,
+      parse_error: null,
+      requested_by: "analyst@example.com",
+      started_at: "2026-08-28T09:05:00Z",
+      completed_at: null,
+    };
+    const successfulRun = {
+      ...runningRun,
+      status: "SUCCESS",
+      page_count: 2,
+      completed_at: "2026-08-28T09:05:02Z",
+    };
+    let parsed = false;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.endsWith("/health")) return { ok: true, json: async () => health };
+      if (url.endsWith("/parse") && init?.method === "POST") {
+        return { ok: true, json: async () => runningRun };
+      }
+      if (url.includes("/api/runs/")) {
+        parsed = true;
+        return { ok: true, json: async () => successfulRun };
+      }
+      if (url.endsWith("/parse-runs")) {
+        return { ok: true, json: async () => parsed ? [successfulRun] : [] };
+      }
+      return {
+        ok: true,
+        json: async () => [{ ...document, status: parsed ? "PARSED" : "UPLOADED" }],
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "invoice-1042.pdf" }));
+    await waitFor(() => expect(screen.getByText("No parse attempts recorded.")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Parse document" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Parsing" })).toBeDisabled());
+    await waitFor(
+      () => expect(screen.getByText("Document parsed successfully.")).toBeInTheDocument(),
+      { timeout: 1500 },
+    );
+    expect(screen.getAllByText("SUCCESS").length).toBeGreaterThan(0);
+    expect(screen.getByText("2db4e559")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/documents/${document.document_id}/parse`,
+      { method: "POST" },
+    );
   });
 });

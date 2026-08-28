@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DocumentDetail } from "./components/DocumentDetail";
 import { DocumentList } from "./components/DocumentList";
 import { UploadPanel, type UploadInput } from "./components/UploadPanel";
 import { WorkflowHeader } from "./components/WorkflowHeader";
@@ -11,6 +12,8 @@ export type HealthResponse = {
   configuration: Record<string, boolean>;
 };
 
+export type DocumentStatus = "UPLOADED" | "PARSING" | "PARSED" | "PARSE_FAILED";
+
 export type DocumentRecord = {
   document_id: string;
   case_id: string | null;
@@ -19,10 +22,22 @@ export type DocumentRecord = {
   file_name: string;
   file_size: number;
   content_sha256: string;
-  status: "UPLOADED";
+  status: DocumentStatus;
   uploaded_by: string;
   uploaded_at: string;
   updated_at: string;
+};
+
+export type ParseRun = {
+  parse_run_id: string;
+  document_id: string;
+  parser_version: "2.0";
+  status: "RUNNING" | "SUCCESS" | "FAILED";
+  page_count: number | null;
+  parse_error: Record<string, unknown> | unknown[] | null;
+  requested_by: string;
+  started_at: string;
+  completed_at: string | null;
 };
 
 type UploadFailure = {
@@ -31,25 +46,30 @@ type UploadFailure = {
   message: string;
   document_id: string | null;
 };
-
-type UploadBatchResponse = {
-  documents: DocumentRecord[];
-  errors: UploadFailure[];
-};
-
+type UploadBatchResponse = { documents: DocumentRecord[]; errors: UploadFailure[] };
+type ApiError = { error: { code: string; message: string } };
 type RuntimeState =
   | { kind: "loading" }
   | { kind: "ready"; health: HealthResponse }
   | { kind: "unavailable" };
-
 type Notice = { kind: "success" | "error"; message: string } | null;
 
 export function App() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [runs, setRuns] = useState<ParseRun[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [startingParse, setStartingParse] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+
+  const selectedDocument = useMemo(
+    () => documents.find((document) => document.document_id === selectedDocumentId) ?? null,
+    [documents, selectedDocumentId],
+  );
 
   const loadDocuments = useCallback(async (signal?: AbortSignal) => {
     setDocumentsLoading(true);
@@ -63,6 +83,22 @@ export function App() {
       }
     } finally {
       if (!signal?.aborted) setDocumentsLoading(false);
+    }
+  }, []);
+
+  const loadRuns = useCallback(async (documentId: string) => {
+    setRunsLoading(true);
+    try {
+      const response = await fetch(`/api/documents/${documentId}/parse-runs`);
+      if (!response.ok) throw new Error("Parse history request failed");
+      const history = (await response.json()) as ParseRun[];
+      setRuns(history);
+      const running = history.find((run) => run.status === "RUNNING");
+      setActiveRunId(running?.parse_run_id ?? null);
+    } catch {
+      setNotice({ kind: "error", message: "Parse history is unavailable." });
+    } finally {
+      setRunsLoading(false);
     }
   }, []);
 
@@ -83,6 +119,42 @@ export function App() {
     return () => controller.abort();
   }, [loadDocuments]);
 
+  useEffect(() => {
+    if (!activeRunId) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/runs/${activeRunId}`);
+        if (!response.ok) throw new Error("Run status request failed");
+        const run = (await response.json()) as ParseRun;
+        if (cancelled) return;
+        setRuns((current) => [run, ...current.filter((item) => item.parse_run_id !== run.parse_run_id)]);
+        if (run.status === "RUNNING") {
+          timer = window.setTimeout(() => void poll(), 500);
+        } else {
+          setActiveRunId(null);
+          setNotice({
+            kind: run.status === "SUCCESS" ? "success" : "error",
+            message: run.status === "SUCCESS" ? "Document parsed successfully." : "Document parsing failed.",
+          });
+          await loadDocuments();
+          if (selectedDocumentId) await loadRuns(selectedDocumentId);
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveRunId(null);
+          setNotice({ kind: "error", message: "Parse status polling failed." });
+        }
+      }
+    };
+    timer = window.setTimeout(() => void poll(), 250);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [activeRunId, loadDocuments, loadRuns, selectedDocumentId]);
+
   async function handleUpload(input: UploadInput) {
     setUploading(true);
     setNotice(null);
@@ -91,15 +163,11 @@ export function App() {
     if (input.caseId.trim()) body.append("case_id", input.caseId.trim());
     body.append("template_id", "invoice_v1");
     body.append("use_case", "invoice");
-
     try {
       const response = await fetch("/api/documents", { method: "POST", body });
-      const payload = (await response.json()) as
-        | UploadBatchResponse
-        | { error: { code: string; message: string } };
+      const payload = (await response.json()) as UploadBatchResponse | ApiError;
       if (!response.ok) {
-        const message = "error" in payload ? payload.error.message : "Upload failed.";
-        throw new Error(message);
+        throw new Error("error" in payload ? payload.error.message : "Upload failed.");
       }
       const result = payload as UploadBatchResponse;
       const accepted = result.documents.length;
@@ -122,24 +190,58 @@ export function App() {
     }
   }
 
+  async function handleSelect(document: DocumentRecord) {
+    setSelectedDocumentId(document.document_id);
+    setRuns([]);
+    await loadRuns(document.document_id);
+  }
+
+  async function handleParse() {
+    if (!selectedDocument) return;
+    setStartingParse(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/documents/${selectedDocument.document_id}/parse`, {
+        method: "POST",
+      });
+      const payload = (await response.json()) as ParseRun | ApiError;
+      if (!response.ok) {
+        throw new Error("error" in payload ? payload.error.message : "Parsing could not start.");
+      }
+      const run = payload as ParseRun;
+      setDocuments((current) =>
+        current.map((document) =>
+          document.document_id === selectedDocument.document_id
+            ? { ...document, status: "PARSING" }
+            : document,
+        ),
+      );
+      setRuns((current) => [run, ...current]);
+      setActiveRunId(run.parse_run_id);
+    } catch (error: unknown) {
+      setNotice({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Parsing could not start.",
+      });
+    } finally {
+      setStartingParse(false);
+    }
+  }
+
   const appName = runtime.kind === "ready" ? runtime.health.application_name : "IDP MVP";
   const runtimeMode = runtime.kind === "ready" ? runtime.health.mode : "unknown";
   const apiStatus =
-    runtime.kind === "ready"
-      ? "Reachable"
-      : runtime.kind === "loading"
-        ? "Checking"
-        : "Unavailable";
+    runtime.kind === "ready" ? "Reachable" : runtime.kind === "loading" ? "Checking" : "Unavailable";
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} activeStep={1} />
+      <WorkflowHeader appName={appName} activeStep={2} />
       <main>
         <section className="page-heading" aria-labelledby="page-title">
           <div>
-            <p className="eyebrow">Document registry</p>
-            <h1 id="page-title">Document intake</h1>
-            <p>Register source PDFs before any parsing or extraction begins.</p>
+            <p className="eyebrow">Document processing</p>
+            <h1 id="page-title">Parse workspace</h1>
+            <p>Register PDFs and create retained layout-aware parse runs.</p>
           </div>
           <dl className="runtime-summary" aria-label="Runtime status">
             <div><dt>Runtime</dt><dd>{runtimeMode}</dd></div>
@@ -151,17 +253,30 @@ export function App() {
             </div>
           </dl>
         </section>
-
-        <section className="intake-layout" aria-label="PDF intake workspace">
+        <section className="intake-layout" aria-label="PDF parsing workspace">
           <UploadPanel uploading={uploading} notice={notice} onUpload={handleUpload} />
-          <DocumentList
-            documents={documents}
-            loading={documentsLoading}
-            onRefresh={() => void loadDocuments()}
-          />
+          <div className="registry-workspace">
+            <DocumentList
+              documents={documents}
+              loading={documentsLoading}
+              selectedDocumentId={selectedDocumentId}
+              onRefresh={() => void loadDocuments()}
+              onSelect={(document) => void handleSelect(document)}
+            />
+            <DocumentDetail
+              document={selectedDocument}
+              runs={runs}
+              loading={runsLoading}
+              starting={startingParse}
+              onParse={() => void handleParse()}
+            />
+          </div>
         </section>
       </main>
-      <footer><span>Secure PDF intake</span><span>Files are not parsed in this increment</span></footer>
+      <footer>
+        <span>Retained parser contract 2.0</span>
+        <span>Page inspection follows in the next increment</span>
+      </footer>
     </div>
   );
 }

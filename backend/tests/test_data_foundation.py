@@ -7,6 +7,7 @@ from idp_app.core.data_objects import TABLE_NAMES, VIEW_NAMES, DataObjectNamespa
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "databricks_etl" / "sql" / "create_objects.sql"
+PARSING_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql"
 BUNDLE_RESOURCE = ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml"
 
 
@@ -55,7 +56,7 @@ def test_views_declare_stable_empty_result_schemas() -> None:
     sql = MIGRATION.read_text(encoding="utf-8").upper()
 
     assert "'_LATEST_SUCCESSFUL_PARSES'" in sql
-    assert "WHERE STATUS = 'PARSED'" in sql
+    assert "WHERE STATUS = 'SUCCESS'" in sql
     assert "'_LATEST_SUCCESSFUL_EXTRACTIONS'" in sql
     assert "WHERE STATUS = 'EXTRACTED'" in sql
     assert "'_VALIDATION_SUMMARY'" in sql
@@ -64,8 +65,8 @@ def test_views_declare_stable_empty_result_schemas() -> None:
 
 def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
     resource = yaml.safe_load(BUNDLE_RESOURCE.read_text(encoding="utf-8"))
-    task = resource["resources"]["jobs"]["governed_data_bootstrap"]["tasks"][0]
-    sql_task = task["sql_task"]
+    tasks = resource["resources"]["jobs"]["governed_data_bootstrap"]["tasks"]
+    sql_task = tasks[0]["sql_task"]
 
     assert sql_task["warehouse_id"] == "${var.warehouse_id}"
     assert sql_task["file"]["path"] == "../sql/create_objects.sql"
@@ -76,3 +77,23 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
         "source_volume_name": "${var.source_volume_name}",
         "artifacts_volume_name": "${var.artifacts_volume_name}",
     }
+    assert tasks[1]["depends_on"] == [{"task_key": "create_governed_objects"}]
+    assert tasks[1]["sql_task"]["file"]["path"] == "../sql/migrate_parsing.sql"
+    assert tasks[1]["sql_task"]["parameters"] == {
+        "catalog": "${var.catalog}",
+        "project_schema": "${var.project_schema}",
+        "table_prefix": "${var.table_prefix}",
+    }
+
+
+def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:
+    sql = " ".join(PARSING_MIGRATION.read_text(encoding="utf-8").upper().split())
+
+    assert sql.count("IF NOT EXISTS") == 3
+    assert "INFORMATION_SCHEMA.COLUMNS" in sql
+    assert "ADD COLUMN CONTENT_SHA256" in sql
+    assert "ADD COLUMN REQUESTED_BY" in sql
+    assert "ADD COLUMN JOB_RUN_ID" in sql
+    assert " DROP " not in f" {sql} "
+    assert " TRUNCATE " not in f" {sql} "
+    assert " DELETE " not in f" {sql} "

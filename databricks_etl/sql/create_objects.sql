@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
 ) (
   parse_run_id STRING COMMENT 'Immutable parse attempt identifier',
   document_id STRING COMMENT 'Registered source document identifier',
+  content_sha256 STRING COMMENT 'Source content identity used with document and parser version',
   parser_version STRING COMMENT 'Pinned parser output contract version',
   parsed VARIANT COMMENT 'Retained layout-aware parser response',
   document_text STRING COMMENT 'Retained parser text used by downstream extraction',
@@ -47,6 +48,8 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
   page_image_root STRING COMMENT 'Trusted artifacts-volume root for rendered page images',
   parse_error VARIANT COMMENT 'Structured failure details when parsing fails',
   status STRING COMMENT 'Immutable parse-run terminal or active state',
+  requested_by STRING COMMENT 'Authenticated application user that requested parsing',
+  job_run_id BIGINT COMMENT 'Databricks Job run identifier used for operational polling',
   started_at TIMESTAMP COMMENT 'Timestamp when the parse attempt started',
   completed_at TIMESTAMP COMMENT 'Timestamp when the parse attempt reached a terminal state'
 )
@@ -162,6 +165,7 @@ AS
 SELECT
   parse_run_id,
   document_id,
+  content_sha256,
   parser_version,
   parsed,
   document_text,
@@ -169,12 +173,14 @@ SELECT
   page_image_root,
   parse_error,
   status,
+  requested_by,
+  job_run_id,
   started_at,
   completed_at
 FROM IDENTIFIER(
   :catalog || '.' || :project_schema || '.' || :table_prefix || '_parsed_documents'
 )
-WHERE status = 'PARSED'
+WHERE status = 'SUCCESS'
 QUALIFY ROW_NUMBER() OVER (
   PARTITION BY document_id ORDER BY completed_at DESC, parse_run_id DESC
 ) = 1;

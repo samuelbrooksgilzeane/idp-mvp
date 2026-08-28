@@ -20,7 +20,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 | 1 | Project foundation | COMPLETE | — | App and bundle build and validate | `chore(idp): scaffold deployable app and asset bundle`; `make check`; mock UI and proxied health verified locally |
 | 2 | Data foundation | IN PROGRESS | — | Prefixed volumes, tables and views exist | Offline migration and bundle smoke checks implemented; live bundle validation, repeated bootstrap and Catalog Explorer evidence require Databricks access |
 | 3 | Upload and registry | IN PROGRESS | — | PDFs can be uploaded and tracked | Mock API/UI, duplicate, identity and failure-path tests implemented; live Files API, SQL registry and deployed-app demonstration require Databricks access |
-| 4 | Parsing pipeline | NOT STARTED | — | PDFs become page and element data | — |
+| 4 | Parsing pipeline | IN PROGRESS | — | PDFs become page and element data | Mock parse API/UI, status transitions, immutable retries, retained raw result and failure tests pass; live `ai_parse_document` Job and representative dev-workspace demonstration require authenticated Databricks access |
 | 5 | Parsed-document viewer | NOT STARTED | — | Parsed pages and overlays are inspectable | — |
 | 6 | Schema registry and viewer | NOT STARTED | — | Exact extraction schema is visible | — |
 | 7 | Extraction pipeline | NOT STARTED | — | Typed fields, confidence and citations exist | — |

@@ -14,6 +14,7 @@ def build_health_response(settings: Settings) -> HealthResponse:
             source_volume_name=settings.source_volume_name is not None,
             artifacts_volume_name=settings.artifacts_volume_name is not None,
             warehouse_id=settings.warehouse_id is not None,
+            parse_job_id=settings.parse_job_id is not None,
             validation_endpoint=settings.validation_endpoint is not None,
         ),
     )

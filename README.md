@@ -1,6 +1,6 @@
 # IDP MVP
 
-Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, and secure PDF intake with deterministic duplicate detection. Parsing and extraction are not included.
+Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, and an idempotent document parsing workflow. Extraction is not included.
 
 ## Prerequisites
 
@@ -29,7 +29,7 @@ make dev-mock
 
 The UI is available at <http://localhost:5173>. Vite proxies API requests to FastAPI, including <http://localhost:5173/api/health> and the document registry. Press `Ctrl+C` once to stop both processes.
 
-Mock mode stores source PDFs beneath `.local/idp/source_volume/incoming/` and registry metadata in `.local/idp/registry.sqlite3`. Both are ignored by Git. It uses no Databricks credentials, CLI, or runtime network access. Remove local mock data only when you intentionally want a fresh local demonstration; application startup never deletes it.
+Mock mode stores source PDFs beneath `.local/idp/source_volume/incoming/`, page images beneath `.local/idp/artifacts_volume/page_images/`, and registry metadata in `.local/idp/registry.sqlite3`. Both source and derived data are ignored by Git. Local parsing uses PyMuPDF and requires no Databricks credentials, CLI, or runtime network access. Remove local mock data only when you intentionally want a fresh local demonstration; application startup never deletes it.
 
 ## Tests and checks
 
@@ -53,6 +53,7 @@ Server settings use the `IDP_` environment prefix:
 | `IDP_SOURCE_VOLUME_NAME` | Source volume name |
 | `IDP_ARTIFACTS_VOLUME_NAME` | Artifact volume name |
 | `IDP_WAREHOUSE_ID` | SQL warehouse identifier |
+| `IDP_PARSE_JOB_ID` | Deployed document-parser Job identifier |
 | `IDP_VALIDATION_ENDPOINT` | Future validation endpoint |
 | `IDP_APP_NAME` | Application display name |
 | `IDP_LOCAL_DATA_DIR` | Ignored local mock storage root |
@@ -90,6 +91,18 @@ GET  /api/documents/{document_id}
 
 Stable errors include `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `DOCUMENT_DUPLICATE`, `FILE_STORAGE_FAILED`, and `REGISTRY_WRITE_FAILED`. A mixed multi-file result uses HTTP 207 and reports each rejected file explicitly. No route accepts a volume or table path.
 
+## Parsing API
+
+```text
+POST /api/documents/{document_id}/parse
+GET  /api/documents/{document_id}/parse-runs
+GET  /api/runs/{parse_run_id}
+```
+
+The manual trigger accepts only a registered document identifier. Eligible documents move through `UPLOADED` or a retry state to `PARSING`, then `PARSED` or `PARSE_FAILED`. Every retry creates a new immutable parse run using the identity inputs `document_id`, source SHA-256, and parser version. The API returns status and run metadata but does not expose source paths, artifact paths, or raw parser output.
+
+The Databricks Job reads only the server-registered source path, pins `ai_parse_document` to version `2.0`, leaves `descriptionElementTypes` empty, and renders images under the configured artifacts volume. It retains the complete `VARIANT` response before deriving text, page count, image references, and parse errors. Source PDFs are never moved or deleted. The App service principal needs `CAN MANAGE RUN` on the parser Job in addition to its intake grants. The Job run identity needs `READ VOLUME` on the source volume, `READ VOLUME` and `WRITE VOLUME` on the artifacts volume, and `SELECT` plus `MODIFY` on the documents and parsed-documents tables.
+
 In an authenticated environment, supply the required bundle variables through the approved deployment configuration and run:
 
 ```bash
@@ -98,6 +111,8 @@ databricks bundle validate -t dev
 databricks bundle deploy -t dev
 databricks bundle run -t dev governed_data_bootstrap
 databricks bundle run -t dev governed_data_bootstrap
+databricks bundle run -t dev document_parser \
+  --params document_id=<registered-uuid>,parse_run_id=<new-uuid>,source_path=<registered-volume-path>,image_output_path=<trusted-artifacts-path>
 ```
 
-Running the bootstrap twice is the live idempotency check. After both runs, inspect the configured project schema in Catalog Explorer and confirm that both volumes, all prefixed tables, and the latest-successful-run views exist with no document rows. The local `make check` validation remains credential-free and validates the reviewed bundle structure and non-destructive SQL contract.
+Running the bootstrap twice is the live idempotency check. After both runs, inspect the configured project schema in Catalog Explorer and confirm that both volumes, all prefixed tables, and the latest-successful-run views exist. Then parse a representative registered invoice through the UI, confirm the document reaches `PARSED`, and inspect its raw `VARIANT`, derived text, page count, and artifact-volume page images. Also verify a malformed PDF reaches `PARSE_FAILED` without changing its source file. The local `make check` validation remains credential-free and validates the reviewed bundle structure, non-destructive SQL contract, and parser task configuration.
