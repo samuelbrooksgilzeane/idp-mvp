@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -25,6 +26,7 @@ from idp_app.services.validation import (
     UNCERTAIN,
     ValidationContext,
     decide_document_status,
+    evaluate_rule,
     run_validators,
 )
 
@@ -426,3 +428,96 @@ def test_nested_leaves_resolve_their_wildcard_policy() -> None:
     assert "line_items[0].amount" in confidence_paths
     coverage = _by_rule(observations, "field_coverage")[0]
     assert coverage.expected_value == str(len(context.leaves))
+
+
+# --------------------------------------------------------------------------------------
+# Repeated entities: one declared rule covers every instance a document contains
+# --------------------------------------------------------------------------------------
+
+
+def _nested_fields(invoices: list[dict[str, Any]]) -> list[ExtractedFieldRecord]:
+    """Build extracted rows for `invoices[i]...` paths, as the flattener emits them."""
+    records: list[ExtractedFieldRecord] = []
+
+    def add(path: str, value: Any) -> None:
+        records.append(
+            ExtractedFieldRecord(
+                extraction_run_id="run-1", document_id="doc-1", field_path=path,
+                field_type="string" if isinstance(value, str) else "number",
+                value=value, value_string=None if value is None else str(value),
+                confidence_score=None if value is None else 0.99,
+                citation_ids=[], citations=[], extraction_error=None,
+            )
+        )
+
+    for index, invoice in enumerate(invoices):
+        for name, value in invoice.items():
+            if name == "line_items":
+                for line, leaves in enumerate(value):
+                    for leaf, amount in leaves.items():
+                        add(f"invoices[{index}].line_items[{line}].{leaf}", amount)
+                continue
+            add(f"invoices[{index}].{name}", value)
+    return records
+
+
+def _nested_context(invoices: list[dict[str, Any]]) -> ValidationContext:
+    base = _context(BALANCED)
+    schema = _schema(4)
+    return replace(
+        base, schema=schema, fields=_nested_fields(invoices),
+        registered_schema_hash=schema.schema_hash,
+    )
+
+
+def _rule(rule_id: str) -> Any:
+    return next(r for r in _schema(4).document_rules if r.rule_id == rule_id)
+
+
+def test_v4_drops_arithmetic_reconciliation_from_the_contract() -> None:
+    """Reconciliation is reported as data in the export, not asserted as a contract."""
+    rule_types = {rule.rule_type for rule in _schema(4).document_rules}
+    assert "arithmetic_reconciliation" not in rule_types
+    assert "comparison" not in rule_types
+    assert rule_types == {"required_fields", "range", "format"}
+
+
+def test_one_declared_rule_checks_every_invoice_in_the_document() -> None:
+    context = _nested_context([
+        {"invoice_number": "INV-1", "invoice_date": "2026-01-05", "seller_name": "Acme",
+         "total": 100.0, "currency": "GBP", "line_items": [{"amount": 100.0}]},
+        {"invoice_number": "INV-2", "invoice_date": "2026-01-06", "seller_name": "Acme",
+         "total": 250.0, "currency": "gbp", "line_items": [{"amount": 250.0}]},
+    ])
+
+    # The format rule is declared once and produces one observation per invoice.
+    formats = evaluate_rule(_rule("invoice_currency_format"), context)
+    assert [(item.field_path, item.status) for item in formats] == [
+        ("invoices[0].currency", PASS),
+        ("invoices[1].currency", FAIL),
+    ]
+
+    ranges = evaluate_rule(_rule("invoice_total_not_negative"), context)
+    assert [item.field_path for item in ranges] == ["invoices[0].total", "invoices[1].total"]
+    assert {item.status for item in ranges} == {PASS}
+
+
+def test_a_required_value_missing_from_the_second_invoice_is_reported() -> None:
+    context = _nested_context([
+        {"invoice_number": "INV-1", "invoice_date": "2026-01-05", "seller_name": "Acme",
+         "total": 100.0, "currency": "GBP"},
+        {"invoice_number": "INV-2", "invoice_date": "2026-01-06", "seller_name": "Acme",
+         "total": 250.0, "currency": None},
+    ])
+    [observation] = evaluate_rule(_rule("required_invoice_identity"), context)
+    assert observation.status == FAIL
+    assert observation.severity == BLOCKING
+    assert "invoices[1].currency" in observation.message
+    assert "invoices[0].currency" not in observation.message
+
+
+def test_a_document_returning_no_invoice_cannot_satisfy_a_requirement() -> None:
+    """A wildcard that matched nothing is missing, never vacuously satisfied."""
+    [observation] = evaluate_rule(_rule("required_invoice_identity"), _nested_context([]))
+    assert observation.status == FAIL
+    assert "invoices[*].invoice_number" in observation.message

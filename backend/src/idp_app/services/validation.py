@@ -645,11 +645,18 @@ def _rule_observation(
 
 
 def _rule_required_fields(rule: DocumentRule, context: ValidationContext) -> list[Observation]:
-    missing = [
-        path
-        for path in rule.field_paths
-        if (field := context.by_path.get(path)) is None or field.value is None
-    ]
+    missing: list[str] = []
+    for declared in rule.field_paths:
+        addressed = _addressed_paths(declared, context)
+        if not addressed:
+            # A repeated entity the document never returned cannot satisfy a requirement.
+            missing.append(declared)
+            continue
+        missing.extend(
+            path
+            for path in addressed
+            if (field := context.by_path.get(path)) is None or field.value is None
+        )
     if missing:
         return [
             _rule_observation(
@@ -731,7 +738,7 @@ def _rule_arithmetic(rule: DocumentRule, context: ValidationContext) -> list[Obs
 def _rule_allowed_values(rule: DocumentRule, context: ValidationContext) -> list[Observation]:
     allowed = rule.allowed_values or []
     observations: list[Observation] = []
-    for path in rule.field_paths:
+    for path in _rule_paths(rule, context, observations):
         raw = _raw_at(path, context)
         if raw is None:
             observations.append(
@@ -769,7 +776,7 @@ def _rule_range(rule: DocumentRule, context: ValidationContext) -> list[Observat
     observations: list[Observation] = []
     expected = f"{rule.minimum if rule.minimum is not None else '-inf'}"
     expected += f" .. {rule.maximum if rule.maximum is not None else '+inf'}"
-    for path in rule.field_paths:
+    for path in _rule_paths(rule, context, observations):
         amount = _decimal_or_none(_value_at(path, context))
         if amount is None:
             observations.append(
@@ -803,7 +810,7 @@ def _rule_range(rule: DocumentRule, context: ValidationContext) -> list[Observat
 def _rule_format(rule: DocumentRule, context: ValidationContext) -> list[Observation]:
     pattern = re.compile(rule.pattern or "")
     observations: list[Observation] = []
-    for path in rule.field_paths:
+    for path in _rule_paths(rule, context, observations):
         raw = _raw_at(path, context)
         if raw is None:
             observations.append(
@@ -842,6 +849,17 @@ def _rule_comparison(rule: DocumentRule, context: ValidationContext) -> list[Obs
     compare = _COMPARATORS[rule.comparator] if rule.comparator else None
     if compare is None or rule.compare_to is None:
         return [_rule_observation(rule, context, SKIPPED, "Comparison rule is not configured.")]
+    if any("[*]" in path for path in (*rule.field_paths, rule.compare_to)):
+        # Comparing repeated fields requires pairing each instance with its own sibling, which
+        # this rule type cannot express. Refuse it rather than compare across entities.
+        return [
+            _rule_observation(
+                rule,
+                context,
+                SKIPPED,
+                "Comparison rules do not support repeated fields.",
+            )
+        ]
     other = _decimal_or_none(_value_at(rule.compare_to, context))
     observations: list[Observation] = []
     for path in rule.field_paths:
@@ -935,6 +953,41 @@ def _term_amount(term: RuleTerm, context: ValidationContext) -> Decimal | None:
     if not amounts:
         return None
     return sum(amounts, Decimal("0"))
+
+
+def _addressed_paths(declared: str, context: ValidationContext) -> list[str]:
+    """Expand a declared rule path into the extracted instance paths it addresses.
+
+    A path without a wildcard addresses only itself. A wildcard path addresses every
+    extracted instance, so one declared rule covers each repeated entity a document
+    contains rather than assuming there is exactly one of them. A wildcard that matched
+    no instance addresses nothing, which callers report as missing rather than as a pass.
+    """
+    if "[*]" not in declared:
+        return [declared]
+    return [field.field_path for field in context.instances_of(declared)]
+
+
+def _rule_paths(
+    rule: DocumentRule, context: ValidationContext, observations: list[Observation]
+) -> list[str]:
+    """Every instance path a per-field rule addresses, recording wildcards that matched none."""
+    paths: list[str] = []
+    for declared in rule.field_paths:
+        addressed = _addressed_paths(declared, context)
+        if not addressed:
+            observations.append(
+                _rule_observation(
+                    rule,
+                    context,
+                    SKIPPED,
+                    f"{declared} returned no value to check.",
+                    field_path=declared,
+                )
+            )
+            continue
+        paths.extend(addressed)
+    return paths
 
 
 def _value_at(path: str, context: ValidationContext) -> object:

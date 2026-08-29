@@ -1,0 +1,196 @@
+{
+  "schema_id": "invoice",
+  "schema_version": 4,
+  "display_name": "Invoice v4",
+  "use_case": "invoice",
+  "status": "PRODUCTION",
+  "instructions": "Extract only values explicitly stated in the source invoice. Do not infer, calculate, reconcile, or populate a missing value. A single document may contain more than one invoice: return every invoice it contains as a separate item, in the order they appear, and never merge two invoices into one item or split one invoice across two. Assign each billed line to the invoice it belongs to, preserving its stated order. Preserve stated signs and currency context. Return null when the source does not state a value.",
+  "ai_extract_schema": {
+    "invoices": {
+      "type": "array",
+      "description": "Each invoice contained in the document, in the order it appears.",
+      "items": {
+        "type": "object",
+        "description": "One invoice stated in the document.",
+        "properties": {
+          "invoice_number": {
+            "type": "string",
+            "description": "Invoice identifier exactly as stated by the seller."
+          },
+          "invoice_date": {
+            "type": "string",
+            "description": "Invoice issue date exactly as stated in the source document."
+          },
+          "seller_name": {
+            "type": "string",
+            "description": "Legal or trading name of the seller issuing the invoice."
+          },
+          "subtotal": {
+            "type": "number",
+            "description": "Subtotal stated before discounts and tax, without a currency symbol."
+          },
+          "discount": {
+            "type": "number",
+            "description": "Discount amount explicitly stated on the invoice, without a currency symbol."
+          },
+          "tax": {
+            "type": "number",
+            "description": "Total tax amount explicitly stated on the invoice, without a currency symbol."
+          },
+          "total": {
+            "type": "number",
+            "description": "Final invoice total explicitly stated as payable, without a currency symbol."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency code or currency name explicitly stated for the invoice amounts."
+          },
+          "line_items": {
+            "type": "array",
+            "description": "Each billed line exactly as stated in the invoice line table.",
+            "items": {
+              "type": "object",
+              "description": "One billed line from the invoice line table.",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Description of the billed item exactly as stated on the line."
+                },
+                "quantity": {
+                  "type": "number",
+                  "description": "Quantity stated for the line, without units."
+                },
+                "unit_price": {
+                  "type": "number",
+                  "description": "Price per unit stated for the line, without a currency symbol."
+                },
+                "tax": {
+                  "type": "number",
+                  "description": "Tax amount stated on the line itself, without a currency symbol."
+                },
+                "amount": {
+                  "type": "number",
+                  "description": "Line total stated for the line, without a currency symbol."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "field_policies": {
+    "invoices[*].invoice_number": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "invoices[*].invoice_date": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high",
+      "semantic_type": "date"
+    },
+    "invoices[*].seller_name": {
+      "required": true,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "invoices[*].subtotal": {
+      "required": false,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "invoices[*].discount": {
+      "required": false,
+      "confidence_threshold": 0.8,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "invoices[*].tax": {
+      "required": false,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "invoices[*].total": {
+      "required": true,
+      "confidence_threshold": 0.95,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "invoices[*].currency": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high",
+      "semantic_type": "currency_code"
+    },
+    "invoices[*].line_items[*].description": {
+      "required": false,
+      "confidence_threshold": 0.7,
+      "citation_required": false,
+      "risk_tier": "low"
+    },
+    "invoices[*].line_items[*].quantity": {
+      "required": false,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "invoices[*].line_items[*].unit_price": {
+      "required": false,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "invoices[*].line_items[*].tax": {
+      "required": false,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "invoices[*].line_items[*].amount": {
+      "required": false,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    }
+  },
+  "document_rules": [
+    {
+      "rule_id": "required_invoice_identity",
+      "rule_type": "required_fields",
+      "description": "Check that every invoice states an invoice number, invoice date, seller name, total and currency.",
+      "field_paths": [
+        "invoices[*].invoice_number",
+        "invoices[*].invoice_date",
+        "invoices[*].seller_name",
+        "invoices[*].total",
+        "invoices[*].currency"
+      ]
+    },
+    {
+      "rule_id": "invoice_total_not_negative",
+      "rule_type": "range",
+      "description": "Reject a negative stated total; credit notes are not enabled here.",
+      "field_paths": [
+        "invoices[*].total"
+      ],
+      "minimum": 0
+    },
+    {
+      "rule_id": "invoice_currency_format",
+      "rule_type": "format",
+      "description": "Require a three-letter uppercase ISO currency code.",
+      "field_paths": [
+        "invoices[*].currency"
+      ],
+      "pattern": "^[A-Z]{3}$"
+    }
+  ]
+}

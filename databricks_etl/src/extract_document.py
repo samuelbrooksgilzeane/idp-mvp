@@ -19,6 +19,12 @@ UUID = re.compile(
 EXTRACTOR_VERSION = "2.1"
 # `line_items[0].amount` style paths produced by the recursive flattener.
 LINE_ITEM_PATH = re.compile(r"^line_items\[(\d+)\]\.(.+)$")
+# The top-level leaves this typed projection reads. A schema that states none of them
+# is a shape the invoice candidate tables cannot describe.
+PROJECTED_LEAVES = frozenset(
+    {"invoice_number", "invoice_date", "seller_name", "subtotal", "discount", "tax",
+     "total", "currency"}
+)
 
 
 @dataclass(frozen=True)
@@ -266,9 +272,21 @@ def main() -> None:
             ai_result,
         )
         write_fields(extracted_fields, fields)
+        # The generic extracted-field rows above carry every schema shape. The typed candidate
+        # projection below understands one invoice per document, so a schema that nests its
+        # invoices is captured and left unprojected rather than written as a row of nulls that
+        # would surface in the summary as a blank invoice.
         candidate = build_candidate(parameters, document, fields)
-        write_candidate(invoice_candidates, candidate)
-        write_line_candidates(invoice_line_candidates, build_line_candidates(parameters, fields))
+        if candidate is None:
+            print(
+                "Typed invoice projection skipped: this schema does not declare "
+                "top-level invoice fields. The extracted fields are recorded in full."
+            )
+        else:
+            write_candidate(invoice_candidates, candidate)
+            write_line_candidates(
+                invoice_line_candidates, build_line_candidates(parameters, fields)
+            )
 
         spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""
@@ -476,8 +494,15 @@ def build_candidate(
     parameters: Parameters,
     document: Any,
     fields: list[dict[str, Any]],
-) -> tuple[object, ...]:
+) -> tuple[object, ...] | None:
+    """Project the flattened leaves into one typed invoice row.
+
+    Returns None when the schema states its invoice fields somewhere other than the top
+    level, because this projection can only describe one invoice per document.
+    """
     values = {field["field_path"]: field["value"] for field in fields}
+    if not PROJECTED_LEAVES & values.keys():
+        return None
     return (
         document["case_id"], parameters.document_id, document["source_path"],
         document["template_id"], string_or_none(values.get("invoice_number")),

@@ -96,6 +96,7 @@ def validate_data_bootstrap() -> None:
         "register_production_schemas",
         "register_production_schemas_v2",
         "register_production_schemas_v3",
+        "register_production_schemas_v4",
     ]
     if not isinstance(tasks, list) or [t.get("task_key") for t in tasks] != expected_tasks:
         raise ValueError(

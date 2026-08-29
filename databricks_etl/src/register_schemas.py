@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 ALLOWED_MANIFESTS = frozenset(
-    {"invoice_v1.json", "invoice_v2.json", "invoice_v3.json"}
+    {"invoice_v1.json", "invoice_v2.json", "invoice_v3.json", "invoice_v4.json"}
 )
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SCHEMA_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
