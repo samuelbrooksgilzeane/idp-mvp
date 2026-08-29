@@ -29,10 +29,38 @@ def flatten_result(
         for item in citations
         if isinstance(item, dict) and isinstance(item.get("id"), int)
     }
-    return [
-        _flatten_scalar(run, path, definition, response.get(path), citation_index)
-        for path, definition in schema.ai_extract_schema.items()
-    ]
+    records: list[ExtractedFieldRecord] = []
+    for name, definition in schema.ai_extract_schema.items():
+        _walk(run, name, definition, response.get(name), citation_index, records)
+    return records
+
+
+def _walk(
+    run: ExtractionRunRecord,
+    path: str,
+    definition: ExtractField,
+    payload: object,
+    citation_index: dict[int, dict[str, Any]],
+    records: list[ExtractedFieldRecord],
+) -> None:
+    """Emit one row per scalar leaf, indexing repeated fields as `line_items[0].amount`.
+
+    An absent or empty repeated field emits no rows; it is never treated as a zero-length
+    result that could satisfy a calculation.
+    """
+    if definition.type == "array" and definition.items is not None:
+        if isinstance(payload, list):
+            for index, element in enumerate(payload):
+                _walk(
+                    run, f"{path}[{index}]", definition.items, element, citation_index, records
+                )
+        return
+    if definition.type == "object" and definition.properties is not None:
+        element = payload if isinstance(payload, dict) else {}
+        for name, child in definition.properties.items():
+            _walk(run, f"{path}.{name}", child, element.get(name), citation_index, records)
+        return
+    records.append(_flatten_scalar(run, path, definition, payload, citation_index))
 
 
 def build_invoice_candidate(

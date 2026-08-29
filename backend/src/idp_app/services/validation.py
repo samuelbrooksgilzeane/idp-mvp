@@ -29,8 +29,10 @@ from idp_app.services.schema_models import (
     DocumentRule,
     ExtractField,
     FieldPolicy,
+    RuleTerm,
     SchemaRecord,
-    rule_path_root,
+    policy_path,
+    schema_leaves,
 )
 from idp_app.services.viewer import normalise_box
 
@@ -88,6 +90,21 @@ class ValidationContext:
     @property
     def by_path(self) -> dict[str, ExtractedFieldRecord]:
         return {field.field_path: field for field in self.fields}
+
+    @property
+    def leaves(self) -> dict[str, ExtractField]:
+        """Declared scalar leaves keyed by wildcard path."""
+        return dict(schema_leaves(self.schema.ai_extract_schema))
+
+    def definition_for(self, instance_path: str) -> ExtractField | None:
+        return self.leaves.get(policy_path(instance_path))
+
+    def policy_for(self, instance_path: str) -> FieldPolicy | None:
+        return self.schema.field_policies.get(policy_path(instance_path))
+
+    def instances_of(self, wildcard: str) -> list[ExtractedFieldRecord]:
+        """Every extracted instance whose path matches a wildcard leaf path."""
+        return [field for field in self.fields if policy_path(field.field_path) == wildcard]
 
 
 def severity_for(policy: FieldPolicy | None) -> str:
@@ -247,10 +264,11 @@ def check_parse_staleness(context: ValidationContext) -> list[Observation]:
 def check_cast_integrity(context: ValidationContext) -> list[Observation]:
     """A returned value must be coercible to the type the registered schema declares."""
     observations: list[Observation] = []
-    for path, definition in context.schema.ai_extract_schema.items():
-        field = context.by_path.get(path)
-        policy = context.schema.field_policies.get(path)
-        if field is None or field.value is None:
+    for field in context.fields:
+        path = field.field_path
+        definition = context.definition_for(path)
+        policy = context.policy_for(path)
+        if definition is None or field.value is None:
             continue
         error = _coercion_error(field, definition, policy)
         if error is None:
@@ -307,9 +325,12 @@ def _coercion_error(
 def check_citations(context: ValidationContext) -> list[Observation]:
     observations: list[Observation] = []
     page_count = context.parse.page_count if context.parse else None
-    for path, policy in context.schema.field_policies.items():
-        field = context.by_path.get(path)
-        if field is None or field.value is None:
+    for field in context.fields:
+        path = field.field_path
+        policy = context.policy_for(path)
+        if policy is None:
+            continue
+        if field.value is None:
             # A field with no value cannot carry evidence; the required-field rule owns this case.
             observations.append(
                 Observation(
@@ -384,10 +405,11 @@ def check_grounding(context: ValidationContext) -> list[Observation]:
     """A returned value should appear in the retained document text."""
     text = context.parse.document_text if context.parse else None
     observations: list[Observation] = []
-    for path, definition in context.schema.ai_extract_schema.items():
-        field = context.by_path.get(path)
-        policy = context.schema.field_policies.get(path)
-        if field is None or field.value is None or not field.value_string:
+    for field in context.fields:
+        path = field.field_path
+        definition = context.definition_for(path)
+        policy = context.policy_for(path)
+        if definition is None or field.value is None or not field.value_string:
             continue
         if not text:
             observations.append(
@@ -456,9 +478,10 @@ def _appears_in(value: str, text: str, declared_type: str) -> bool:
 
 def check_confidence(context: ValidationContext) -> list[Observation]:
     observations: list[Observation] = []
-    for path, policy in context.schema.field_policies.items():
-        field = context.by_path.get(path)
-        if field is None or field.value is None:
+    for field in context.fields:
+        path = field.field_path
+        policy = context.policy_for(path)
+        if policy is None or field.value is None:
             continue
         if field.confidence_score is None:
             observations.append(
@@ -534,12 +557,10 @@ def check_duplicates(context: ValidationContext) -> list[Observation]:
 
 
 def check_field_coverage(context: ValidationContext) -> list[Observation]:
-    declared = len(context.schema.ai_extract_schema)
-    returned = sum(
-        1
-        for path in context.schema.ai_extract_schema
-        if (field := context.by_path.get(path)) is not None and field.value is not None
-    )
+    declared = len(context.leaves)
+    returned = len({
+        policy_path(field.field_path) for field in context.fields if field.value is not None
+    })
     return [
         Observation(
             rule_id="field_coverage",
@@ -590,9 +611,9 @@ def _rule_severity(rule: DocumentRule, context: ValidationContext) -> str:
     if rule.severity is not None:
         return rule.severity
     tiers = [
-        context.schema.field_policies[rule_path_root(path)].risk_tier
+        context.schema.field_policies[policy_path(path)].risk_tier
         for path in rule.field_paths
-        if rule_path_root(path) in context.schema.field_policies
+        if policy_path(path) in context.schema.field_policies
     ]
     if "high" in tiers:
         return BLOCKING
@@ -657,7 +678,7 @@ def _rule_arithmetic(rule: DocumentRule, context: ValidationContext) -> list[Obs
     total = Decimal("0")
     missing: list[str] = []
     for term in rule.terms:
-        amount = _decimal_or_none(_value_at(term.field_path, context))
+        amount = _term_amount(term, context)
         if amount is None:
             missing.append(term.field_path)
             continue
@@ -896,6 +917,24 @@ def decide_document_status(observations: list[Observation]) -> str:
 # --------------------------------------------------------------------------------------
 # Value helpers
 # --------------------------------------------------------------------------------------
+
+
+def _term_amount(term: RuleTerm, context: ValidationContext) -> Decimal | None:
+    """Resolve one reconciliation term, folding a repeated field when the term aggregates.
+
+    An aggregate over zero returned instances is missing, not zero, so it can never let a
+    calculation pass.
+    """
+    if term.aggregate is None:
+        return _decimal_or_none(_value_at(term.field_path, context))
+    amounts = [
+        amount
+        for field in context.instances_of(policy_path(term.field_path))
+        if (amount := _decimal_or_none(field.value)) is not None
+    ]
+    if not amounts:
+        return None
+    return sum(amounts, Decimal("0"))
 
 
 def _value_at(path: str, context: ValidationContext) -> object:

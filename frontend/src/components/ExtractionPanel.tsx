@@ -368,6 +368,8 @@ function FieldTable({
   candidate: InvoiceCandidate | null;
   onViewEvidence: (field: ExtractedField) => void;
 }) {
+  const header = fields.filter((field) => !field.field_path.includes("["));
+  const groups = groupRepeatedFields(fields);
   return (
     <>
       <p className="extraction-disclaimer">
@@ -386,7 +388,7 @@ function FieldTable({
             </tr>
           </thead>
           <tbody>
-            {fields.map((field) => {
+            {header.map((field) => {
               const typed = typedValue(field.field_path, candidate);
               const hasCitation = field.citations.some((citation) => citation.bbox.length > 0);
               return (
@@ -420,7 +422,98 @@ function FieldTable({
           </tbody>
         </table>
       </div>
+      {[...groups.entries()].map(([name, rows]) => (
+        <RepeatedFieldTable
+          key={name}
+          name={name}
+          rows={rows}
+          onViewEvidence={onViewEvidence}
+        />
+      ))}
     </>
+  );
+}
+
+/** Group `line_items[0].amount` style paths into ordered rows keyed by their array name. */
+function groupRepeatedFields(
+  fields: ExtractedField[],
+): Map<string, Map<number, Record<string, ExtractedField>>> {
+  const groups = new Map<string, Map<number, Record<string, ExtractedField>>>();
+  for (const field of fields) {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]\.(.+)$/.exec(field.field_path);
+    if (!match) continue;
+    const [, name, index, leaf] = match;
+    const rows = groups.get(name) ?? new Map<number, Record<string, ExtractedField>>();
+    const row = rows.get(Number(index)) ?? {};
+    row[leaf] = field;
+    rows.set(Number(index), row);
+    groups.set(name, rows);
+  }
+  return groups;
+}
+
+function RepeatedFieldTable({
+  name,
+  rows,
+  onViewEvidence,
+}: {
+  name: string;
+  rows: Map<number, Record<string, ExtractedField>>;
+  onViewEvidence: (field: ExtractedField) => void;
+}) {
+  const ordered = [...rows.entries()].sort((a, b) => a[0] - b[0]);
+  const columns = [...new Set(ordered.flatMap(([, row]) => Object.keys(row)))];
+  return (
+    <div className="line-item-group">
+      <div className="line-item-heading">
+        <strong>{name.replace(/_/g, " ")}</strong>
+        <span>{ordered.length} {ordered.length === 1 ? "line" : "lines"}</span>
+      </div>
+      <div className="extraction-table-scroll">
+        <table className="extraction-table line-item-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              {columns.map((column) => <th key={column}>{column.replace(/_/g, " ")}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map(([index, row]) => (
+              <tr key={index}>
+                <td>{index + 1}</td>
+                {columns.map((column) => {
+                  const field = row[column];
+                  if (!field) {
+                    return <td key={column}><span className="value-null">Not returned</span></td>;
+                  }
+                  const cited = field.citations.some((citation) => citation.bbox.length > 0);
+                  return (
+                    <td key={column}>
+                      <span className="line-value">
+                        {field.value_string ?? <span className="value-null">Not returned</span>}
+                      </span>
+                      <small>{formatConfidence(field.confidence_score)}</small>
+                      {cited ? (
+                        <button
+                          type="button"
+                          className="evidence-link"
+                          onClick={() => onViewEvidence(field)}
+                        >
+                          <MapPin size={11} aria-hidden="true" />
+                          <span className="visually-hidden">
+                            View evidence for {field.field_path}
+                          </span>
+                        </button>
+                      ) : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -14,7 +15,7 @@ from idp_app.services.document_models import (
     ExtractionRunRecord,
     ParseRunRecord,
 )
-from idp_app.services.schema_models import SchemaManifest, SchemaRecord
+from idp_app.services.schema_models import SchemaManifest, SchemaRecord, schema_leaves
 from idp_app.services.schemas import load_source_manifests
 from idp_app.services.validation import (
     BLOCKING,
@@ -28,6 +29,7 @@ from idp_app.services.validation import (
 )
 
 V1_HASH = "b02b3c20d69e7f77ed76e45337107d4995aafab5ee411ab4f2e73b166876c640"
+V2_HASH = "63e45630339a8783077968bf3a0c6ba185011edf749ec6c57e9bf1b3b252a05f"
 
 BALANCED = {
     "invoice_number": "INV-1042",
@@ -259,9 +261,8 @@ def test_validators_never_mutate_extraction_data() -> None:
 
 def test_a_validator_failure_becomes_an_auditable_non_pass() -> None:
     context = _context(BALANCED)
-    broken = context.schema.field_policies.copy()
-    broken["total"] = None  # type: ignore[assignment]
-    object.__setattr__(context.schema, "field_policies", broken)
+    # Replace the policy mapping with something that cannot be looked up at all.
+    object.__setattr__(context.schema, "field_policies", ["not-a-mapping"])
     observations = run_validators(context)
     assert any(o.status == UNCERTAIN and "did not complete" in o.message for o in observations)
 
@@ -314,3 +315,114 @@ def test_newest_contract_reports_currency_pass() -> None:
     object.__setattr__(context, "latest_schema_version", 2)
     observations = run_validators(context)
     assert _by_rule(observations, "schema_version_currency")[0].status == PASS
+
+
+# --------------------------------------------------------------------------------------
+# Line items: recursive contracts and aggregate reconciliation
+# --------------------------------------------------------------------------------------
+
+LINES = [
+    {"description": "Widget A", "quantity": 3.0, "unit_price": 91.65, "tax": 0.0, "amount": 274.95},
+    {"description": "Widget B", "quantity": 2.0, "unit_price": 33.01, "tax": 0.0, "amount": 66.02},
+]
+LINE_TOTAL = Decimal("340.97")
+
+
+def _line_fields(lines: list[dict[str, Any]]) -> list[ExtractedFieldRecord]:
+    schema = _schema(3).ai_extract_schema["line_items"]
+    assert schema.items is not None and schema.items.properties is not None
+    records: list[ExtractedFieldRecord] = []
+    for index, line in enumerate(lines):
+        for leaf, definition in schema.items.properties.items():
+            value = line.get(leaf)
+            records.append(
+                ExtractedFieldRecord(
+                    extraction_run_id="run-1",
+                    document_id="doc-1",
+                    field_path=f"line_items[{index}].{leaf}",
+                    field_type=definition.type,
+                    value=value,
+                    value_string=None if value is None else str(value),
+                    confidence_score=None if value is None else 0.99,
+                    citation_ids=[0] if value is not None else [],
+                    citations=(
+                        [{"id": 0, "bbox": [{"coord": [10, 20, 120, 60], "page_id": 0}]}]
+                        if value is not None
+                        else []
+                    ),
+                    extraction_error=None,
+                )
+            )
+    return records
+
+
+def _line_context(
+    header: dict[str, Any], lines: list[dict[str, Any]]
+) -> ValidationContext:
+    context = _context(header, version=3)
+    object.__setattr__(context, "fields", context.fields + _line_fields(lines))
+    return context
+
+
+def test_invoice_v3_declares_nested_leaves_and_keeps_earlier_hashes() -> None:
+    assert _manifest(1).schema_hash == V1_HASH
+    assert _manifest(2).schema_hash == V2_HASH
+    leaves = dict(schema_leaves(_manifest(3).ai_extract_schema))
+    assert "line_items[*].amount" in leaves
+    assert leaves["line_items[*].amount"].type == "number"
+    assert set(_manifest(3).field_policies) == set(leaves)
+
+
+def test_line_items_reconcile_to_total_when_balanced() -> None:
+    # sum(amount) - discount + sum(line tax) = 340.97 - 0.00 + 0.00
+    header = {**BALANCED, "discount": 0.0, "total": float(LINE_TOTAL)}
+    observations = run_validators(_line_context(header, LINES))
+    result = _by_rule(observations, "line_items_reconcile_to_total")[0]
+    assert result.status == PASS
+
+
+def test_line_items_reconcile_to_total_fails_when_out_of_tolerance() -> None:
+    header = {**BALANCED, "discount": 0.0, "total": 999.00}
+    observations = run_validators(_line_context(header, LINES))
+    result = _by_rule(observations, "line_items_reconcile_to_total")[0]
+    assert result.status == FAIL and result.severity == BLOCKING
+    assert result.expected_value == str(LINE_TOTAL)
+    assert decide_document_status(observations) == "REVIEW_REQUIRED"
+
+
+def test_line_sum_is_uncertain_when_subtotal_is_absent() -> None:
+    observations = run_validators(_line_context({**BALANCED, "subtotal": None}, LINES))
+    result = _by_rule(observations, "line_items_sum_to_subtotal")[0]
+    assert result.status == UNCERTAIN and "subtotal" in result.message
+
+
+def test_line_sum_passes_against_a_stated_subtotal() -> None:
+    observations = run_validators(
+        _line_context({**BALANCED, "subtotal": float(LINE_TOTAL)}, LINES)
+    )
+    assert _by_rule(observations, "line_items_sum_to_subtotal")[0].status == PASS
+
+
+def test_absent_line_items_are_uncertain_never_an_implicit_zero() -> None:
+    """No returned lines must not let an aggregate satisfy a calculation."""
+    observations = run_validators(_line_context({**BALANCED, "total": 0.0}, []))
+    for rule_id in ("line_items_reconcile_to_total", "line_items_sum_to_subtotal"):
+        result = _by_rule(observations, rule_id)[0]
+        assert result.status == UNCERTAIN
+        assert result.status != PASS
+
+
+def test_nested_leaves_resolve_their_wildcard_policy() -> None:
+    """A nested instance must pick up the policy registered under its wildcard path."""
+    context = _line_context(BALANCED, LINES)
+    assert context.policy_for("line_items[1].amount") is not None
+    assert context.policy_for("line_items[1].amount") == (
+        context.schema.field_policies["line_items[*].amount"]
+    )
+    observations = run_validators(context)
+    confidence_paths = {
+        o.field_path for o in _by_rule(observations, "confidence_threshold")
+    }
+    assert "line_items[0].amount" in confidence_paths
+    coverage = _by_rule(observations, "field_coverage")[0]
+    assert coverage.expected_value == str(len(context.leaves))

@@ -16,7 +16,7 @@ from idp_app.services.document_models import DocumentRecord, ExtractionRunRecord
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.extraction_result import build_invoice_candidate, flatten_result
 from idp_app.services.extraction_runs import ExtractionRunRepository
-from idp_app.services.schema_models import SchemaRecord
+from idp_app.services.schema_models import ExtractField, SchemaRecord
 
 
 @dataclass(frozen=True)
@@ -156,14 +156,13 @@ class DatabricksExtractionJobRunner:
 def _mock_ai_extract(parse_run: ParseRunRecord, schema: SchemaRecord) -> dict[str, Any]:
     text = parse_run.document_text or ""
     citation = _first_citation(parse_run)
-    response: dict[str, dict[str, Any]] = {}
+    response: dict[str, Any] = {}
     for path, definition in schema.ai_extract_schema.items():
+        if definition.type == "array":
+            response[path] = _mock_line_items(definition, text, citation)
+            continue
         value = _mock_value(path, definition.type, text)
-        response[path] = {
-            "value": value,
-            "citation_ids": [0] if value is not None and citation is not None else [],
-            "confidence_score": 0.99 if value is not None else None,
-        }
+        response[path] = _wrap(value, citation)
     return {
         "response": response,
         "error_message": None,
@@ -174,6 +173,58 @@ def _mock_ai_extract(parse_run: ParseRunRecord, schema: SchemaRecord) -> dict[st
             "citations": [citation] if citation is not None else [],
         },
     }
+
+
+# The local mock reads a deliberately simple line form from the generated fixture PDFs, so mock
+# mode exercises the same nested response shape that ai_extract returns.
+LINE_ITEM = re.compile(
+    r"^LINE:\s*(?P<quantity>\d+(?:\.\d+)?)\s*x\s*(?P<description>.+?)\s*@\s*"
+    r"(?P<unit_price>[\d,]+\.?\d*)\s*tax\s*(?P<tax>[\d,]+\.?\d*)\s*=\s*"
+    r"(?P<amount>[\d,]+\.?\d*)\s*$",
+    flags=re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _wrap(value: object, citation: dict[str, Any] | None) -> dict[str, Any]:
+    return {
+        "value": value,
+        "citation_ids": [0] if value is not None and citation is not None else [],
+        "confidence_score": 0.99 if value is not None else None,
+    }
+
+
+def _mock_line_items(
+    definition: ExtractField, text: str, citation: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    item = definition.items
+    properties = item.properties if item is not None else None
+    if not properties:
+        return []
+    elements: list[dict[str, Any]] = []
+    for match in LINE_ITEM.finditer(text):
+        element: dict[str, Any] = {}
+        for name, leaf in properties.items():
+            raw = match.groupdict().get(name)
+            value: object = None
+            if raw is not None:
+                value = _coerce(raw.strip(), leaf.type)
+            element[name] = _wrap(value, citation)
+        elements.append(element)
+    return elements
+
+
+def _coerce(raw: str, field_type: str) -> object:
+    if field_type == "number":
+        try:
+            return float(raw.replace(",", ""))
+        except ValueError:
+            return None
+    if field_type == "integer":
+        try:
+            return int(float(raw.replace(",", "")))
+        except ValueError:
+            return None
+    return raw
 
 
 def _first_citation(parse_run: ParseRunRecord) -> dict[str, Any] | None:

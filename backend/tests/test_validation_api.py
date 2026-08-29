@@ -173,3 +173,82 @@ def test_business_duplicate_invoice_is_detected(tmp_path: Path) -> None:
     duplicate = next(r for r in report["results"] if r["rule_id"] == "duplicate_document")
     assert duplicate["status"] == "FAIL"
     assert first in (duplicate["evidence"] or "")
+
+
+def _pdf_with_lines(total: str = "340.97") -> bytes:
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "Seller: Acme Supplies Ltd\n"
+        "Invoice Number: INV-2050\n"
+        "Invoice Date: 2026-08-29\n"
+        "LINE: 3 x Widget A @ 91.65 tax 0.00 = 274.95\n"
+        "LINE: 2 x Widget B @ 33.01 tax 0.00 = 66.02\n"
+        "Subtotal: 340.97\n"
+        "Discount: 0.00\n"
+        "Tax: 0.00\n"
+        f"Total: {total}\n"
+        "Currency: GBP",
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def _prepare_v3(client: TestClient, content: bytes, name: str) -> str:
+    uploaded = client.post("/api/documents", files=[("files", (name, content, "application/pdf"))])
+    assert uploaded.status_code == 201
+    document_id = uploaded.json()["documents"][0]["document_id"]
+    started = client.post(f"/api/documents/{document_id}/parse")
+    for _ in range(100):
+        if client.get(f"/api/runs/{started.json()['parse_run_id']}").json()["status"] != "RUNNING":
+            break
+        time.sleep(0.02)
+    assert client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": "invoice", "schema_version": 3},
+    ).status_code == 202
+    for _ in range(100):
+        runs = client.get(f"/api/documents/{document_id}/extraction-runs").json()
+        if runs and runs[0]["status"] != "RUNNING":
+            assert runs[0]["status"] == "EXTRACTED"
+            break
+        time.sleep(0.02)
+    return document_id
+
+
+def test_line_items_are_extracted_and_reconcile_end_to_end(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    document_id = _prepare_v3(client, _pdf_with_lines(), "lines.pdf")
+
+    latest = client.get(f"/api/documents/{document_id}/extractions/latest").json()
+    paths = {field["field_path"] for field in latest["fields"]}
+    assert "line_items[0].amount" in paths and "line_items[1].amount" in paths
+    assert "line_items[2].amount" not in paths
+    lines = {f["field_path"]: f for f in latest["fields"]}
+    assert lines["line_items[0].description"]["value"] == "Widget A"
+    assert lines["line_items[0].amount"]["value"] == 274.95
+    assert lines["line_items[0].amount"]["confidence_score"] == 0.99
+    assert lines["line_items[0].amount"]["citations"][0]["bbox"][0]["page_id"] == 0
+
+    report = client.post(f"/api/documents/{document_id}/validate", json={}).json()
+    reconciliation = next(
+        r for r in report["results"] if r["rule_id"] == "line_items_reconcile_to_total"
+    )
+    assert reconciliation["status"] == "PASS"
+    assert report["run"]["document_status"] == "VALIDATED_PASS"
+
+
+def test_line_items_that_do_not_add_up_are_blocked(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    document_id = _prepare_v3(client, _pdf_with_lines(total="999.00"), "bad-lines.pdf")
+
+    report = client.post(f"/api/documents/{document_id}/validate", json={}).json()
+    reconciliation = next(
+        r for r in report["results"] if r["rule_id"] == "line_items_reconcile_to_total"
+    )
+    assert reconciliation["status"] == "FAIL"
+    assert reconciliation["severity"] == "BLOCKING"
+    assert reconciliation["expected_value"] == "340.97"
+    assert report["run"]["document_status"] == "REVIEW_REQUIRED"

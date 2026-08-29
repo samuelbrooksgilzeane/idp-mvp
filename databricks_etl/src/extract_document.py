@@ -85,11 +85,29 @@ def qualified(parameters: Parameters, suffix: str) -> str:
 
 def canonical_json(value: object) -> str:
     return json.dumps(
-        _without_nulls(value),
+        _normalise_numbers(_without_nulls(value)),
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
     )
+
+
+def _normalise_numbers(value: object) -> object:
+    """Render an integral float as an integer.
+
+    The manifest is hashed independently by the backend, the registration task and the
+    extraction task. JSON does not distinguish 0 from 0.0, but typed loading can, so the
+    three implementations must agree on one representation or their hashes diverge.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalise_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalise_numbers(item) for item in value]
+    return value
 
 
 def _without_nulls(value: object) -> object:
@@ -307,10 +325,61 @@ def flatten_fields(
         if isinstance(item, dict) and isinstance(item.get("id"), int)
     }
     fields: list[dict[str, Any]] = []
-    for path, definition in schema.items():
-        if not isinstance(definition, dict):
-            raise ValueError(f"Registered field definition is invalid: {path}")
-        payload = response.get(path)
+    for name, definition in schema.items():
+        _walk(extraction_run_id, document_id, name, definition, response.get(name),
+              citation_index, fields)
+    return fields
+
+
+def _walk(
+    extraction_run_id: str,
+    document_id: str,
+    path: str,
+    definition: Any,
+    payload: Any,
+    citation_index: dict[int, Any],
+    fields: list[dict[str, Any]],
+) -> None:
+    """Emit one row per scalar leaf, indexing repeated fields as `line_items[0].amount`.
+
+    An absent or empty repeated field emits no rows; it is never treated as a zero-length
+    result that could satisfy a calculation.
+    """
+    if not isinstance(definition, dict):
+        raise ValueError(f"Registered field definition is invalid: {path}")
+    field_type = definition.get("type")
+    if field_type == "array":
+        items = definition.get("items")
+        if isinstance(payload, list) and isinstance(items, dict):
+            for index, element in enumerate(payload):
+                _walk(
+                    extraction_run_id, document_id, f"{path}[{index}]", items, element,
+                    citation_index, fields,
+                )
+        return
+    if field_type == "object":
+        properties = definition.get("properties")
+        if isinstance(properties, dict):
+            element = payload if isinstance(payload, dict) else {}
+            for name, child in properties.items():
+                _walk(
+                    extraction_run_id, document_id, f"{path}.{name}", child, element.get(name),
+                    citation_index, fields,
+                )
+        return
+    fields.append(
+        _flatten_scalar(extraction_run_id, document_id, path, definition, payload, citation_index)
+    )
+
+
+def _flatten_scalar(
+    extraction_run_id: str,
+    document_id: str,
+    path: str,
+    definition: dict[str, Any],
+    payload: Any,
+    citation_index: dict[int, Any],
+) -> dict[str, Any]:
         errors: list[str] = []
         if not isinstance(payload, dict):
             payload = {"value": None}
@@ -328,21 +397,18 @@ def flatten_fields(
             confidence = None
             errors.append("confidence_score is outside the range 0 to 1.")
         value = payload.get("value")
-        fields.append(
-            {
-                "extraction_run_id": extraction_run_id,
-                "document_id": document_id,
-                "field_path": path,
-                "field_type": definition.get("type"),
-                "value": value,
-                "value_string": value_string(value),
-                "confidence_score": float(confidence) if confidence is not None else None,
-                "citation_ids": citation_ids,
-                "citations": resolved,
-                "extraction_error": " ".join(errors) or None,
-            }
-        )
-    return fields
+        return {
+            "extraction_run_id": extraction_run_id,
+            "document_id": document_id,
+            "field_path": path,
+            "field_type": definition.get("type"),
+            "value": value,
+            "value_string": value_string(value),
+            "confidence_score": float(confidence) if confidence is not None else None,
+            "citation_ids": citation_ids,
+            "citations": resolved,
+            "extraction_error": " ".join(errors) or None,
+        }
 
 
 def value_string(value: object) -> str | None:

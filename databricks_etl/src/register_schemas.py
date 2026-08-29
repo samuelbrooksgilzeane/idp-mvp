@@ -10,11 +10,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-ALLOWED_MANIFESTS = frozenset({"invoice_v1.json", "invoice_v2.json"})
+ALLOWED_MANIFESTS = frozenset(
+    {"invoice_v1.json", "invoice_v2.json", "invoice_v3.json"}
+)
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SCHEMA_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 FIELD_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,149}$")
-FIELD_TYPES = {"string", "integer", "number", "boolean", "enum"}
+SCALAR_TYPES = {"string", "integer", "number", "boolean", "enum"}
+FIELD_TYPES = SCALAR_TYPES | {"object", "array"}
+MAX_SCHEMA_LEAVES = 256
+MAX_SCHEMA_DEPTH = 12
 
 
 @dataclass(frozen=True)
@@ -81,23 +86,53 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ValueError("instructions are required")
     fields = manifest["ai_extract_schema"]
     policies = manifest["field_policies"]
-    if not isinstance(fields, dict) or not 1 <= len(fields) <= 256:
-        raise ValueError("ai_extract_schema must contain between 1 and 256 fields")
-    if set(fields) != set(policies):
-        raise ValueError("field_policies must define every extraction field exactly once")
+    if not isinstance(fields, dict) or not fields:
+        raise ValueError("ai_extract_schema must declare at least one field")
+    leaves: list[str] = []
     for name, field in fields.items():
-        if FIELD_IDENTIFIER.fullmatch(name) is None:
-            raise ValueError(f"Invalid extraction field name: {name}")
-        if not isinstance(field, dict) or field.get("type") not in FIELD_TYPES:
-            raise ValueError(f"Invalid extraction field definition: {name}")
-        if not isinstance(field.get("description"), str) or not field["description"]:
-            raise ValueError(f"Extraction field description is required: {name}")
+        _validate_field(name, name, field, leaves, 1)
+    if not 1 <= len(leaves) <= MAX_SCHEMA_LEAVES:
+        raise ValueError(
+            f"ai_extract_schema must contain between 1 and {MAX_SCHEMA_LEAVES} leaves"
+        )
+    if set(leaves) != set(policies):
+        raise ValueError("field_policies must define every extraction leaf exactly once")
     return manifest
+
+
+def _validate_field(
+    name: str, path: str, field: object, leaves: list[str], depth: int
+) -> None:
+    """Recursively validate one contract node and collect its scalar leaf paths."""
+    if depth > MAX_SCHEMA_DEPTH:
+        raise ValueError(f"Extraction schema nests deeper than {MAX_SCHEMA_DEPTH} levels")
+    if FIELD_IDENTIFIER.fullmatch(name) is None:
+        raise ValueError(f"Invalid extraction field name: {name}")
+    if not isinstance(field, dict) or field.get("type") not in FIELD_TYPES:
+        raise ValueError(f"Invalid extraction field definition: {path}")
+    if not isinstance(field.get("description"), str) or not field["description"]:
+        raise ValueError(f"Extraction field description is required: {path}")
+
+    field_type = field["type"]
+    if field_type == "array":
+        items = field.get("items")
+        if not isinstance(items, dict):
+            raise ValueError(f"Array field requires items: {path}")
+        _validate_field(name, f"{path}[*]", items, leaves, depth + 1)
+        return
+    if field_type == "object":
+        properties = field.get("properties")
+        if not isinstance(properties, dict) or not properties:
+            raise ValueError(f"Object field requires properties: {path}")
+        for child_name, child in properties.items():
+            _validate_field(child_name, f"{path}.{child_name}", child, leaves, depth + 1)
+        return
+    leaves.append(path)
 
 
 def canonical_json(value: object) -> str:
     return json.dumps(
-        _without_nulls(value),
+        _normalise_numbers(_without_nulls(value)),
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
@@ -110,6 +145,24 @@ def compact_json(value: object) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def _normalise_numbers(value: object) -> object:
+    """Render an integral float as an integer.
+
+    The manifest is hashed independently by the backend, the registration task and the
+    extraction task. JSON does not distinguish 0 from 0.0, but typed loading can, so the
+    three implementations must agree on one representation or their hashes diverge.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalise_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalise_numbers(item) for item in value]
+    return value
 
 
 def _without_nulls(value: object) -> object:

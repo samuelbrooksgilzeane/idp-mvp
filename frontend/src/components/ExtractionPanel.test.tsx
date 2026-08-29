@@ -79,6 +79,22 @@ const latestResult = {
       extraction_error: null,
     },
     {
+      field_path: "line_items[0].description", field_type: "string", value: "Widget A",
+      value_string: "Widget A", confidence_score: 0.97, citation_ids: [], citations: [],
+      extraction_error: null,
+    },
+    {
+      field_path: "line_items[0].amount", field_type: "number", value: 274.95,
+      value_string: "274.95", confidence_score: 0.99, citation_ids: [5],
+      citations: [{ id: 5, bbox: [{ coord: [10, 20, 30, 40], page_id: 0 }] }],
+      extraction_error: null,
+    },
+    {
+      field_path: "line_items[1].description", field_type: "string", value: "Widget B",
+      value_string: "Widget B", confidence_score: 0.96, citation_ids: [], citations: [],
+      extraction_error: null,
+    },
+    {
       field_path: "subtotal",
       field_type: "number",
       value: null,
@@ -148,7 +164,7 @@ describe("ExtractionPanel", () => {
     expect(screen.getAllByText("Model confidence 100%").length).toBeGreaterThan(0);
 
     // Null field renders an explicit state, not a blank cell.
-    expect(screen.getByText("Not returned")).toBeInTheDocument();
+    expect(screen.getAllByText("Not returned").length).toBeGreaterThan(0);
     expect(screen.getByText("No citation returned")).toBeInTheDocument();
   });
 
@@ -163,7 +179,9 @@ describe("ExtractionPanel", () => {
       />,
     );
 
-    const evidenceButtons = await screen.findAllByRole("button", { name: /View evidence/ });
+    // Header-field controls are named exactly "View evidence"; line-item cells carry their
+    // own path in the accessible name, so this selects the header controls only.
+    const evidenceButtons = await screen.findAllByRole("button", { name: "View evidence" });
     // invoice_date + total are cited; subtotal is not.
     expect(evidenceButtons).toHaveLength(2);
     fireEvent.click(evidenceButtons[1]); // total, which has two citation boxes
@@ -206,5 +224,35 @@ describe("ExtractionPanel", () => {
       await screen.findByText("A successful parse is required before extraction."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /extraction/i })).toBeDisabled();
+  });
+});
+
+describe("ExtractionPanel line items", () => {
+  it("groups repeated fields into a line table and links a cell to its evidence", async () => {
+    const onViewEvidence = vi.fn<(target: CitationTarget) => void>();
+    vi.stubGlobal("fetch", panelFetch());
+    render(
+      <ExtractionPanel
+        document={document}
+        onViewEvidence={onViewEvidence}
+        onDocumentsChanged={vi.fn()}
+      />,
+    );
+
+    // Repeated leaves are grouped, not listed as flat rows.
+    expect(await screen.findByText("line items")).toBeInTheDocument();
+    expect(screen.getByText("2 lines")).toBeInTheDocument();
+    expect(screen.getByText("Widget A")).toBeInTheDocument();
+    expect(screen.getByText("Widget B")).toBeInTheDocument();
+    expect(screen.queryByText("line_items[0].amount")).not.toBeInTheDocument();
+
+    // A ragged line shows an explicit state rather than a blank cell.
+    expect(screen.getAllByText("Not returned").length).toBeGreaterThan(0);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /View evidence for line_items\[0\]\.amount/ }),
+    );
+    expect(onViewEvidence).toHaveBeenCalledTimes(1);
+    expect(onViewEvidence.mock.calls[0][0].fieldLabel).toBe("line_items[0].amount");
   });
 });

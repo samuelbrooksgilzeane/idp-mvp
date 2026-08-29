@@ -12,7 +12,7 @@ from idp_app.services.schema_registry import (
     SchemaVersionConflictError,
     SQLiteSchemaRepository,
 )
-from idp_app.services.schemas import load_manifest, manifest_directory
+from idp_app.services.schemas import load_manifest, load_source_manifests, manifest_directory
 
 
 @pytest.fixture
@@ -99,14 +99,13 @@ def test_production_schema_list_filters_by_use_case(client: TestClient) -> None:
     payload = response.json()
     # Every registered production version stays listed, newest first, so a prior version
     # remains selectable and inspectable.
-    assert [(item["schema_id"], item["schema_version"]) for item in payload] == [
-        ("invoice", 2),
-        ("invoice", 1),
-    ]
-    assert payload[0]["display_name"] == "Invoice v2"
-    assert all(len(item["schema_hash"]) == 64 for item in payload)
-    assert payload[0]["schema_hash"] != payload[1]["schema_hash"]
+    versions = [item["schema_version"] for item in payload]
+    assert versions == sorted(versions, reverse=True)
+    assert versions[-1] == 1 and len(versions) == len(set(versions)) > 1
+    assert all(item["schema_id"] == "invoice" for item in payload)
     assert all(item["status"] == "PRODUCTION" for item in payload)
+    assert all(len(item["schema_hash"]) == 64 for item in payload)
+    assert len({item["schema_hash"] for item in payload}) == len(payload)
     assert client.get("/api/schemas?status=PRODUCTION&use_case=contract").json() == []
 
 
@@ -148,3 +147,52 @@ def test_missing_unknown_and_untrusted_schema_requests_are_safe(
     assert non_production.status_code == 422
     assert injected.status_code == 405
     assert client.get("/api/schemas?status=PRODUCTION&use_case=attacker").json() == []
+
+
+def test_every_hash_implementation_agrees_on_every_manifest() -> None:
+    """The backend, the registration task and the extraction task each hash the manifest
+    independently. If they disagree, a governed extraction fails its own integrity check, so
+    the three implementations are pinned together here."""
+    import hashlib
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[2]
+    modules = {}
+    for name, relative in (
+        ("register_schemas", "databricks_etl/src/register_schemas.py"),
+        ("extract_document", "databricks_etl/src/extract_document.py"),
+    ):
+        spec = importlib.util.spec_from_file_location(name, root / relative)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        modules[name] = module
+
+    manifests = load_source_manifests()
+    assert len(manifests) >= 3
+    for manifest in manifests:
+        raw = json.loads(
+            (root / "schemas" / f"invoice_v{manifest.schema_version}.json").read_text()
+        )
+        digests = {
+            manifest.schema_hash,
+            hashlib.sha256(
+                modules["register_schemas"].canonical_json(raw).encode("utf-8")
+            ).hexdigest(),
+            hashlib.sha256(
+                modules["extract_document"].canonical_json(raw).encode("utf-8")
+            ).hexdigest(),
+        }
+        assert len(digests) == 1, f"hash implementations disagree for v{manifest.schema_version}"
+
+
+def test_integral_numbers_hash_identically_however_they_are_written() -> None:
+    """JSON does not distinguish 0 from 0.0, so neither may the canonical form."""
+    manifest = load_source_manifests()[0]
+    payload = manifest.model_dump(mode="json", exclude_none=True)
+    integral = SchemaManifest.model_validate({**payload, "schema_version": 1})
+    assert integral.canonical_json() == manifest.canonical_json()

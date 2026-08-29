@@ -22,15 +22,47 @@ def rule_path_root(path: str) -> str:
     return re.split(r"[.\[]", path, maxsplit=1)[0]
 
 
+SCALAR_TYPES = frozenset({"string", "integer", "number", "boolean", "enum"})
+MAX_SCHEMA_LEAVES = 256
+MAX_SCHEMA_DEPTH = 12
+
+
+def _normalise_numbers(value: object) -> object:
+    """Render an integral float as an integer.
+
+    The manifest is hashed independently by the backend, the registration task and the
+    extraction task. JSON does not distinguish 0 from 0.0, but typed loading can, so the
+    three implementations must agree on one representation or their hashes diverge.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalise_numbers(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalise_numbers(item) for item in value]
+    return value
+
+
 class ExtractField(BaseModel):
+    """One node of the extraction contract.
+
+    Scalars are leaves. `object` and `array` describe repeated or nested structures, matching the
+    `ai_extract` schema shape. `items` and `properties` are optional so manifests registered before
+    nesting existed keep an identical canonical form, and therefore an identical hash.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["string", "integer", "number", "boolean", "enum"]
+    type: Literal["string", "integer", "number", "boolean", "enum", "object", "array"]
     description: str = Field(min_length=1, max_length=1000)
     labels: list[str] | None = None
+    items: ExtractField | None = None
+    properties: dict[str, ExtractField] | None = None
 
     @model_validator(mode="after")
-    def validate_enum_labels(self) -> ExtractField:
+    def validate_field_shape(self) -> ExtractField:
         if self.type == "enum":
             if not self.labels:
                 raise ValueError("enum fields require labels")
@@ -38,7 +70,55 @@ class ExtractField(BaseModel):
                 raise ValueError("enum fields support at most 500 labels")
         elif self.labels is not None:
             raise ValueError("labels are only valid for enum fields")
+
+        if self.type == "array":
+            if self.items is None:
+                raise ValueError("array fields require items")
+        elif self.items is not None:
+            raise ValueError("items are only valid for array fields")
+
+        if self.type == "object":
+            if not self.properties:
+                raise ValueError("object fields require properties")
+            invalid = [name for name in self.properties if not FIELD_NAME.fullmatch(name)]
+            if invalid:
+                raise ValueError(f"invalid extraction field name: {invalid[0]}")
+        elif self.properties is not None:
+            raise ValueError("properties are only valid for object fields")
         return self
+
+
+def schema_leaves(
+    schema: dict[str, ExtractField],
+) -> list[tuple[str, ExtractField]]:
+    """Every scalar leaf of the contract, keyed by its wildcard path.
+
+    A top-level scalar keeps its bare name (`total`); a leaf inside a repeated field uses the
+    wildcard form (`line_items[*].amount`), which is the same convention rule paths use.
+    """
+    leaves: list[tuple[str, ExtractField]] = []
+    for name, field in schema.items():
+        _collect_leaves(name, field, leaves, 1)
+    return leaves
+
+
+def _collect_leaves(
+    path: str, field: ExtractField, leaves: list[tuple[str, ExtractField]], depth: int
+) -> None:
+    if depth > MAX_SCHEMA_DEPTH:
+        raise ValueError(f"extraction schema nests deeper than {MAX_SCHEMA_DEPTH} levels")
+    if field.type == "array" and field.items is not None:
+        _collect_leaves(f"{path}[*]", field.items, leaves, depth + 1)
+    elif field.type == "object" and field.properties is not None:
+        for name, child in field.properties.items():
+            _collect_leaves(f"{path}.{name}", child, leaves, depth + 1)
+    else:
+        leaves.append((path, field))
+
+
+def policy_path(instance_path: str) -> str:
+    """Map an extracted instance path onto the wildcard path its policy is registered under."""
+    return re.sub(r"\[\d+\]", "[*]", instance_path)
 
 
 class FieldPolicy(BaseModel):
@@ -61,6 +141,9 @@ class RuleTerm(BaseModel):
 
     field_path: str = Field(min_length=1, max_length=200)
     sign: Literal["+", "-"] = "+"
+    # When set, the term folds every instance matching a wildcard path rather than reading one
+    # value, so line-item totals need no new rule type.
+    aggregate: Literal["sum"] | None = None
 
 
 class DocumentRule(BaseModel):
@@ -114,9 +197,12 @@ class SchemaManifest(BaseModel):
         invalid_names = [name for name in self.ai_extract_schema if not FIELD_NAME.fullmatch(name)]
         if invalid_names:
             raise ValueError(f"invalid extraction field name: {invalid_names[0]}")
-        schema_fields = set(self.ai_extract_schema)
+        leaves = schema_leaves(self.ai_extract_schema)
+        if len(leaves) > MAX_SCHEMA_LEAVES:
+            raise ValueError(f"extraction schema declares more than {MAX_SCHEMA_LEAVES} leaves")
+        schema_fields = {path for path, _ in leaves}
         if set(self.field_policies) != schema_fields:
-            raise ValueError("field_policies must define every extraction field exactly once")
+            raise ValueError("field_policies must define every extraction leaf exactly once")
         rule_ids: set[str] = set()
         for rule in self.document_rules:
             if rule.rule_id in rule_ids:
@@ -138,7 +224,7 @@ class SchemaManifest(BaseModel):
         for path in referenced:
             if RULE_PATH.fullmatch(path) is None:
                 raise ValueError(f"document rule references an invalid field path: {path}")
-            if rule_path_root(path) not in schema_fields:
+            if policy_path(path) not in schema_fields:
                 raise ValueError(f"document rule references unknown field: {path}")
 
         if rule.rule_type == "arithmetic_reconciliation":
@@ -171,7 +257,7 @@ class SchemaManifest(BaseModel):
 
     def canonical_json(self) -> str:
         return json.dumps(
-            self.model_dump(mode="json", exclude_none=True),
+            _normalise_numbers(self.model_dump(mode="json", exclude_none=True)),
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
