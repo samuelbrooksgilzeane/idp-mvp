@@ -66,5 +66,25 @@ async def latest_extraction(
     )
 
 
+@extraction_router.get(
+    "/documents/{document_id}/extractions/{extraction_run_id}",
+    response_model=ExtractionResultResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def extraction_result(
+    document_id: str,
+    extraction_run_id: str,
+    service: Annotated[ExtractionService, Depends(get_extraction_service)],
+) -> ExtractionResultResponse:
+    run, fields, candidate = await service.result(document_id, extraction_run_id)
+    return ExtractionResultResponse(
+        run=_run_response(run),
+        fields=[ExtractedFieldResponse.model_validate(field) for field in fields],
+        candidate=(
+            InvoiceCandidateResponse.model_validate(candidate) if candidate is not None else None
+        ),
+    )
+
+
 def _run_response(run: ExtractionRunRecord) -> ExtractionRunResponse:
     return ExtractionRunResponse.model_validate(run)

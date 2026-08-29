@@ -1,7 +1,9 @@
 import { Clock3, FileSearch, LoaderCircle, Play, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
 
 import type { DocumentRecord, ParseRun } from "../App";
-import { DocumentViewer } from "./DocumentViewer";
+import { DocumentViewer, type CitationTarget } from "./DocumentViewer";
+import { ExtractionPanel } from "./ExtractionPanel";
 import { SchemaViewer } from "./SchemaViewer";
 
 type DocumentDetailProps = {
@@ -10,6 +12,7 @@ type DocumentDetailProps = {
   loading: boolean;
   starting: boolean;
   onParse: () => void;
+  onDocumentsChanged: () => void;
 };
 
 const formatter = new Intl.DateTimeFormat(undefined, {
@@ -23,7 +26,15 @@ export function DocumentDetail({
   loading,
   starting,
   onParse,
+  onDocumentsChanged,
 }: DocumentDetailProps) {
+  const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(null);
+  const documentId = document?.document_id ?? null;
+
+  useEffect(() => {
+    setCitationTarget(null);
+  }, [documentId]);
+
   if (!document) {
     return (
       <section className="document-detail empty-detail" aria-label="Document detail">
@@ -75,6 +86,13 @@ export function DocumentDetail({
       <DocumentViewer
         documentId={document.document_id}
         documentStatus={document.status}
+        citationTarget={citationTarget}
+      />
+
+      <ExtractionPanel
+        document={document}
+        onViewEvidence={setCitationTarget}
+        onDocumentsChanged={onDocumentsChanged}
       />
 
       <SchemaViewer useCase={document.use_case} />

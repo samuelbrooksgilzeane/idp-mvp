@@ -276,6 +276,7 @@ export function App() {
               loading={runsLoading}
               starting={startingParse}
               onParse={() => void handleParse()}
+              onDocumentsChanged={() => void loadDocuments()}
             />
           </div>
         </section>

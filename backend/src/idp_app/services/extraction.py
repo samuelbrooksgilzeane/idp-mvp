@@ -181,6 +181,24 @@ class ExtractionService:
         candidate = await run_in_threadpool(self._runs.get_candidate, run.extraction_run_id)
         return run, fields, candidate
 
+    async def result(
+        self, document_id: str, extraction_run_id: str
+    ) -> tuple[ExtractionRunRecord, list[ExtractedFieldRecord], InvoiceCandidateRecord | None]:
+        document = await run_in_threadpool(self._documents.get, document_id)
+        if document is None:
+            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
+        run = await run_in_threadpool(self._runs.get, extraction_run_id)
+        if run is None or run.document_id != document_id:
+            raise DocumentServiceError(
+                "EXTRACTION_RUN_NOT_FOUND",
+                "Extraction run not found for this document.",
+                404,
+                document_id=document_id,
+            )
+        fields = await run_in_threadpool(self._runs.list_fields, run.extraction_run_id)
+        candidate = await run_in_threadpool(self._runs.get_candidate, run.extraction_run_id)
+        return run, fields, candidate
+
     async def _refresh(self, run: ExtractionRunRecord) -> None:
         assert run.job_run_id is not None
         poll = await run_in_threadpool(self._jobs.poll, run.job_run_id)

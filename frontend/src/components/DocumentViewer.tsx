@@ -18,7 +18,11 @@ import {
 } from "react";
 
 import type { DocumentStatus } from "../App";
-import { scaleBoundingBox } from "./viewerGeometry";
+import {
+  citationToBox,
+  scaleBoundingBox,
+  type CitationCoordinate,
+} from "./viewerGeometry";
 
 export type PageMetadata = {
   page_id: number;
@@ -45,6 +49,13 @@ export type ParsedElement = {
   boxes: ElementBox[];
 };
 
+export type CitationTarget = {
+  pageId: number;
+  fieldLabel: string;
+  boxes: CitationCoordinate[];
+  nonce: number;
+};
+
 type Size = { width: number; height: number };
 type ViewerState =
   | { kind: "idle" }
@@ -56,11 +67,16 @@ type ViewerState =
 type DocumentViewerProps = {
   documentId: string;
   documentStatus: DocumentStatus;
+  citationTarget?: CitationTarget | null;
 };
 
 const zoomLevels = [75, 100, 125, 150, 200];
 
-export function DocumentViewer({ documentId, documentStatus }: DocumentViewerProps) {
+export function DocumentViewer({
+  documentId,
+  documentStatus,
+  citationTarget,
+}: DocumentViewerProps) {
   const [viewer, setViewer] = useState<ViewerState>({ kind: "idle" });
   const [pageIndex, setPageIndex] = useState(0);
   const [zoom, setZoom] = useState(100);
@@ -165,9 +181,22 @@ export function DocumentViewer({ documentId, documentStatus }: DocumentViewerPro
     return () => observer.disconnect();
   }, [imageState, zoom, currentPage]);
 
+  useEffect(() => {
+    if (!citationTarget || viewer.kind !== "ready") return;
+    const index = viewer.pages.findIndex((page) => page.page_id === citationTarget.pageId);
+    if (index >= 0) setPageIndex(index);
+  }, [citationTarget, viewer]);
+
   const visibleElements = useMemo(
     () => elements.filter((element) => selectedTypes.has(element.element_type)),
     [elements, selectedTypes],
+  );
+  const citationBoxes = useMemo(
+    () =>
+      citationTarget && currentPage
+        ? citationTarget.boxes.filter((box) => box.page_id === currentPage.page_id)
+        : [],
+    [citationTarget, currentPage],
   );
   const selectedElement =
     elements.find((element) => element.element_id === selectedElementId) ?? null;
@@ -317,6 +346,13 @@ export function DocumentViewer({ documentId, documentStatus }: DocumentViewerPro
             ))}
           </div>
 
+          {citationTarget && citationBoxes.length > 0 ? (
+            <div className="citation-legend" role="status">
+              <span className="citation-swatch" aria-hidden="true" />
+              Highlighting extraction evidence for <strong>{citationTarget.fieldLabel}</strong>
+            </div>
+          ) : null}
+
           <div className="viewer-workspace">
             <div className="page-viewport" aria-busy={imageState === "loading"}>
               {imageState === "loading" ? <div className="page-image-skeleton" /> : null}
@@ -366,6 +402,31 @@ export function DocumentViewer({ documentId, documentStatus }: DocumentViewerPro
                         );
                       }),
                     )}
+                  </div>
+                ) : null}
+                {imageState === "ready" && citationTarget && citationBoxes.length > 0 ? (
+                  <div
+                    className="citation-overlay"
+                    aria-label={`Evidence for ${citationTarget.fieldLabel}`}
+                  >
+                    {citationBoxes.map((citation, index) => {
+                      const scaled = scaleBoundingBox(
+                        citationToBox(citation),
+                        naturalSize,
+                        renderedSize,
+                      );
+                      return (
+                        <div
+                          className="citation-box"
+                          style={boxStyle(scaled)}
+                          key={`citation-${citationTarget.nonce}-${index}`}
+                          role="img"
+                          aria-label={`Cited evidence for ${citationTarget.fieldLabel} on page ${currentPage.page_number}`}
+                        >
+                          <span aria-hidden="true">{citationTarget.fieldLabel}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>

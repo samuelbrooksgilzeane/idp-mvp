@@ -506,3 +506,69 @@ def _parse_record():
         started_at=now,
         completed_at=now,
     )
+
+
+def _pdf_bytes_variant() -> bytes:
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "Seller: Beacon Trading Co\n"
+        "Invoice Number: INV-2099\n"
+        "Invoice Date: 2026-01-15\n"
+        "Total: 42.00\n"
+        "Currency: USD",
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def test_extraction_result_endpoint_serves_historical_run_and_rejects_foreign(
+    tmp_path: Path,
+) -> None:
+    client, _ = _client(tmp_path)
+    document = _upload(client)
+    document_id = document["document_id"]
+    _wait_parse(client, document_id)
+
+    body = {"schema_id": "invoice", "schema_version": 1}
+    assert client.post(f"/api/documents/{document_id}/extract", json=body).status_code == 202
+    _wait_extraction(client, document_id)
+    assert client.post(f"/api/documents/{document_id}/extract", json=body).status_code == 202
+    _wait_extraction(client, document_id)
+
+    runs = client.get(f"/api/documents/{document_id}/extraction-runs").json()
+    assert len(runs) == 2
+    older_run_id = runs[1]["extraction_run_id"]
+    latest_run_id = runs[0]["extraction_run_id"]
+    assert older_run_id != latest_run_id
+
+    # The non-latest run remains fully inspectable with its own fields and candidate.
+    historical = client.get(f"/api/documents/{document_id}/extractions/{older_run_id}")
+    assert historical.status_code == 200
+    payload = historical.json()
+    assert payload["run"]["extraction_run_id"] == older_run_id
+    assert len(payload["fields"]) == 8
+    assert payload["candidate"]["extraction_run_id"] == older_run_id
+
+    # An unknown run id is not found.
+    unknown = client.get(
+        f"/api/documents/{document_id}/extractions/00000000-0000-4000-8000-000000000000"
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["error"]["code"] == "EXTRACTION_RUN_NOT_FOUND"
+
+    # A run that belongs to a different document cannot be read through this document.
+    other = client.post(
+        "/api/documents",
+        files=[("files", ("other.pdf", _pdf_bytes_variant(), "application/pdf"))],
+    ).json()["documents"][0]
+    other_id = other["document_id"]
+    _wait_parse(client, other_id)
+    assert client.post(f"/api/documents/{other_id}/extract", json=body).status_code == 202
+    other_run = _wait_extraction(client, other_id)["extraction_run_id"]
+
+    foreign = client.get(f"/api/documents/{document_id}/extractions/{other_run}")
+    assert foreign.status_code == 404
+    assert foreign.json()["error"]["code"] == "EXTRACTION_RUN_NOT_FOUND"

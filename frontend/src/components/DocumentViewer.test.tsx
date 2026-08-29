@@ -124,6 +124,48 @@ describe("DocumentViewer", () => {
     expect(screen.getByText("The retained parse metadata is still available.")).toBeInTheDocument();
   });
 
+  it("navigates to a cited page and draws a scaled, distinct citation box", async () => {
+    vi.stubGlobal("fetch", viewerFetch());
+    const { rerender } = render(
+      <DocumentViewer documentId={documentId} documentStatus="PARSED" citationTarget={null} />,
+    );
+
+    const firstImage = await screen.findByAltText("Rendered page 1");
+    setImageDimensions(firstImage, 1600, 2200, 800, 1100);
+    fireEvent.load(firstImage);
+
+    rerender(
+      <DocumentViewer
+        documentId={documentId}
+        documentStatus="PARSED"
+        citationTarget={{
+          pageId: 1,
+          fieldLabel: "total",
+          nonce: 1,
+          boxes: [{ page_id: 1, coord: [180, 1900, 1000, 1990] }],
+        }}
+      />,
+    );
+
+    // The viewer jumps to the page whose page_id matches the citation.
+    const secondImage = await screen.findByAltText("Rendered page 2");
+    setImageDimensions(secondImage, 1600, 2200, 800, 1100);
+    fireEvent.load(secondImage);
+
+    const citation = await screen.findByRole("img", {
+      name: /Cited evidence for total on page 2/,
+    });
+    expect(citation).toHaveStyle({
+      transform: "translate3d(90px, 950px, 0)",
+      width: "410px",
+      height: "45px",
+    });
+    // Distinct from parse-element overlays (those are buttons) and announced.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Highlighting extraction evidence for total",
+    );
+  });
+
   it("shows an intentional empty state before parsing", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
