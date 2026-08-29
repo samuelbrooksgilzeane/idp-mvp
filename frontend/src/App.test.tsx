@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
@@ -24,6 +25,14 @@ const document = {
   updated_at: "2026-08-28T09:00:00Z",
 };
 
+function renderApp(path = "/") {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -33,15 +42,15 @@ describe("App", () => {
   it("renders document intake with proxied health and an empty registry", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
       ok: true,
-      json: async () => input.toString().endsWith("/health") ? health : [],
+      json: async () => (input.toString().endsWith("/health") ? health : []),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    renderApp();
 
-    expect(screen.getByRole("heading", { name: "Inspect and prepare extraction" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Upload and track documents" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "MVP workflow" })).toHaveTextContent("Ingest");
+    expect(screen.getByRole("navigation", { name: "Sections" })).toHaveTextContent("Documents");
     await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText("No documents registered")).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith(
@@ -55,11 +64,11 @@ describe("App", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => ({
         ok: true,
-        json: async () => input.toString().endsWith("/health") ? health : [document],
+        json: async () => (input.toString().endsWith("/health") ? health : [document]),
       })),
     );
 
-    render(<App />);
+    renderApp();
 
     await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
     expect(screen.getByText("CASE-1042")).toBeInTheDocument();
@@ -69,9 +78,7 @@ describe("App", () => {
 
   it("shows a deterministic duplicate explanation from the upload API", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (input.toString().endsWith("/health")) {
-        return { ok: true, json: async () => health };
-      }
+      if (input.toString().endsWith("/health")) return { ok: true, json: async () => health };
       if (init?.method === "POST") {
         return {
           ok: false,
@@ -87,13 +94,11 @@ describe("App", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
 
     const file = new File(["%PDF-1.7"], "invoice-copy.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/Choose PDF files/), {
-      target: { files: [file] },
-    });
+    fireEvent.change(screen.getByLabelText(/Choose PDF files/), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Register documents" }));
 
     await waitFor(() =>
@@ -106,61 +111,47 @@ describe("App", () => {
     expect(Array.from((post?.[1]?.body as FormData).keys())).not.toContain("storage_path");
   });
 
-  it("starts parsing, polls the run, and shows immutable history", async () => {
-    const runningRun = {
-      parse_run_id: "2db4e559-76d0-4e9e-a0de-d17e84699fca",
-      document_id: document.document_id,
-      parser_version: "2.0",
-      status: "RUNNING",
-      page_count: null,
-      parse_error: null,
-      requested_by: "analyst@example.com",
-      started_at: "2026-08-28T09:05:00Z",
-      completed_at: null,
-    };
-    const successfulRun = {
-      ...runningRun,
-      status: "SUCCESS",
-      page_count: 2,
-      completed_at: "2026-08-28T09:05:02Z",
-    };
-    let parsed = false;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = input.toString();
-      if (url.endsWith("/health")) return { ok: true, json: async () => health };
-      if (url.endsWith("/parse") && init?.method === "POST") {
-        return { ok: true, json: async () => runningRun };
-      }
-      if (url.includes("/api/runs/")) {
-        parsed = true;
-        return { ok: true, json: async () => successfulRun };
-      }
-      if (url.endsWith("/parse-runs")) {
-        return { ok: true, json: async () => parsed ? [successfulRun] : [] };
-      }
-      return {
-        ok: true,
-        json: async () => [{ ...document, status: parsed ? "PARSED" : "UPLOADED" }],
-      };
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("navigates from the registry to a document's own route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        if (url.endsWith("/health")) return { ok: true, json: async () => health };
+        if (url.endsWith(`/api/documents/${document.document_id}`)) {
+          return { ok: true, json: async () => document };
+        }
+        if (url.endsWith("/parse-runs")) return { ok: true, json: async () => [] };
+        if (url.endsWith("/pages")) return { ok: true, status: 200, json: async () => [] };
+        return { ok: true, json: async () => [document] };
+      }),
+    );
 
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "invoice-1042.pdf" }));
-    await waitFor(() => expect(screen.getByText("No parse attempts recorded.")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "Parse document" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Parsing" })).toBeDisabled());
-    await waitFor(
-      () => expect(screen.getByText("Document parsed successfully.")).toBeInTheDocument(),
-      { timeout: 1500 },
+    // The detail route renders its own heading and tabs.
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Inspect a document" })).toBeInTheDocument(),
     );
-    expect(screen.getAllByText("SUCCESS").length).toBeGreaterThan(0);
-    expect(screen.getByText("2db4e559")).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/documents/${document.document_id}/parse`,
-      { method: "POST" },
+    expect(screen.getByRole("tab", { name: "Pages" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /All documents/ })).toBeInTheDocument();
+  });
+
+  it("serves the schema contract from its own route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => ({
+        ok: true,
+        json: async () => (input.toString().endsWith("/health") ? health : []),
+      })),
     );
+
+    renderApp("/schema");
+
+    expect(
+      await screen.findByRole("heading", { name: "Extraction contract" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Approved field specification" })).toBeInTheDocument();
   });
 });

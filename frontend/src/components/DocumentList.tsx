@@ -1,6 +1,6 @@
 import { FileText, RefreshCw } from "lucide-react";
 
-import type { DocumentRecord } from "../App";
+import type { DocumentRecord } from "../types";
 
 type DocumentListProps = {
   documents: DocumentRecord[];

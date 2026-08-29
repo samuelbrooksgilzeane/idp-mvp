@@ -29,11 +29,13 @@ button:disabled { cursor: not-allowed; }
 .brand-lockup strong { font-size: 15px; }
 .brand-lockup div span { color: #676d67; font-size: 12px; }
 .workflow-steps { margin: 0; padding: 0; display: flex; list-style: none; }
-.workflow-steps li { position: relative; min-width: 96px; padding: 8px 18px 8px 22px; color: #8a8e89; border-left: 1px solid #d7d8d1; font-size: 13px; }
-.workflow-steps li span { display: block; margin-bottom: 3px; color: #a3a7a2; font-size: 10px; }
-.workflow-steps li.active { color: #202420; font-weight: 700; }
-.workflow-steps li.complete { color: #49745f; }
-.workflow-steps li.active::after { content: ""; position: absolute; left: 22px; bottom: 0; width: 22px; height: 2px; background: #1f7a52; }
+.workflow-steps li { position: relative; border-left: 1px solid #d7d8d1; }
+.workflow-steps a { position: relative; display: block; min-width: 108px; padding: 8px 18px 10px 22px; color: #8a8e89; font-size: 13px; text-decoration: none; }
+.workflow-steps a span { display: block; margin-bottom: 3px; color: #a3a7a2; font-size: 10px; }
+.workflow-steps a:hover { color: #3c423c; }
+.workflow-steps a.active { color: #202420; font-weight: 700; }
+.workflow-steps a.active::after { content: ""; position: absolute; left: 22px; bottom: 0; width: 22px; height: 2px; background: #1f7a52; }
+.workflow-steps a:focus-visible { outline: 3px solid #1f7a52; outline-offset: -3px; }
 
 main { width: min(1440px, 100%); margin: 0 auto; padding: 48px clamp(24px, 5vw, 72px) 64px; }
 .page-heading { display: flex; align-items: end; justify-content: space-between; gap: 48px; padding-bottom: 36px; border-bottom: 1px solid #bfc2bb; }
@@ -366,6 +368,21 @@ td:first-child { min-width: 190px; }
 .line-item-table td small { display: block; margin-top: 3px; color: #868c86; font-size: 8px; }
 .evidence-link { margin-top: 5px; padding: 2px 5px; display: inline-flex; align-items: center; border: 1px solid #c2410c; border-radius: 3px; background: #fff; color: #9a3412; }
 .evidence-link:hover { background: #fdf3ec; }
+
+/* Routed pages, section tabs and shared page states */
+.page-state { min-height: 220px; display: grid; place-items: center; align-content: center; gap: 8px; padding: 40px 20px; color: #757b75; text-align: center; }
+.page-state strong { color: #3a403a; font-size: 14px; }
+.page-state span { max-width: 460px; font-size: 12px; line-height: 1.55; }
+.back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 18px; color: #5c635c; font-size: 11px; font-weight: 650; text-decoration: none; }
+.back-link:hover { color: #1f7a52; text-decoration: underline; text-underline-offset: 3px; }
+.detail-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 22px 0 0; border-bottom: 1px solid #d7d8d1; }
+.detail-tabs button { min-height: 38px; padding: 0 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: #6e756e; font-size: 12px; font-weight: 650; }
+.detail-tabs button:hover { color: #2d332d; }
+.detail-tabs button.active { border-bottom-color: #1f7a52; color: #202420; font-weight: 750; }
+.detail-tabs button:focus-visible { outline: 3px solid #1f7a52; outline-offset: -3px; }
+.detail-tab-panel { padding-top: 26px; }
+.detail-tab-panel .document-viewer, .detail-tab-panel .extraction-panel,
+.detail-tab-panel .validation-panel, .detail-tab-panel .schema-viewer { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
 
 footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #777c77; border-top: 1px solid #d7d8d1; font-size: 11px; }
 

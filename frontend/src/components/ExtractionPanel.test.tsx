@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { DocumentRecord } from "../App";
+import type { DocumentRecord } from "../types";
 import type { CitationTarget } from "./DocumentViewer";
 import { ExtractionPanel } from "./ExtractionPanel";
 

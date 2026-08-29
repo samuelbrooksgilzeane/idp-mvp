@@ -17,7 +17,7 @@ import {
   type CSSProperties,
 } from "react";
 
-import type { DocumentStatus } from "../App";
+import type { DocumentStatus } from "../types";
 import {
   citationToBox,
   scaleBoundingBox,

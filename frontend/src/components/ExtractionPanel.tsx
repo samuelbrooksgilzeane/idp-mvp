@@ -1,7 +1,7 @@
 import { FileText, LoaderCircle, MapPin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { DocumentRecord } from "../App";
+import type { DocumentRecord } from "../types";
 import type { CitationTarget } from "./DocumentViewer";
 import type { CitationCoordinate } from "./viewerGeometry";
 
