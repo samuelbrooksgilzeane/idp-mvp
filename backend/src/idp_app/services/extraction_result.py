@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -10,6 +11,7 @@ from idp_app.services.document_models import (
     ExtractedFieldRecord,
     ExtractionRunRecord,
     InvoiceCandidateRecord,
+    InvoiceLineCandidateRecord,
 )
 from idp_app.services.schema_models import ExtractField, SchemaRecord
 
@@ -85,6 +87,40 @@ def build_invoice_candidate(
         extraction_run_id=run.extraction_run_id,
         schema_version=run.schema_version,
     )
+
+
+# `line_items[0].amount` style paths produced by the recursive flattener.
+LINE_ITEM_PATH = re.compile(r"^line_items\[(\d+)\]\.(.+)$")
+
+
+def build_invoice_line_candidates(
+    run: ExtractionRunRecord, fields: list[ExtractedFieldRecord]
+) -> list[InvoiceLineCandidateRecord]:
+    """Project the repeated line leaves into typed rows.
+
+    Only lines the model actually returned produce rows, so an invoice with no line table
+    yields none rather than a zero-valued row that could be mistaken for a real line.
+    """
+    grouped: dict[int, dict[str, ExtractedFieldRecord]] = {}
+    for field in fields:
+        match = LINE_ITEM_PATH.match(field.field_path)
+        if match is None:
+            continue
+        grouped.setdefault(int(match.group(1)), {})[match.group(2)] = field
+    return [
+        InvoiceLineCandidateRecord(
+            extraction_run_id=run.extraction_run_id,
+            document_id=run.document_id,
+            # One-based for reading; the matching evidence path is line_items[line_number - 1].
+            line_number=index + 1,
+            description=_string_value(leaves.get("description")),
+            quantity=_decimal_value(leaves.get("quantity"), "0.0001"),
+            unit_price=_decimal_value(leaves.get("unit_price")),
+            tax=_decimal_value(leaves.get("tax")),
+            amount=_decimal_value(leaves.get("amount")),
+        )
+        for index, leaves in sorted(grouped.items())
+    ]
 
 
 def _flatten_scalar(
@@ -199,10 +235,12 @@ def _date_value(field: ExtractedFieldRecord | None) -> date | None:
     return None
 
 
-def _decimal_value(field: ExtractedFieldRecord | None) -> Decimal | None:
+def _decimal_value(
+    field: ExtractedFieldRecord | None, exponent: str = "0.01"
+) -> Decimal | None:
     if field is None or field.value is None or isinstance(field.value, bool):
         return None
     try:
-        return Decimal(str(field.value)).quantize(Decimal("0.01"))
+        return Decimal(str(field.value)).quantize(Decimal(exponent))
     except (InvalidOperation, ValueError):
         return None

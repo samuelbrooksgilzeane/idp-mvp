@@ -92,6 +92,12 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_candidates
             permission: SELECT
+        - name: invoice-lines-modify
+          description: Record and read typed billed lines for an extraction.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_line_candidates
+            permission: MODIFY
         - name: validation-runs-modify
           description: Record immutable deterministic validation attempts.
           uc_securable:

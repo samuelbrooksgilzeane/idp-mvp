@@ -99,6 +99,20 @@ class InvoiceCandidateRecord:
 
 
 @dataclass(frozen=True)
+class InvoiceLineCandidateRecord:
+    """One typed billed line. Candidate data is not approved data."""
+
+    extraction_run_id: str
+    document_id: str
+    line_number: int
+    description: str | None
+    quantity: Decimal | None
+    unit_price: Decimal | None
+    tax: Decimal | None
+    amount: Decimal | None
+
+
+@dataclass(frozen=True)
 class ValidationResultRecord:
     """One immutable observation produced by a validator. It never edits extracted data."""
 

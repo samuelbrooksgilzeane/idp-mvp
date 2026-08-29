@@ -2,6 +2,7 @@ import sqlite3
 import time
 from dataclasses import replace
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import pymupdf
@@ -572,3 +573,88 @@ def test_extraction_result_endpoint_serves_historical_run_and_rejects_foreign(
     foreign = client.get(f"/api/documents/{document_id}/extractions/{other_run}")
     assert foreign.status_code == 404
     assert foreign.json()["error"]["code"] == "EXTRACTION_RUN_NOT_FOUND"
+
+
+def _pdf_with_lines(total: str = "500.00") -> bytes:
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text(
+        (72, 72),
+        "Seller: Acme Supplies Ltd\n"
+        "Invoice Number: INV-3300\n"
+        "Invoice Date: 2026-08-29\n"
+        "LINE: 3 x Widget A @ 100.00 tax 0.00 = 300.00\n"
+        "LINE: 2 x Widget B @ 100.00 tax 0.00 = 200.00\n"
+        "Subtotal: 500.00\n"
+        "Discount: 0.00\n"
+        "Tax: 0.00\n"
+        f"Total: {total}\n"
+        "Currency: GBP",
+    )
+    content = document.tobytes()
+    document.close()
+    return content
+
+
+def _extract_v3(client: TestClient, content: bytes, name: str) -> str:
+    uploaded = client.post("/api/documents", files=[("files", (name, content, "application/pdf"))])
+    assert uploaded.status_code == 201
+    document_id = uploaded.json()["documents"][0]["document_id"]
+    _wait_parse(client, document_id)
+    assert client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": "invoice", "schema_version": 3},
+    ).status_code == 202
+    assert _wait_extraction(client, document_id)["status"] == "EXTRACTED"
+    return document_id
+
+
+def test_typed_line_candidates_are_persisted_with_decimal_scale(tmp_path: Path) -> None:
+    client, settings = _client(tmp_path)
+    document_id = _extract_v3(client, _pdf_with_lines(), "lines.pdf")
+
+    repository = SQLiteExtractionRunRepository(settings.local_data_dir / "registry.sqlite3")
+    run_id = client.get(f"/api/documents/{document_id}/extraction-runs").json()[0][
+        "extraction_run_id"
+    ]
+    lines = repository.list_lines(run_id)
+
+    assert [line.line_number for line in lines] == [1, 2]
+    first, second = lines
+    assert first.description == "Widget A"
+    # Money keeps two places and quantity four, matching the governed column types.
+    assert first.quantity == Decimal("3.0000")
+    assert first.unit_price == Decimal("100.00")
+    assert first.amount == Decimal("300.00")
+    assert second.amount == Decimal("200.00")
+    assert sum((line.amount or Decimal("0")) for line in lines) == Decimal("500.00")
+    assert all(line.document_id == document_id for line in lines)
+
+
+def test_an_invoice_without_lines_produces_no_line_rows(tmp_path: Path) -> None:
+    """An absent line table must not become a zero-valued row that reads as a real line."""
+    client, settings = _client(tmp_path)
+    document_id = _extract_v3(client, _pdf_bytes(), "no-lines.pdf")
+
+    repository = SQLiteExtractionRunRepository(settings.local_data_dir / "registry.sqlite3")
+    run_id = client.get(f"/api/documents/{document_id}/extraction-runs").json()[0][
+        "extraction_run_id"
+    ]
+    assert repository.list_lines(run_id) == []
+
+
+def test_line_candidates_are_immutable_per_run(tmp_path: Path) -> None:
+    client, settings = _client(tmp_path)
+    document_id = _extract_v3(client, _pdf_with_lines(), "first.pdf")
+    assert client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": "invoice", "schema_version": 3},
+    ).status_code == 202
+    assert _wait_extraction(client, document_id)["status"] == "EXTRACTED"
+
+    runs = client.get(f"/api/documents/{document_id}/extraction-runs").json()
+    repository = SQLiteExtractionRunRepository(settings.local_data_dir / "registry.sqlite3")
+    assert len(runs) == 2
+    # Each attempt keeps its own typed lines rather than overwriting the earlier ones.
+    for run in runs:
+        assert len(repository.list_lines(run["extraction_run_id"])) == 2

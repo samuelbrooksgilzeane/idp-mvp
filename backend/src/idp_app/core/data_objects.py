@@ -7,6 +7,7 @@ TABLE_NAMES = (
     "extraction_runs",
     "extracted_fields",
     "invoice_candidates",
+    "invoice_line_candidates",
     "validation_results",
     "validation_runs",
 )

@@ -136,6 +136,21 @@ USING DELTA
 COMMENT 'Invoice-shaped candidate data that has not received human approval';
 
 CREATE TABLE IF NOT EXISTS IDENTIFIER(
+  :catalog || '.' || :project_schema || '.' || :table_prefix || '_invoice_line_candidates'
+) (
+  extraction_run_id STRING COMMENT 'Extraction attempt that produced this line',
+  document_id STRING COMMENT 'Registered source document identifier',
+  line_number INT COMMENT 'One-based line position; evidence is at line_items[line_number - 1]',
+  description STRING COMMENT 'Line description exactly as stated on the invoice',
+  quantity DECIMAL(18,4) COMMENT 'Stated quantity for the line',
+  unit_price DECIMAL(18,2) COMMENT 'Stated price per unit for the line',
+  tax DECIMAL(18,2) COMMENT 'Tax stated on the line itself',
+  amount DECIMAL(18,2) COMMENT 'Stated line total'
+)
+USING DELTA
+COMMENT 'Typed billed lines that have not received human approval';
+
+CREATE TABLE IF NOT EXISTS IDENTIFIER(
   :catalog || '.' || :project_schema || '.' || :table_prefix || '_validation_results'
 ) (
   validation_run_id STRING COMMENT 'Immutable validation attempt identifier',

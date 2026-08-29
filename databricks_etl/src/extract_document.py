@@ -17,6 +17,8 @@ UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 EXTRACTOR_VERSION = "2.1"
+# `line_items[0].amount` style paths produced by the recursive flattener.
+LINE_ITEM_PATH = re.compile(r"^line_items\[(\d+)\]\.(.+)$")
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,7 @@ def main() -> None:
     extraction_runs = qualified(parameters, "extraction_runs")
     extracted_fields = qualified(parameters, "extracted_fields")
     invoice_candidates = qualified(parameters, "invoice_candidates")
+    invoice_line_candidates = qualified(parameters, "invoice_line_candidates")
 
     try:
         run = spark.sql(  # type: ignore[name-defined]  # noqa: F821
@@ -265,6 +268,7 @@ def main() -> None:
         write_fields(extracted_fields, fields)
         candidate = build_candidate(parameters, document, fields)
         write_candidate(invoice_candidates, candidate)
+        write_line_candidates(invoice_line_candidates, build_line_candidates(parameters, fields))
 
         spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""
@@ -522,13 +526,78 @@ def parse_date(value: object) -> date | None:
     return None
 
 
-def parse_decimal(value: object) -> Decimal | None:
+def parse_decimal(value: object, exponent: str = "0.01") -> Decimal | None:
     if value is None or isinstance(value, bool):
         return None
     try:
-        return Decimal(str(value)).quantize(Decimal("0.01"))
+        return Decimal(str(value)).quantize(Decimal(exponent))
     except (InvalidOperation, ValueError):
         return None
+
+
+def build_line_candidates(
+    parameters: Parameters, fields: list[dict[str, Any]]
+) -> list[tuple[object, ...]]:
+    """Project the repeated line leaves into typed rows.
+
+    Only lines the model actually returned produce rows, so an invoice with no line table
+    yields none rather than a zero-valued row that could be mistaken for a real line.
+    """
+    grouped: dict[int, dict[str, Any]] = {}
+    for field in fields:
+        match = LINE_ITEM_PATH.match(field["field_path"])
+        if match is None:
+            continue
+        grouped.setdefault(int(match.group(1)), {})[match.group(2)] = field["value"]
+    return [
+        (
+            parameters.extraction_run_id,
+            parameters.document_id,
+            # One-based for reading; the matching evidence path is line_items[line_number - 1].
+            index + 1,
+            string_or_none(leaves.get("description")),
+            parse_decimal(leaves.get("quantity"), "0.0001"),
+            parse_decimal(leaves.get("unit_price")),
+            parse_decimal(leaves.get("tax")),
+            parse_decimal(leaves.get("amount")),
+        )
+        for index, leaves in sorted(grouped.items())
+    ]
+
+
+def write_line_candidates(table: str, lines: list[tuple[object, ...]]) -> None:
+    if not lines:
+        return
+    from pyspark.sql.types import (  # type: ignore[import-not-found]
+        DecimalType,
+        IntegerType,
+        StringType,
+        StructField,
+        StructType,
+    )
+
+    names = (
+        "extraction_run_id", "document_id", "line_number", "description",
+        "quantity", "unit_price", "tax", "amount",
+    )
+    line_schema = StructType(
+        [
+            StructField("extraction_run_id", StringType(), False),
+            StructField("document_id", StringType(), False),
+            StructField("line_number", IntegerType(), False),
+            StructField("description", StringType(), True),
+            StructField("quantity", DecimalType(18, 4), True),
+            StructField("unit_price", DecimalType(18, 2), True),
+            StructField("tax", DecimalType(18, 2), True),
+            StructField("amount", DecimalType(18, 2), True),
+        ]
+    )
+    spark.createDataFrame(lines, line_schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
+        "idp_invoice_lines_to_insert"
+    )
+    spark.sql(  # type: ignore[name-defined]  # noqa: F821
+        f"INSERT INTO {table} SELECT {', '.join(names)} FROM idp_invoice_lines_to_insert"
+    )
 
 
 def write_candidate(table: str, candidate: tuple[object, ...]) -> None:

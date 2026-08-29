@@ -11,6 +11,7 @@ from idp_app.services.document_models import (
     ExtractedFieldRecord,
     ExtractionRunRecord,
     InvoiceCandidateRecord,
+    InvoiceLineCandidateRecord,
 )
 from idp_app.services.document_registry import DatabricksDocumentRegistry
 
@@ -32,6 +33,17 @@ RUN_COLUMNS = (
     "completed_at",
 )
 
+LINE_COLUMNS = (
+    "extraction_run_id",
+    "document_id",
+    "line_number",
+    "description",
+    "quantity",
+    "unit_price",
+    "tax",
+    "amount",
+)
+
 
 class ExtractionRunRepository(Protocol):
     def create(self, run: ExtractionRunRecord) -> None: ...
@@ -45,6 +57,7 @@ class ExtractionRunRepository(Protocol):
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
         candidate: InvoiceCandidateRecord,
+        lines: list[InvoiceLineCandidateRecord],
     ) -> None: ...
 
     def fail(self, extraction_run_id: str, error_message: str) -> None: ...
@@ -58,6 +71,8 @@ class ExtractionRunRepository(Protocol):
     def list_fields(self, extraction_run_id: str) -> list[ExtractedFieldRecord]: ...
 
     def get_candidate(self, extraction_run_id: str) -> InvoiceCandidateRecord | None: ...
+
+    def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]: ...
 
 
 class SQLiteExtractionRunRepository:
@@ -106,6 +121,17 @@ class SQLiteExtractionRunRepository:
                     citations TEXT NOT NULL,
                     extraction_error TEXT,
                     PRIMARY KEY (extraction_run_id, field_path)
+                );
+                CREATE TABLE IF NOT EXISTS invoice_line_candidates (
+                    extraction_run_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    line_number INTEGER NOT NULL,
+                    description TEXT,
+                    quantity TEXT,
+                    unit_price TEXT,
+                    tax TEXT,
+                    amount TEXT,
+                    PRIMARY KEY (extraction_run_id, line_number)
                 );
                 CREATE TABLE IF NOT EXISTS invoice_candidates (
                     case_id TEXT,
@@ -159,6 +185,7 @@ class SQLiteExtractionRunRepository:
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
         candidate: InvoiceCandidateRecord,
+        lines: list[InvoiceLineCandidateRecord],
     ) -> None:
         with self._connect() as connection:
             for field in fields:
@@ -176,6 +203,11 @@ class SQLiteExtractionRunRepository:
                 "extraction_run_id, schema_version) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 _candidate_values(candidate),
+            )
+            connection.executemany(
+                f"INSERT INTO invoice_line_candidates ({', '.join(LINE_COLUMNS)}) "
+                f"VALUES ({', '.join('?' for _ in LINE_COLUMNS)})",
+                [_line_values(line) for line in lines],
             )
             cursor = connection.execute(
                 "UPDATE extraction_runs SET status = 'EXTRACTED', error_message = NULL, "
@@ -238,6 +270,15 @@ class SQLiteExtractionRunRepository:
             ).fetchone()
         return _sqlite_row_to_candidate(row) if row else None
 
+    def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM invoice_line_candidates WHERE extraction_run_id = ? "
+                "ORDER BY line_number",
+                (extraction_run_id,),
+            ).fetchall()
+        return [_line_from_values([row[column] for column in LINE_COLUMNS]) for row in rows]
+
 
 class DatabricksExtractionRunRepository:
     def __init__(
@@ -252,6 +293,7 @@ class DatabricksExtractionRunRepository:
         self._runs = f"{prefix}_extraction_runs"
         self._fields = f"{prefix}_extracted_fields"
         self._candidates = f"{prefix}_invoice_candidates"
+        self._lines = f"{prefix}_invoice_line_candidates"
 
     def create(self, run: ExtractionRunRecord) -> None:
         self._sql.execute_sql(
@@ -297,6 +339,7 @@ class DatabricksExtractionRunRepository:
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
         candidate: InvoiceCandidateRecord,
+        lines: list[InvoiceLineCandidateRecord],
     ) -> None:
         for field in fields:
             self._sql.execute_sql(
@@ -325,6 +368,23 @@ class DatabricksExtractionRunRepository:
             ":currency, :extraction_run_id, CAST(:schema_version AS INT))",
             _candidate_parameters(candidate),
         )
+        for line in lines:
+            self._sql.execute_sql(
+                f"INSERT INTO {self._lines} VALUES (:extraction_run_id, :document_id, "
+                "CAST(:line_number AS INT), :description, "
+                "CAST(:quantity AS DECIMAL(18,4)), CAST(:unit_price AS DECIMAL(18,2)), "
+                "CAST(:tax AS DECIMAL(18,2)), CAST(:amount AS DECIMAL(18,2)))",
+                {
+                    "extraction_run_id": line.extraction_run_id,
+                    "document_id": line.document_id,
+                    "line_number": line.line_number,
+                    "description": line.description,
+                    "quantity": _text(line.quantity),
+                    "unit_price": _text(line.unit_price),
+                    "tax": _text(line.tax),
+                    "amount": _text(line.amount),
+                },
+            )
         self._sql.execute_sql(
             f"UPDATE {self._runs} SET status = 'EXTRACTED', error_message = NULL, "
             "completed_at = CURRENT_TIMESTAMP() WHERE extraction_run_id = :extraction_run_id "
@@ -384,6 +444,16 @@ class DatabricksExtractionRunRepository:
             {"extraction_run_id": extraction_run_id},
         )
         return _values_to_candidate(rows[0]) if rows else None
+
+    def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]:
+        rows = self._sql.execute_sql(
+            "SELECT extraction_run_id, document_id, CAST(line_number AS STRING), description, "
+            "CAST(quantity AS STRING), CAST(unit_price AS STRING), CAST(tax AS STRING), "
+            f"CAST(amount AS STRING) FROM {self._lines} "
+            "WHERE extraction_run_id = :extraction_run_id ORDER BY line_number",
+            {"extraction_run_id": extraction_run_id},
+        )
+        return [_line_from_values(row) for row in rows]
 
     def _select_runs(self) -> str:
         return (
@@ -534,3 +604,30 @@ def _values_to_candidate(row: list[str]) -> InvoiceCandidateRecord:
 def _timestamp(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _text(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _line_values(line: InvoiceLineCandidateRecord) -> tuple[Any, ...]:
+    return (
+        line.extraction_run_id, line.document_id, line.line_number, line.description,
+        _text(line.quantity), _text(line.unit_price), _text(line.tax), _text(line.amount),
+    )
+
+
+def _line_from_values(values: Any) -> InvoiceLineCandidateRecord:
+    def amount(raw: Any) -> Decimal | None:
+        return None if raw is None else Decimal(str(raw))
+
+    return InvoiceLineCandidateRecord(
+        extraction_run_id=str(values[0]),
+        document_id=str(values[1]),
+        line_number=int(values[2]),
+        description=str(values[3]) if values[3] is not None else None,
+        quantity=amount(values[4]),
+        unit_price=amount(values[5]),
+        tax=amount(values[6]),
+        amount=amount(values[7]),
+    )
