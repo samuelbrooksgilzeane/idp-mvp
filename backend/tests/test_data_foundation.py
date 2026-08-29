@@ -9,10 +9,13 @@ from idp_app.core.data_objects import TABLE_NAMES, VIEW_NAMES, DataObjectNamespa
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "databricks_etl" / "sql" / "create_objects.sql"
 PARSING_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql"
+EXTRACTION_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_extraction.sql"
 BUNDLE_RESOURCE = ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml"
 APP_RESOURCE = ROOT / "databricks_etl" / "resources" / "application.app.yml"
 BUNDLE_CONFIG = ROOT / "databricks_etl" / "databricks.yml"
 SCHEMA_REGISTRATION = ROOT / "databricks_etl" / "src" / "register_schemas.py"
+EXTRACTION_JOB = ROOT / "databricks_etl" / "resources" / "extraction.job.yml"
+EXTRACTION_SOURCE = ROOT / "databricks_etl" / "src" / "extract_document.py"
 INVOICE_MANIFEST = ROOT / "schemas" / "invoice_v1.json"
 
 
@@ -89,13 +92,16 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
         "project_schema": "${var.project_schema}",
         "table_prefix": "${var.table_prefix}",
     }
-    assert tasks[2]["task_key"] == "register_production_schemas"
+    assert tasks[2]["task_key"] == "migrate_extraction_columns"
     assert tasks[2]["depends_on"] == [{"task_key": "migrate_parsing_columns"}]
-    assert tasks[2]["spark_python_task"]["python_file"] == "../src/register_schemas.py"
-    assert tasks[2]["spark_python_task"]["parameters"][-1] == (
+    assert tasks[2]["sql_task"]["file"]["path"] == "../sql/migrate_extraction.sql"
+    assert tasks[3]["task_key"] == "register_production_schemas"
+    assert tasks[3]["depends_on"] == [{"task_key": "migrate_extraction_columns"}]
+    assert tasks[3]["spark_python_task"]["python_file"] == "../src/register_schemas.py"
+    assert tasks[3]["spark_python_task"]["parameters"][-1] == (
         "${workspace.file_path}/schemas/invoice_v1.json"
     )
-    assert tasks[2]["environment_key"] == "default"
+    assert tasks[3]["environment_key"] == "default"
 
 
 def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:
@@ -105,6 +111,17 @@ def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:
     assert "INFORMATION_SCHEMA.COLUMNS" in sql
     assert "ADD COLUMN CONTENT_SHA256" in sql
     assert "ADD COLUMN REQUESTED_BY" in sql
+    assert "ADD COLUMN JOB_RUN_ID" in sql
+    assert " DROP " not in f" {sql} "
+    assert " TRUNCATE " not in f" {sql} "
+    assert " DELETE " not in f" {sql} "
+
+
+def test_extraction_schema_migration_is_guarded_and_non_destructive() -> None:
+    sql = " ".join(EXTRACTION_MIGRATION.read_text(encoding="utf-8").upper().split())
+
+    assert sql.count("IF NOT EXISTS") == 1
+    assert "INFORMATION_SCHEMA.COLUMNS" in sql
     assert "ADD COLUMN JOB_RUN_ID" in sql
     assert " DROP " not in f" {sql} "
     assert " TRUNCATE " not in f" {sql} "
@@ -125,6 +142,7 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
     assert env["IDP_TABLE_PREFIX"]["value"] == "${var.table_prefix}"
     assert env["IDP_WAREHOUSE_ID"]["value_from"] == "sql-warehouse"
     assert env["IDP_PARSE_JOB_ID"]["value_from"] == "document-parser"
+    assert env["IDP_EXTRACTION_JOB_ID"]["value_from"] == "document-extractor"
 
     bindings = {item["name"]: item for item in app["resources"]}
     assert bindings["sql-warehouse"]["sql_warehouse"] == {
@@ -133,6 +151,10 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
     }
     assert bindings["document-parser"]["job"] == {
         "id": "${resources.jobs.document_parser.id}",
+        "permission": "CAN_MANAGE_RUN",
+    }
+    assert bindings["document-extractor"]["job"] == {
+        "id": "${resources.jobs.document_extractor.id}",
         "permission": "CAN_MANAGE_RUN",
     }
     assert bindings["source-volume-write"]["uc_securable"]["permission"] == (
@@ -162,6 +184,42 @@ def test_schema_registration_task_is_immutable_and_source_controlled() -> None:
     assert " DELETE " not in f" {normalized} "
     assert " DROP " not in f" {normalized} "
     assert " TRUNCATE " not in f" {normalized} "
+
+
+def test_extraction_job_pins_evidence_contract_and_retains_raw_first() -> None:
+    resource = yaml.safe_load(EXTRACTION_JOB.read_text(encoding="utf-8"))
+    job = resource["resources"]["jobs"]["document_extractor"]
+    task = job["tasks"][0]["spark_python_task"]
+    source = EXTRACTION_SOURCE.read_text(encoding="utf-8")
+
+    assert task["python_file"] == "../src/extract_document.py"
+    assert set(item["name"] for item in job["parameters"]) == {
+        "catalog",
+        "project_schema",
+        "table_prefix",
+        "document_id",
+        "extraction_run_id",
+        "schema_id",
+        "schema_version",
+        "requested_by",
+    }
+    for required in (
+        "ai_extract(",
+        "'version', '2.1'",
+        "'mode', 'precision'",
+        "'enableCitations', 'true'",
+        "'enableConfidenceScores', 'true'",
+        "SET ai_result = PARSE_JSON(:result_json)",
+        "ORDER BY completed_at DESC, parse_run_id DESC",
+        "computed_hash",
+        "flatten_fields(",
+    ):
+        assert required in source
+    raw_write = source.index("SET ai_result = PARSE_JSON(:result_json)")
+    flatten = source.index("fields = flatten_fields(")
+    assert raw_write < flatten
+    for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
+        assert forbidden not in f" {' '.join(source.upper().split())} "
 
 
 def test_bundle_sync_includes_app_source_and_built_frontend() -> None:

@@ -97,6 +97,8 @@ td:first-child { min-width: 190px; }
 .status-label { padding: 4px 7px; border: 1px solid #b9d3c4; border-radius: 3px; background: #edf5f0; color: #286044; font-size: 10px; font-weight: 700; }
 .status-parsing { border-color: #d4c18e; background: #faf5e6; color: #765b16; }
 .status-parse_failed { border-color: #ddb7b3; background: #f8ecea; color: #843e37; }
+.status-extracting { border-color: #d4c18e; background: #faf5e6; color: #765b16; }
+.status-extract_failed { border-color: #ddb7b3; background: #f8ecea; color: #843e37; }
 
 .document-detail { min-height: 230px; margin-top: 38px; padding-top: 30px; border-top: 1px solid #bfc2bb; }
 .empty-detail { display: grid; place-items: center; align-content: center; gap: 8px; color: #777c77; }

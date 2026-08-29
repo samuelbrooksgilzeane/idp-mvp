@@ -26,9 +26,20 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
-        - task_key: register_production_schemas
+        - task_key: migrate_extraction_columns
           depends_on:
             - task_key: migrate_parsing_columns
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_extraction.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
+        - task_key: register_production_schemas
+          depends_on:
+            - task_key: migrate_extraction_columns
           spark_python_task:
             python_file: ../src/register_schemas.py
             parameters:

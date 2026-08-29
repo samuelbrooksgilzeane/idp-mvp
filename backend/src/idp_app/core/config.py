@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     artifacts_volume_name: str | None = None
     warehouse_id: str | None = None
     parse_job_id: PositiveInt | None = None
+    extraction_job_id: PositiveInt | None = None
     validation_endpoint: str | None = None
     app_name: str = "IDP MVP"
     local_data_dir: Path = Path(".local/idp")
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
             "IDP_ARTIFACTS_VOLUME_NAME": self.artifacts_volume_name,
             "IDP_WAREHOUSE_ID": self.warehouse_id,
             "IDP_PARSE_JOB_ID": self.parse_job_id,
+            "IDP_EXTRACTION_JOB_ID": self.extraction_job_id,
             "IDP_VALIDATION_ENDPOINT": self.validation_endpoint,
         }
         missing = [name for name, value in required.items() if not value]

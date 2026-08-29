@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
   error_message STRING COMMENT 'Sanitized extraction failure detail',
   status STRING COMMENT 'Immutable extraction-run terminal or active state',
   requested_by STRING COMMENT 'Authenticated application user that requested extraction',
+  job_run_id BIGINT COMMENT 'Databricks Job run identifier used for operational polling',
   started_at TIMESTAMP COMMENT 'Timestamp when the extraction attempt started',
   completed_at TIMESTAMP COMMENT 'Timestamp when the extraction attempt reached a terminal state'
 )

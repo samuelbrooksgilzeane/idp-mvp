@@ -58,6 +58,14 @@ class DocumentRegistry(Protocol):
         new_status: str,
     ) -> DocumentRecord: ...
 
+    def begin_extraction(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        schema_id: str,
+        schema_version: int,
+    ) -> DocumentRecord: ...
+
 
 class SQLiteDocumentRegistry:
     def __init__(self, database_path: Path) -> None:
@@ -156,6 +164,34 @@ class SQLiteDocumentRegistry:
         updated = self.get(document_id)
         if updated is None:
             raise RuntimeError("Document status update did not produce a readable row")
+        return updated
+
+    def begin_extraction(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        schema_id: str,
+        schema_version: int,
+    ) -> DocumentRecord:
+        now = datetime.now(UTC).isoformat()
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM documents WHERE document_id = ? LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(document_id)
+            document = _sqlite_row_to_document(row)
+            if document.status not in expected_statuses:
+                raise InvalidDocumentStateError(document, expected_statuses)
+            connection.execute(
+                "UPDATE documents SET status = 'EXTRACTING', selected_schema_id = ?, "
+                "selected_schema_version = ?, updated_at = ? WHERE document_id = ?",
+                (schema_id, schema_version, now, document_id),
+            )
+        updated = self.get(document_id)
+        if updated is None:
+            raise RuntimeError("Document extraction update did not produce a readable row")
         return updated
 
 
@@ -263,6 +299,47 @@ class DatabricksDocumentRegistry:
         if updated is None:
             raise RuntimeError("Document status update did not produce a readable row")
         if updated.status != new_status:
+            raise InvalidDocumentStateError(updated, expected_statuses)
+        return updated
+
+    def begin_extraction(
+        self,
+        document_id: str,
+        expected_statuses: set[str],
+        schema_id: str,
+        schema_version: int,
+    ) -> DocumentRecord:
+        existing = self.get(document_id)
+        if existing is None:
+            raise KeyError(document_id)
+        if existing.status not in expected_statuses:
+            raise InvalidDocumentStateError(existing, expected_statuses)
+        expected_markers = ", ".join(
+            f":expected_status_{index}" for index, _ in enumerate(sorted(expected_statuses))
+        )
+        values: dict[str, object] = {
+            "document_id": document_id,
+            "schema_id": schema_id,
+            "schema_version": schema_version,
+        }
+        values.update(
+            {
+                f"expected_status_{index}": status
+                for index, status in enumerate(sorted(expected_statuses))
+            }
+        )
+        self.execute_sql(
+            f"UPDATE {self._table} SET status = 'EXTRACTING', "
+            "selected_schema_id = :schema_id, "
+            "selected_schema_version = CAST(:schema_version AS INT), "
+            "updated_at = CURRENT_TIMESTAMP() "
+            f"WHERE document_id = :document_id AND status IN ({expected_markers})",
+            values,
+        )
+        updated = self.get(document_id)
+        if updated is None:
+            raise RuntimeError("Document extraction update did not produce a readable row")
+        if updated.status != "EXTRACTING":
             raise InvalidDocumentStateError(updated, expected_statuses)
         return updated
 

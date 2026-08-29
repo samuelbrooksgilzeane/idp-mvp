@@ -21,7 +21,8 @@ def test_health_returns_safe_mock_configuration_state() -> None:
             "source_volume_name": False,
             "artifacts_volume_name": False,
             "warehouse_id": False,
-            "parse_job_id": False,
+                "parse_job_id": False,
+                "extraction_job_id": False,
             "validation_endpoint": False,
         },
     }

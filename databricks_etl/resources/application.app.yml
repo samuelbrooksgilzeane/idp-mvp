@@ -15,6 +15,11 @@ resources:
           job:
             id: ${resources.jobs.document_parser.id}
             permission: CAN_MANAGE_RUN
+        - name: document-extractor
+          description: Document extraction Job triggered by the application.
+          job:
+            id: ${resources.jobs.document_extractor.id}
+            permission: CAN_MANAGE_RUN
         - name: source-volume-read
           description: Read access to registered source PDFs.
           uc_securable:
@@ -63,6 +68,30 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry
             permission: SELECT
+        - name: extraction-runs-table-select
+          description: Read access to immutable extraction-run history.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extraction_runs
+            permission: SELECT
+        - name: extraction-runs-table-modify
+          description: Write access to extraction-run status and Job identifiers.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extraction_runs
+            permission: MODIFY
+        - name: extracted-fields-table-select
+          description: Read access to flattened extracted values and evidence.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_fields
+            permission: SELECT
+        - name: invoice-candidates-select
+          description: Read access to typed invoice candidate projections.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_candidates
+            permission: SELECT
       config:
         command:
           - uv
@@ -93,6 +122,8 @@ resources:
             value_from: sql-warehouse
           - name: IDP_PARSE_JOB_ID
             value_from: document-parser
+          - name: IDP_EXTRACTION_JOB_ID
+            value_from: document-extractor
           - name: IDP_VALIDATION_ENDPOINT
             value: ${var.validation_endpoint}
           - name: IDP_APP_NAME

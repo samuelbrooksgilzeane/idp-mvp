@@ -34,8 +34,10 @@ export function DocumentDetail({
     );
   }
 
-  const retry = document.status === "PARSED" || document.status === "PARSE_FAILED";
-  const unavailable = document.status === "PARSING" || starting;
+  const retry = ["PARSED", "PARSE_FAILED", "EXTRACTED", "EXTRACT_FAILED"].includes(
+    document.status,
+  );
+  const unavailable = ["PARSING", "EXTRACTING"].includes(document.status) || starting;
 
   return (
     <section className="document-detail" aria-labelledby="detail-title">
@@ -53,7 +55,13 @@ export function DocumentDetail({
           ) : (
             <Play size={16} aria-hidden="true" />
           )}
-          {document.status === "PARSING" ? "Parsing" : retry ? "Retry parse" : "Parse document"}
+          {document.status === "PARSING"
+            ? "Parsing"
+            : document.status === "EXTRACTING"
+              ? "Extracting"
+              : retry
+                ? "Retry parse"
+                : "Parse document"}
         </button>
       </div>
 

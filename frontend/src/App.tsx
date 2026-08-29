@@ -12,7 +12,14 @@ export type HealthResponse = {
   configuration: Record<string, boolean>;
 };
 
-export type DocumentStatus = "UPLOADED" | "PARSING" | "PARSED" | "PARSE_FAILED";
+export type DocumentStatus =
+  | "UPLOADED"
+  | "PARSING"
+  | "PARSED"
+  | "PARSE_FAILED"
+  | "EXTRACTING"
+  | "EXTRACTED"
+  | "EXTRACT_FAILED";
 
 export type DocumentRecord = {
   document_id: string;

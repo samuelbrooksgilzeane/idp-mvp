@@ -1,0 +1,49 @@
+resources:
+  jobs:
+    document_extractor:
+      name: ${var.app_name}-${bundle.target}-document-extractor
+      description: Extracts one registered document using an immutable schema and parse attempt.
+      max_concurrent_runs: 4
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: project_schema
+          default: ${var.project_schema}
+        - name: table_prefix
+          default: ${var.table_prefix}
+        - name: document_id
+          default: ""
+        - name: extraction_run_id
+          default: ""
+        - name: schema_id
+          default: ""
+        - name: schema_version
+          default: ""
+        - name: requested_by
+          default: ""
+      tasks:
+        - task_key: extract_registered_document
+          spark_python_task:
+            python_file: ../src/extract_document.py
+            parameters:
+              - --catalog
+              - "{{job.parameters.catalog}}"
+              - --project-schema
+              - "{{job.parameters.project_schema}}"
+              - --table-prefix
+              - "{{job.parameters.table_prefix}}"
+              - --document-id
+              - "{{job.parameters.document_id}}"
+              - --extraction-run-id
+              - "{{job.parameters.extraction_run_id}}"
+              - --schema-id
+              - "{{job.parameters.schema_id}}"
+              - --schema-version
+              - "{{job.parameters.schema_version}}"
+              - --requested-by
+              - "{{job.parameters.requested_by}}"
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"

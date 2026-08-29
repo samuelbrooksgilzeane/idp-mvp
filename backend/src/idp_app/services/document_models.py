@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 
 
@@ -44,3 +45,54 @@ class ParseRunRecord:
     job_run_id: int | None
     started_at: datetime
     completed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ExtractionRunRecord:
+    extraction_run_id: str
+    document_id: str
+    parse_run_id: str
+    schema_id: str
+    schema_version: int
+    schema_hash: str
+    extractor_version: str
+    options: dict[str, str]
+    ai_result: dict[str, Any] | None
+    error_message: str | None
+    status: str
+    requested_by: str
+    job_run_id: int | None
+    started_at: datetime
+    completed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class ExtractedFieldRecord:
+    extraction_run_id: str
+    document_id: str
+    field_path: str
+    field_type: str
+    value: Any
+    value_string: str | None
+    confidence_score: float | None
+    citation_ids: list[int]
+    citations: list[dict[str, Any]]
+    extraction_error: str | None
+
+
+@dataclass(frozen=True)
+class InvoiceCandidateRecord:
+    case_id: str | None
+    document_id: str
+    source_path: str
+    template_id: str
+    invoice_number: str | None
+    invoice_date: date | None
+    seller_name: str | None
+    subtotal: Decimal | None
+    discount_amount: Decimal | None
+    tax_amount: Decimal | None
+    total_amount: Decimal | None
+    currency: str | None
+    extraction_run_id: str
+    schema_version: int

@@ -88,7 +88,7 @@ def validate_data_bootstrap() -> None:
         raise ValueError("Bundle must define the governed_data_bootstrap job")
 
     tasks = bootstrap.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 3:
+    if not isinstance(tasks, list) or len(tasks) != 4:
         raise ValueError(
             "Governed data bootstrap must contain the reviewed creation, migration, "
             "and schema-registration tasks"
@@ -108,10 +108,23 @@ def validate_data_bootstrap() -> None:
     if migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
         raise ValueError("Parsing migration parameters must match the trusted contract")
 
-    registration_task = tasks[2]
+    extraction_migration_task = tasks[2]
+    extraction_migration_sql = extraction_migration_task.get("sql_task", {})
+    if extraction_migration_task.get("depends_on") != [
+        {"task_key": "migrate_parsing_columns"}
+    ]:
+        raise ValueError("Extraction migration must run after parsing migration")
+    if extraction_migration_sql.get("file", {}).get("path") != (
+        "../sql/migrate_extraction.sql"
+    ):
+        raise ValueError("Bootstrap must use the reviewed extraction migration")
+    if extraction_migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
+        raise ValueError("Extraction migration parameters must match the trusted contract")
+
+    registration_task = tasks[3]
     registration_python = registration_task.get("spark_python_task", {})
     if registration_task.get("depends_on") != [
-        {"task_key": "migrate_parsing_columns"}
+        {"task_key": "migrate_extraction_columns"}
     ]:
         raise ValueError("Schema registration must run after governed migrations")
     if registration_python.get("python_file") != "../src/register_schemas.py":
@@ -149,6 +162,18 @@ def validate_data_bootstrap() -> None:
         if forbidden in f" {migration_normalized} ":
             raise ValueError(f"Parsing migration contains forbidden SQL: {forbidden}")
 
+    extraction_migration = (
+        ROOT / "databricks_etl" / "sql" / "migrate_extraction.sql"
+    ).read_text(encoding="utf-8")
+    extraction_migration_normalized = " ".join(extraction_migration.upper().split())
+    if "IF NOT EXISTS" not in extraction_migration_normalized:
+        raise ValueError("Extraction migration must guard existing columns")
+    for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
+        if forbidden in f" {extraction_migration_normalized} ":
+            raise ValueError(
+                f"Extraction migration contains forbidden SQL: {forbidden}"
+            )
+
 
 def validate_parsing_job() -> None:
     resource = load_yaml(ROOT / "databricks_etl" / "resources" / "parsing.job.yml")
@@ -180,6 +205,38 @@ def validate_parsing_job() -> None:
         raise ValueError("Parsing task must not delete or move source documents")
 
 
+def validate_extraction_job() -> None:
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "extraction.job.yml")
+    jobs = resource.get("resources", {}).get("jobs", {})
+    extraction = jobs.get("document_extractor")
+    if not isinstance(extraction, dict):
+        raise ValueError("Bundle must define the document_extractor job")
+    tasks = extraction.get("tasks")
+    if not isinstance(tasks, list) or len(tasks) != 1:
+        raise ValueError("Document extractor must contain exactly one reviewed task")
+    python_task = tasks[0].get("spark_python_task", {})
+    if python_task.get("python_file") != "../src/extract_document.py":
+        raise ValueError("Document extractor must use the reviewed extraction task")
+    source = (ROOT / "databricks_etl" / "src" / "extract_document.py").read_text(
+        encoding="utf-8"
+    )
+    required = (
+        "ai_extract(",
+        "'version', '2.1'",
+        "'mode', 'precision'",
+        "'enableCitations', 'true'",
+        "'enableConfidenceScores', 'true'",
+        "SET ai_result = PARSE_JSON(:result_json)",
+        "ORDER BY completed_at DESC, parse_run_id DESC",
+    )
+    if any(value not in source for value in required):
+        raise ValueError("Extraction task does not retain the reviewed extraction contract")
+    normalized = " ".join(source.upper().split())
+    for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
+        if forbidden in f" {normalized} ":
+            raise ValueError(f"Extraction task contains forbidden SQL: {forbidden}")
+
+
 def validate_application_resource() -> None:
     resource = load_yaml(
         ROOT / "databricks_etl" / "resources" / "application.app.yml"
@@ -206,6 +263,8 @@ def validate_application_resource() -> None:
         raise ValueError("Databricks App must use its bound SQL warehouse")
     if env.get("IDP_PARSE_JOB_ID", {}).get("value_from") != "document-parser":
         raise ValueError("Databricks App must use its bound parsing Job")
+    if env.get("IDP_EXTRACTION_JOB_ID", {}).get("value_from") != "document-extractor":
+        raise ValueError("Databricks App must use its bound extraction Job")
 
     bindings = app.get("resources")
     if not isinstance(bindings, list):
@@ -216,6 +275,7 @@ def validate_application_resource() -> None:
     required_bindings = {
         "sql-warehouse",
         "document-parser",
+        "document-extractor",
         "source-volume-read",
         "source-volume-write",
         "documents-table-select",
@@ -223,6 +283,10 @@ def validate_application_resource() -> None:
         "parsed-documents-table-select",
         "parsed-documents-table-modify",
         "schema-registry-table-select",
+        "extraction-runs-table-select",
+        "extraction-runs-table-modify",
+        "extracted-fields-table-select",
+        "invoice-candidates-select",
     }
     if not required_bindings.issubset(binding_names):
         raise ValueError("Databricks App resource bindings are incomplete")
@@ -233,6 +297,7 @@ def main() -> None:
     validate_bundle_config()
     validate_data_bootstrap()
     validate_parsing_job()
+    validate_extraction_job()
     validate_application_resource()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
         raise ValueError("Default local application mode must be mock")

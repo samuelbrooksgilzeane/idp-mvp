@@ -1,7 +1,8 @@
-from datetime import datetime
-from typing import Literal
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from idp_app.core.config import IdpMode
 
@@ -14,6 +15,7 @@ class ConfigurationPresence(BaseModel):
     artifacts_volume_name: bool
     warehouse_id: bool
     parse_job_id: bool
+    extraction_job_id: bool
     validation_endpoint: bool
 
 
@@ -34,7 +36,15 @@ class DocumentResponse(BaseModel):
     file_name: str
     file_size: int
     content_sha256: str
-    status: Literal["UPLOADED", "PARSING", "PARSED", "PARSE_FAILED"]
+    status: Literal[
+        "UPLOADED",
+        "PARSING",
+        "PARSED",
+        "PARSE_FAILED",
+        "EXTRACTING",
+        "EXTRACTED",
+        "EXTRACT_FAILED",
+    ]
     uploaded_by: str
     uploaded_at: datetime
     updated_at: datetime
@@ -100,8 +110,8 @@ class PageResponse(BaseModel):
 
 
 class SchemaSummaryResponse(BaseModel):
-    schema_id: str
-    schema_version: int
+    schema_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    schema_version: int = Field(ge=1)
     display_name: str
     use_case: str
     schema_hash: str
@@ -131,3 +141,66 @@ class SchemaDetailResponse(SchemaSummaryResponse):
     instructions: str
     fields: list[SchemaFieldResponse]
     document_rules: list[SchemaRuleResponse]
+
+
+class ExtractionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    schema_version: int = Field(ge=1)
+
+
+class ExtractionRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    extraction_run_id: str
+    document_id: str
+    parse_run_id: str
+    schema_id: str
+    schema_version: int
+    schema_hash: str
+    extractor_version: Literal["2.1"]
+    options: dict[str, str]
+    error_message: str | None
+    status: Literal["RUNNING", "EXTRACTED", "FAILED"]
+    requested_by: str
+    job_run_id: int | None
+    started_at: datetime
+    completed_at: datetime | None
+
+
+class ExtractedFieldResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    field_path: str
+    field_type: str
+    value: Any
+    value_string: str | None
+    confidence_score: float | None
+    citation_ids: list[int]
+    citations: list[dict[str, Any]]
+    extraction_error: str | None
+
+
+class InvoiceCandidateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    case_id: str | None
+    document_id: str
+    template_id: str
+    invoice_number: str | None
+    invoice_date: date | None
+    seller_name: str | None
+    subtotal: Decimal | None
+    discount_amount: Decimal | None
+    tax_amount: Decimal | None
+    total_amount: Decimal | None
+    currency: str | None
+    extraction_run_id: str
+    schema_version: int
+
+
+class ExtractionResultResponse(BaseModel):
+    run: ExtractionRunResponse
+    fields: list[ExtractedFieldResponse]
+    candidate: InvoiceCandidateResponse | None

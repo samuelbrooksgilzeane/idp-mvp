@@ -18,7 +18,13 @@ from idp_app.services.parse_jobs import (
 from idp_app.services.parse_runs import ParseRunRepository
 
 PARSER_VERSION = "2.0"
-ELIGIBLE_DOCUMENT_STATES = {"UPLOADED", "PARSE_FAILED", "PARSED"}
+ELIGIBLE_DOCUMENT_STATES = {
+    "UPLOADED",
+    "PARSE_FAILED",
+    "PARSED",
+    "EXTRACTED",
+    "EXTRACT_FAILED",
+}
 
 
 class ParsingService:
