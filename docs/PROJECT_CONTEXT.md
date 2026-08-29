@@ -1,6 +1,6 @@
 # IDP MVP Project Context
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 This document is a concise engineering handoff. The authoritative requirements remain unchanged under `docs/implementation/`; use the numbered commit specifications and `PROGRESS_TRACKER.md` for acceptance decisions.
 
@@ -8,8 +8,9 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/05-parsed-document-viewer`
-- Commit 5 is implemented, deployed, visually accepted, and committed. The Parsing MVP is ready for the `mvp-parsing` acceptance tag.
+- Current implementation branch: `feat/06-schema-registry-viewer`
+- The Parsing MVP is accepted and tagged `mvp-parsing`.
+- Commit 6 is implemented, deployed, verified, and committed.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -22,6 +23,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 3: upload and registry | `feat/03-upload-and-registry` | `c9043a8` | Pushed |
 | Commit 4: parsing pipeline | `feat/04-parsing-pipeline` | `9ce5f16` | Pushed |
 | Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | `91e111c` | Pushed and accepted |
+| Commit 6: schema registry and viewer | `feat/06-schema-registry-viewer` | `727041c` | Implemented and deployed |
 
 ## Implemented capabilities
 
@@ -77,19 +79,33 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Bounding boxes rescale against the rendered image after resize and zoom.
 - Element inspector with type, confidence, region count, and extracted content.
 - Explicit unparsed, missing-image, loading, and API-error states.
-- No extraction schema, extraction, or validation functionality yet.
+
+### Schema registry and viewer
+
+- Source-controlled `schemas/invoice_v1.json` with eight typed invoice fields.
+- Separate extraction schema, field policies, deterministic document rules, and instructions.
+- Typed manifest validation and canonical SHA-256 hashing.
+- Immutable `schema_id + schema_version` registration with conflict rejection.
+- Idempotent Databricks bootstrap task and local SQLite registration.
+- Production/use-case schema list and version-detail APIs.
+- Browser responses expose safe field and policy metadata, not raw schema JSON.
+- Read-only selector, provenance, field-policy table, and calibration notice in the document UI.
+- No `ai_extract`, extracted values, correction, or validation functionality yet.
 
 ## Local verification
 
-The following passed on 2026-08-28:
+The following passed on 2026-08-29:
 
-- `make test`: 44 backend tests and 8 frontend tests.
+- `make test`: 55 backend tests and 11 frontend tests.
 - `make check`: tests, Ruff, mypy, ESLint, TypeScript checking, frontend production build, and offline configuration/YAML validation.
 - `make dev-mock`: FastAPI and Vite started together and stopped cleanly.
 - `GET http://localhost:5173/api/health`: returned HTTP 200 in mock mode through the Vite proxy.
 - A generated PDF uploaded through the Vite proxy and reached `UPLOADED`.
 - Its parse attempt moved from `RUNNING` to `SUCCESS` with one retained page.
 - The parsed-page viewer rendered two labelled elements; zoom, filtering, overlay selection, and inspector content were exercised in the browser.
+- The schema viewer rendered the approved `invoice_v1` contract with eight fields,
+  immutable provenance, thresholds, citation requirements, risk tiers, and explicit
+  loading, empty, and error states.
 - Failure, retry, concurrent-state, immutable-history, raw-result, image-confinement, cross-run access, missing-image, trigger-failure, polling-failure, scaling, navigation, filtering, and partial-state paths have automated coverage.
 
 The local servers are not intentionally left running. Start them with:
@@ -105,7 +121,7 @@ Then use:
 
 ## Databricks verification
 
-Authenticated dev-workspace verification completed on 2026-08-28 against the
+Authenticated dev-workspace verification completed through 2026-08-29 against the
 `workspace` catalog and serverless SQL warehouse `647704f77f24020a`:
 
 - `databricks bundle validate -t dev` passed.
@@ -133,6 +149,14 @@ Authenticated dev-workspace verification completed on 2026-08-28 against the
   `d0ed9896-da45-560a-8ddb-5b88d20dea1e`.
 - The authenticated page-image endpoint returned HTTP 200, `image/jpeg`, and
   204,525 streamed bytes without exposing its internal volume path.
+- Governed bootstrap runs `983917610156087` and `810202042098230` both succeeded,
+  proving schema registration is idempotent.
+- The live production-schema endpoint returned exactly one `invoice` schema at
+  version 1 with hash
+  `b02b3c20d69e7f77ed76e45337107d4995aafab5ee411ab4f2e73b166876c640`.
+- The live schema-detail endpoint returned eight fields and two deterministic
+  rules without exposing `ai_extract_schema` JSON.
+- The final deployed app root references the verified Commit 6 JavaScript and CSS assets.
 
 Additional live hardening checks remain:
 
@@ -141,12 +165,11 @@ Additional live hardening checks remain:
   artifact-volume page images.
 - Malformed-PDF failure behavior in the deployed environment.
 
-Capabilities 2, 3, 4, and 5 are `COMPLETE`. The Parsing MVP implementation,
-automated checks, local visual interaction, live backend deployment, and
-stakeholder visual acceptance pass.
+Capabilities 2 through 6 are `COMPLETE`. The Parsing MVP is tagged and the first
+Extraction MVP capability is deployed. Extraction execution has not started.
 
 ## Next review boundary
 
-1. Tag the accepted Parsing MVP state `mvp-parsing`.
+1. Review the registered field names and initial policy thresholds before extraction.
 2. Perform the additional live hardening checks above when practical.
-3. Start `docs/implementation/07_COMMIT_SCHEMA_REGISTRY_AND_VIEWER.md` on its own feature branch.
+3. Start `docs/implementation/08_COMMIT_EXTRACTION_PIPELINE.md` on its own feature branch.

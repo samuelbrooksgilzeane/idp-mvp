@@ -22,7 +22,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 | 3 | Upload and registry | COMPLETE | `c9043a8` + App deployment in `551bd1b` | PDFs can be uploaded and tracked | Two representative invoices uploaded through the deployed App and appeared in the SQL-backed registry; duplicate, identity and failure-path tests pass |
 | 4 | Parsing pipeline | COMPLETE | `9ce5f16` + runtime fix in `627625c` | PDFs become page and element data | Dev Job run `585474568087236` succeeded with `ai_parse_document` 2.0; the invoice reached `PARSED` with one page after a visible, retryable failure; parsing tests pass |
 | 5 | Parsed-document viewer | COMPLETE | `91e111c` | Parsed pages and labelled overlays are inspectable | `make check` passes with 44 backend and 8 frontend tests; local browser QA covered zoom, filtering and element inspection; the deployed API returned one page, 11 elements and a 204,525-byte JPEG; stakeholder visual acceptance completed on 2026-08-28. |
-| 6 | Schema registry and viewer | NOT STARTED | — | Exact extraction schema is visible | — |
+| 6 | Schema registry and viewer | COMPLETE | `727041c` | Exact extraction schema is visible | `invoice_v1` registered once after bootstrap runs `983917610156087` and `810202042098230`; live APIs returned 8 governed fields and 2 rules without raw schema JSON; local browser QA and `make check` pass. |
 | 7 | Extraction pipeline | NOT STARTED | — | Typed fields, confidence and citations exist | — |
 | 8 | Extraction evidence UI | NOT STARTED | — | Fields link to supporting PDF regions | — |
 | 9 | Deterministic validation | NOT STARTED | — | Technical and arithmetic exceptions are identified | — |
@@ -34,7 +34,7 @@ Mark a capability `COMPLETE` only when its definition of done, automated checks 
 | Milestone | Required commits | Acceptance tag | Status |
 |---|---|---|---|
 | Parsing MVP | 1–5 | `mvp-parsing` | COMPLETE |
-| Extraction MVP | 6–8 | `mvp-extraction` | NOT STARTED |
+| Extraction MVP | 6–8 | `mvp-extraction` | IN PROGRESS |
 | Validated MVP | 9–11 | `mvp-validation` | NOT STARTED |
 
 Do not mark a milestone complete until every required capability is complete and the tagged commit has passed the milestone acceptance checks.
