@@ -12,7 +12,7 @@ Sections are lettered to avoid colliding with the pack's numbering.
 | A | Multi-page UI, source beside values | **COMPLETE** | `feat/11-multi-page-ui` — `58cc981`, `7b37402`, `beda63b` |
 | B | Typed line-item candidate table | **COMPLETE** | `feat/12-typed-line-candidates` — `60ccb00` |
 | C | Batch parse and extract | **COMPLETE** | `feat/13-batch-processing` — `45f001a` |
-| D | Summary view, XLSX export, case filter | **NOT STARTED** | — |
+| D | Summary view, XLSX export, case filter | **COMPLETE** | `feat/13-batch-processing` — verified live in dev |
 | E | LLM validation and Knowledge Assistant | **NOT STARTED** (blocked, see below) | — |
 | F | Set-based batch engine | **DEFERRED** by decision | — |
 
@@ -42,7 +42,7 @@ These were settled with the project owner. Do not silently revisit them.
 - **Set-based engine (F)**: deferred. At ~100 documents it saves only a few minutes for a
   substantial rewrite. Revisit when batches reach the high hundreds.
 
-## Section D — Summary view, XLSX export, case filter (next)
+## Section D — Summary view, XLSX export, case filter (implemented locally)
 
 - Add an `invoice_summary` view to `databricks_etl/sql/create_objects.sql` joining `documents`,
   the latest successful extraction, `invoice_candidates` and aggregated
@@ -57,6 +57,25 @@ These were settled with the project owner. Do not silently revisit them.
 - Case filtering as a query parameter on the documents list, the summary and the export, with a
   dropdown of distinct case IDs plus "All cases".
 - Fill in `frontend/src/pages/ResultsPage.tsx`, which is currently an intentional placeholder.
+
+Evidence on 2026-08-29: `make check` passes with 134 backend and 32 frontend tests; API tests
+open the generated workbook and verify both sheets, join keys, delta, validation outcome, case
+scope and omission of trusted paths/internal run identifiers. Browser QA covered desktop and 390px
+responsive layouts.
+
+**Verified live in dev.** Bootstrap run `735102880444788` created the view through the documented
+two-pass deploy; the deployed App serves the filtered results and a real two-sheet workbook; the
+representative invoice reports its `-37.31` delta; and case filtering was demonstrated on two newly
+uploaded invoices under `CASE-ALPHA` and `CASE-BETA` (batch parse `227813517718902`, batch extract
+`907357470375810`).
+
+One defect was found and fixed while verifying: the view computed the delta as
+`sum(amount) - discount - total`, omitting the `sum(line tax)` term that the registered
+`line_items_reconcile_to_total` rule includes. Every invoice in dev stated zero or no line tax, so
+the two agreed by coincidence. On an invoice carrying line tax the export reported `-300.00` beside
+`VALIDATED_PASS`. The report now uses the rule's signed terms, treats an unstated line tax as
+missing rather than zero, and a test pins the two together. Full detail, plus the finding that
+replacing a governed view revokes the App's Unity Catalog grant, is in `docs/PROJECT_CONTEXT.md`.
 
 Section B already makes the aggregation a plain `GROUP BY`. This query is verified working
 against dev today:

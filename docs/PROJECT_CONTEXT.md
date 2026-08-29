@@ -15,7 +15,8 @@ This document is a concise engineering handoff. The authoritative requirements r
 - **Branches form a linear stack**: each is built on the previous one, so
   `feat/13-batch-processing` contains every change listed below. Start any new work from it.
 - Work now follows [the working plan](implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md),
-  an agreed insertion into the numbered pack. **Section D is next.**
+  an agreed insertion into the numbered pack. **Section D is implemented locally and awaits dev
+  deployment/verification.**
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -36,6 +37,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Plan section A: multi-page UI | `feat/11-multi-page-ui` | `58cc981`, `7b37402`, `beda63b` | Implemented, deployed, and verified live |
 | Plan section B: typed line candidates | `feat/12-typed-line-candidates` | `60ccb00` | Implemented, deployed, and verified live |
 | Plan section C: batch processing | `feat/13-batch-processing` | `45f001a` | Implemented, deployed, and verified live |
+| Plan section D: summary and XLSX export | current working tree | — | Implemented and verified locally; dev verification pending |
 
 ## Implemented capabilities
 
@@ -53,7 +55,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 ### Governed data foundation
 
 - Parameterized schema, volume, table, and view creation.
-- Two governed volumes, seven Delta tables, and three latest-result/summary views.
+- Two governed volumes, nine Delta tables, and four latest-result/summary views.
 - Distinct `idp_dev` and `idp` table prefixes.
 - Non-destructive, repeatable bootstrap contract.
 - Idempotent parsing-column migration for environments that previously ran Commit 2.
@@ -242,12 +244,29 @@ Supporting decisions:
   can replace `for_each` without touching the contract or the client.
 - Registry multi-select and a batch action bar with per-batch progress.
 
+### Summary and export (plan section D)
+
+- Governed `invoice_summary` view selects each document's latest successful extraction, aggregates
+  typed billed lines, computes the reconciliation delta once, and attaches the latest completed
+  validation outcome.
+- `GET /api/results/invoices` and `GET /api/exports/invoices.xlsx` share the same reporting
+  repository and optional `case_id` scope; the workbook contains Summary and Line items sheets.
+- `GET /api/documents?case_id=...` filters the registry and `GET /api/documents/cases` supplies
+  distinct dropdown choices without adding case CRUD.
+- The Results route provides scope controls, operational totals, invoice-to-document navigation,
+  currency-aware amounts, delta state, validation outcome, refresh, and XLSX export.
+- Public JSON and workbook output omit source paths and extraction-run identifiers.
+
 ## Local verification
 
 The following passed on 2026-08-29:
 
-- `make test`: 55 backend tests and 11 frontend tests.
-- `make check`: tests, Ruff, mypy, ESLint, TypeScript checking, frontend production build, and offline configuration/YAML validation.
+- `make check`: 133 backend tests and 32 frontend tests, Ruff, strict mypy, ESLint,
+  TypeScript checking, the frontend production build, and offline configuration/YAML validation.
+- Reporting tests open the generated workbook and verify both sheets, typed number/date formats,
+  latest-run selection, case scope, reconciliation behavior, and public-field confinement.
+- Browser QA covered the populated Results route at desktop and 390px widths; the summary table
+  remains horizontally contained on mobile and the representative delta renders as `-€37.31`.
 - `make dev-mock`: FastAPI and Vite started together and stopped cleanly.
 - `GET http://localhost:5173/api/health`: returned HTTP 200 in mock mode through the Vite proxy.
 - A generated PDF uploaded through the Vite proxy and reached `UPLOADED`.
@@ -477,27 +496,100 @@ One defect was found and fixed while verifying:
 
 ## Next review boundary
 
-Everything through **plan section C is complete, verified live and pushed**. The authoritative
-plan, its decisions and the remaining sections are in
+Everything through **plan section D is complete and verified live in dev**. The authoritative plan,
+its decisions and the remaining sections are in
 [`implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md`](implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md).
 
-**Next: plan section D** — the `invoice_summary` view, the two-sheet XLSX export, and case
-filtering. Section B already reduces the aggregation to a plain `GROUP BY`, and
-`frontend/src/pages/ResultsPage.tsx` is an intentional placeholder waiting for it.
+**Next: section E**, which is blocked on infrastructure. `validation_endpoint` is still deployed as
+the literal string `unused`, so a Databricks model serving endpoint must exist before LLM validation
+can be verified live. The Knowledge Assistant table requirements are recorded in the plan.
 
-**Then section E**, which is blocked on infrastructure: `validation_endpoint` is still deployed as
-the literal string `unused`, so a Databricks model serving endpoint must exist before LLM
-validation can be verified live. The Knowledge Assistant table requirements are recorded in the
-plan.
+## Section D verification (2026-08-29)
+
+Deployed and demonstrated live against the dev App
+`https://idp-mvp-dev-7474660341420973.aws.databricksapps.com`.
+
+- `make check` passes with **134 backend and 32 frontend tests** and the full lint, type, build and
+  configuration gate.
+- The two-pass deployment behaved exactly as predicted: the first `bundle deploy` failed with
+  `Invalid UC Table resource invoice-summary-select: Table workspace.idp_mvp.idp_dev_invoice_summary
+  does not exist`; governed bootstrap run `735102880444788` created the view; the second deploy
+  reported `Updated apps.idp_app`; `bundle run … idp_app` republished the source.
+- `/api/health` returns `mode: databricks` with every configuration key present.
+- `/api/results/invoices` and `/api/exports/invoices.xlsx` serve seven invoices from the governed
+  `invoice_summary` view. The workbook has both `Summary` and `Line items` sheets, joins on document
+  ID and invoice number, and exposes no volume path or internal run identifier.
+- The representative invoice `d0ed9896` reports **5 lines, 881.11 against a stated 888.55, delta
+  `-37.31`**, `REVIEW_REQUIRED`, unchanged by the correction below.
+- Case filtering is demonstrated on real data. Two new invoices were uploaded under `CASE-ALPHA` and
+  `CASE-BETA`, parsed as batch job run `227813517718902` and extracted as `907357470375810`.
+  `/api/documents/cases` lists the cases, and the documents list, the results list and the export
+  are all scoped by `case_id`, the export naming its workbook `invoice-results-CASE-ALPHA.xlsx` and
+  scoping both sheets consistently.
+
+### The reported delta must use the registered rule's signed terms
+
+The blank `Validation outcome` column seen first was **not a defect**: the section C batch
+re-extracted every document after the last validation, and the view reports the outcome *of the
+latest extraction*, so no outcome existed. Re-validating repopulated it.
+
+A real defect was found and fixed. The view computed `reconciliation_delta` as
+`sum(amount) - discount - total`, while the registered rule `line_items_reconcile_to_total`
+reconciles `sum(amount) - discount + sum(line tax)` against the total. Every invoice in dev happened
+to state zero or no line tax, and every seeded line in `test_reporting_api.py` used `tax = "0"`, so
+the two agreed by coincidence and no test covered the difference.
+
+`CASE-ALPHA` was built to expose it and did: an invoice that the validator passed
+(`1500 - 100 + 300 = 1700`) was reported in the export as **delta `-300.00` beside
+`VALIDATED_PASS`**, and the results page painted the row as an exception and excluded it from its
+"Reconciled" tile. `CASE-BETA` reported `-151.20` where the validator said "out by 45.0".
+
+The view and the local SQLite projection now use the rule's signed terms, and an unstated line tax
+is treated as missing rather than zero, exactly as the validator treats an aggregate over zero
+stated instances. After the fix `CASE-ALPHA` reports `0.00` beside `VALIDATED_PASS`, `CASE-BETA`
+reports `-45.00` matching its validation message, and `d0ed9896` still reports `-37.31`. A test
+pins the rule and the report together so they cannot drift apart again.
+
+### Replacing a governed view revokes the App's grant
+
+`create_objects.sql` uses `CREATE OR REPLACE VIEW`, which recreates the securable and **drops the
+Unity Catalog grant the App resource binding had applied**. Re-running the bootstrap after a deploy
+left `/api/results/invoices` returning `502 REPORT_READ_FAILED` even though the view itself queried
+correctly from SQL. A further `bundle deploy` reapplied the grant and the endpoint recovered.
+
+**Whenever the bootstrap replaces a view an App binding reads, run `bundle deploy` again
+afterwards.** The ordering that works is: `bundle deploy` → `bundle run … governed_data_bootstrap`
+→ `bundle deploy` → `bundle run … idp_app`.
+
+### The `frontend/dist` sync warning is a false alarm
+
+`databricks bundle validate` reports `Pattern frontend/dist/** does not match any files` because it
+tests the pattern against the gitignore-filtered file set, and `frontend/dist/` is in `.gitignore`.
+The sync honours `sync.include` regardless. `databricks bundle sync -t dev --dry-run --full -o json`
+lists `frontend/dist/index.html` and the current hashed assets in its `put` payload; confirm the
+hashes there match the local build rather than trusting the warning. This does not block a release.
+
+### Trusted dev variables
+
+```text
+catalog=workspace
+project_schema=idp_mvp
+source_volume_name=idp_source
+artifacts_volume_name=idp_artifacts
+warehouse_id=647704f77f24020a
+validation_endpoint=unused
+evaluation_experiment=unused
+app_name=idp-mvp
+```
 
 To resume:
 
 ```bash
 git checkout feat/13-batch-processing
-make check          # expect 132 backend and 29 frontend tests
+make check          # expect 134 backend and 32 frontend tests
 ```
 
-Deploying to dev needs the two-step ordering whenever a release adds both a governed table and an
+Deploying to dev needs the two-step ordering whenever a release adds both a governed object and an
 App binding that references it: `bundle deploy` (the App update fails), then
-`bundle run … governed_data_bootstrap` to create the table, then `bundle deploy` again, then
+`bundle run … governed_data_bootstrap` to create the object, then `bundle deploy` again, then
 `bundle run … idp_app` to publish the App source.
