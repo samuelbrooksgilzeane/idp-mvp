@@ -8,10 +8,10 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/08-extraction-evidence-ui`
+- Current implementation branch: `feat/09-deterministic-validation`
 - The Parsing MVP is accepted and tagged `mvp-parsing`.
 - The Extraction MVP (commits 6–8) is complete and tagged `mvp-extraction`.
-- Commit 8 is implemented, deployed, verified live, and committed.
+- Commit 9 is implemented, deployed, verified live, and committed.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -27,6 +27,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 6: schema registry and viewer | `feat/06-schema-registry-viewer` | `727041c` | Implemented and deployed |
 | Commit 7: extraction pipeline | `feat/07-extraction-pipeline` | `72e0db3` | Implemented, deployed, and verified live |
 | Commit 8: extraction evidence UI | `feat/08-extraction-evidence-ui` | `41ee11e` | Implemented, deployed, and verified live |
+| Commit 9: deterministic validation | `feat/09-deterministic-validation` | `5eec8b4` | Implemented, deployed, and verified live |
 
 ## Implemented capabilities
 
@@ -136,6 +137,42 @@ This document is a concise engineering handoff. The authoritative requirements r
   are visually and accessibly distinct from parse-element overlays.
 - All volume paths, artifact paths, and credentials remain behind the backend.
 - No validation, arithmetic or required-field checks, correction, editing, approval, or export.
+
+### Deterministic validation
+
+Validation splits into two deliberately different mechanisms.
+
+- **Structural validators** are generic and need no per-schema configuration, so they apply to any
+  use case: `provenance`, `schema_drift` (integrity of the exact contract used),
+  `schema_version_currency` (a newer contract exists), `parse_staleness`, `cast_integrity`,
+  `grounding`, `citation_presence`, `citation_geometry`, `confidence_threshold`,
+  `duplicate_document` and `field_coverage`.
+- **Business rules are declarative**, read from the registered schema manifest as a closed set of
+  parameterised types: `arithmetic_reconciliation`, `required_fields`, `allowed_values`, `range`,
+  `format` and `comparison`. There is deliberately no expression language: adding a rule *instance*
+  is a governed schema version bump, while adding a rule *type* is a reviewed code change. Rule
+  configuration is validated at registration, so the immutable `schema_hash` only ever covers a
+  known-good configuration.
+
+Supporting decisions:
+
+- `invoice_v2` is registered with explicit signed reconciliation terms and a target, plus range,
+  format and comparison rules. `invoice_v1` remains registered and immutable, and its hash
+  `b02b3c20…640` is unchanged and asserted by a regression test. Because v1 declares no signed
+  terms, its reconciliation rule reports `SKIPPED` rather than the engine guessing the signs.
+- `FieldPolicy.semantic_type` optionally declares that a string field is a date or a currency code,
+  so semantic casting is driven by the registered contract rather than hardcoded per use case.
+- Deterministic validation is pure computation over persisted data. It needs no Databricks Job and
+  completes synchronously, so there is no `RUNNING` state to poll.
+- Absent inputs never produce a pass: a calculation missing a value returns `UNCERTAIN` or
+  `SKIPPED`. Low confidence is a review signal, never proof of an incorrect value.
+- Validators only observe. They never edit an extracted value or approve a document, and neither
+  `VALIDATED_PASS` nor `REVIEW_REQUIRED` means a person has approved anything.
+- Rules are engineer-authored in source-controlled JSON. User-authored rules remain a planned
+  future extension; the closed-set configuration is deliberately shaped so a constrained rule
+  builder could emit it later behind schema registration and approval.
+- Repeated-field rule paths (`line_items[*].amount`) already validate at registration, so the
+  engine needs no redesign when nested line-item extraction lands.
 
 ## Local verification
 
@@ -312,9 +349,53 @@ context and the progress tracker were updated, and the branch was committed and 
   overlay reuses the identical `scaleBoundingBox` contract, citation boxes land on the cited
   regions.
 
+## Commit 9 verification (2026-08-29)
+
+- `make check` passed: 108 backend tests, 20 frontend tests, Ruff, mypy, ESLint, TypeScript, the
+  production build and offline configuration/YAML validation.
+- The governed `validation_runs` table was added to `create_objects.sql`; because every table uses
+  `CREATE TABLE IF NOT EXISTS`, the existing bootstrap covers new and existing environments and no
+  separate migration file was needed.
+- Bootstrap now registers `invoice_v1` and `invoice_v2`; both are present in the dev registry.
+- The deployed App was updated. The first deploy failed because the new least-privilege App binding
+  referenced `idp_dev_validation_runs` before bootstrap created it; running bootstrap first and then
+  redeploying resolved it.
+- Live on invoice `d0ed9896`, validated under `invoice_v2`: 37 observations, 32 passed, zero
+  failures, and reconciliation correctly `UNCERTAIN` because that scanned invoice returns no
+  subtotal or tax. `schema_drift` passes and `schema_version_currency` passes.
+- Live demonstration of the required behaviour, through the deployed App:
+  a balanced invoice reached `VALIDATED_PASS` with 43 of 43 checks passing and reconciliation
+  `PASS`; the same invoice pushed outside tolerance reached `REVIEW_REQUIRED` with a `BLOCKING`
+  reconciliation failure reporting "out by 360, beyond the configured tolerance of 0.01".
+- Four immutable validation runs and their 33, 37, 43 and 43 results are retained in
+  `idp_dev_validation_runs` and `idp_dev_validation_results`.
+
+Two defects were found and fixed while verifying:
+
+- `schema_drift` originally compared the run against the newest registered version, so a document
+  extracted under v1 was wrongly reported as a hash mismatch. Contract integrity and contract
+  currency are now separate observations with accurate messages.
+- The Commit 8 citation overlay assumed a four-value rectangle. The local parser emits an
+  eight-value polygon, which would have rendered zero-height citation boxes in mock mode. Both the
+  overlay and the new geometry validator now reuse the viewer's canonical `normalise_box`
+  convention, which accepts either shape.
+- Re-parsing and re-extracting are now permitted from `VALIDATED_PASS` and `REVIEW_REQUIRED`, so a
+  validated document can still be corrected.
+
 ## Next review boundary
 
-Commit 8 is complete and pushed on `feat/08-extraction-evidence-ui`; the Extraction MVP is tagged
-`mvp-extraction`. The next increment is Commit 9 (deterministic validation): technical and
-arithmetic exceptions identified server-side with `Decimal`, no LLM. Correction, approval, LLM
-validation, and export remain out of scope until their commits.
+Commit 9 is complete and pushed on `feat/09-deterministic-validation`.
+
+The agreed next increment is **line-item extraction**, which the Databricks documentation confirms
+is supported: `ai_extract` accepts `{"type": "array", "items": {"type": "object", "properties": …}}`
+with up to 256 fields and 12 levels of nesting, and returns `value`, `confidence_score` and
+`citation_ids` on each scalar leaf. That maps directly onto `extracted_fields` rows, so no table
+change is expected. Scope: a recursive `ExtractField`, reworking the `field_policies`
+"every field exactly once" rule for nested leaves, registering `invoice` v3, a recursive flattener
+emitting `line_items[0].unit_price`, and UI grouping for repeated fields. The
+`aggregate_comparison` rule type then slots into the existing engine to deliver
+`sum(line_items[*].amount) = total`, which is the check that most directly answers "how do we trust
+this?".
+
+Commit 10 (LLM validation) and Commit 11 (evaluation and demo) follow. Correction, approval, export
+and user-authored rules remain out of scope until their commits.
