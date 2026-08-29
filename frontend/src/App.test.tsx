@@ -72,7 +72,8 @@ describe("App", () => {
 
     await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
     expect(screen.getByText("CASE-1042")).toBeInTheDocument();
-    expect(screen.getByText("UPLOADED")).toBeInTheDocument();
+    // The status also appears as a filter option, so assert the row's own status label.
+    expect(screen.getByText("UPLOADED", { selector: ".status-label" })).toBeInTheDocument();
     expect(screen.queryByText(/Volumes/)).not.toBeInTheDocument();
   });
 

@@ -11,6 +11,10 @@ type DocumentListProps = {
   selectedIds?: Set<string>;
   onToggleSelect?: (documentId: string) => void;
   onToggleAll?: () => void;
+  /** Documents registered before filtering, so the count can say what is being withheld. */
+  totalCount?: number;
+  /** Whether a filter, rather than an empty registry, is what leaves the list short. */
+  filtered?: boolean;
 };
 
 const formatter = new Intl.DateTimeFormat(undefined, {
@@ -32,8 +36,11 @@ export function DocumentList({
   selectedIds,
   onToggleSelect,
   onToggleAll,
+  totalCount,
+  filtered = false,
 }: DocumentListProps) {
   const selectable = Boolean(selectedIds && onToggleSelect && onToggleAll);
+  const withheld = totalCount !== undefined && totalCount !== documents.length;
   const allSelected = Boolean(
     selectable && documents.length > 0 && documents.every((item) => selectedIds?.has(item.document_id)),
   );
@@ -45,7 +52,11 @@ export function DocumentList({
           <h2 id="registry-title">Registered documents</h2>
         </div>
         <div className="registry-actions">
-          <span>{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
+          <span>
+            {withheld
+              ? `${documents.length} of ${totalCount} documents`
+              : `${documents.length} ${documents.length === 1 ? "document" : "documents"}`}
+          </span>
           <button
             className="icon-button"
             type="button"
@@ -62,8 +73,12 @@ export function DocumentList({
       {!loading && !documents.length ? (
         <div className="empty-registry">
           <FileText size={24} aria-hidden="true" />
-          <strong>No documents registered</strong>
-          <span>Uploaded PDFs will appear here.</span>
+          <strong>{filtered ? "No matching documents" : "No documents registered"}</strong>
+          <span>
+            {filtered
+              ? "No registered document matches this filter. Widen the status or search to see more."
+              : "Uploaded PDFs will appear here."}
+          </span>
         </div>
       ) : null}
       {!loading && documents.length ? (

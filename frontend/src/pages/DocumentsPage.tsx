@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
 import { UploadPanel, type UploadInput } from "../components/UploadPanel";
-import type { ApiError, DocumentRecord, Notice } from "../types";
+import type { ApiError, DocumentRecord, DocumentStatus, Notice } from "../types";
 import { useMemo, useState } from "react";
 
 type UploadFailure = {
@@ -36,14 +36,34 @@ export function DocumentsPage({
   const [notice, setNotice] = useState<Notice>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const knownIds = useMemo(
-    () => new Set(documents.map((item) => item.document_id)),
-    [documents],
+  const [status, setStatus] = useState<DocumentStatus | "">("");
+  const [search, setSearch] = useState("");
+
+  // Offer only the statuses the case actually contains, plus whichever one is selected, so
+  // the control never lists a state the registry cannot show or silently drops its own value.
+  const statuses = useMemo(() => {
+    const present = new Set(documents.map((item) => item.status));
+    if (status) present.add(status);
+    return [...present].sort();
+  }, [documents, status]);
+
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return documents.filter(
+      (item) =>
+        (!status || item.status === status) &&
+        (!term || item.file_name.toLowerCase().includes(term)),
+    );
+  }, [documents, status, search]);
+  const visibleIds = useMemo(
+    () => new Set(visible.map((item) => item.document_id)),
+    [visible],
   );
-  // A selection only ever refers to documents still in the registry.
+  // A batch only ever acts on documents the filters leave visible, so a hidden document
+  // can never be swept into a run the user cannot see.
   const selection = useMemo(
-    () => [...selectedIds].filter((id) => knownIds.has(id)),
-    [selectedIds, knownIds],
+    () => [...selectedIds].filter((id) => visibleIds.has(id)),
+    [selectedIds, visibleIds],
   );
 
   function toggleSelect(documentId: string) {
@@ -56,9 +76,16 @@ export function DocumentsPage({
   }
 
   function toggleAll() {
-    setSelectedIds((current) =>
-      current.size === documents.length ? new Set() : new Set(knownIds),
-    );
+    setSelectedIds((current) => {
+      const allSelected =
+        visible.length > 0 && visible.every((item) => current.has(item.document_id));
+      const next = new Set(current);
+      for (const item of visible) {
+        if (allSelected) next.delete(item.document_id);
+        else next.add(item.document_id);
+      }
+      return next;
+    });
   }
 
   function changeCase(caseId: string | null) {
@@ -105,17 +132,43 @@ export function DocumentsPage({
     <section className="intake-layout" aria-label="PDF parsing workspace">
       <UploadPanel uploading={uploading} notice={notice} onUpload={handleUpload} />
       <div className="registry-workspace">
-        <div className="case-filter case-filter-documents">
-          <label htmlFor="document-case-filter">Case</label>
-          <select
-            id="document-case-filter"
-            value={selectedCaseId ?? ""}
-            onChange={(event) => changeCase(event.target.value || null)}
-          >
-            <option value="">All cases</option>
-            {caseIds.map((caseId) => <option key={caseId} value={caseId}>{caseId}</option>)}
-          </select>
-          <span>Filters the registry and available batch selection.</span>
+        <div className="registry-filters">
+          <div className="registry-filter">
+            <label htmlFor="document-case-filter">Case</label>
+            <select
+              id="document-case-filter"
+              value={selectedCaseId ?? ""}
+              onChange={(event) => changeCase(event.target.value || null)}
+            >
+              <option value="">All cases</option>
+              {caseIds.map((caseId) => <option key={caseId} value={caseId}>{caseId}</option>)}
+            </select>
+          </div>
+          <div className="registry-filter">
+            <label htmlFor="document-status-filter">Status</label>
+            <select
+              id="document-status-filter"
+              value={status}
+              onChange={(event) => setStatus(event.target.value as DocumentStatus | "")}
+            >
+              <option value="">All statuses</option>
+              {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </div>
+          <div className="registry-filter">
+            <label htmlFor="document-name-filter">Search</label>
+            <input
+              id="document-name-filter"
+              type="search"
+              value={search}
+              placeholder="File name"
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </div>
+          <p className="registry-filters-hint">
+            The case scopes the registry; status and search narrow what is listed. A batch
+            only ever runs the documents left visible here.
+          </p>
         </div>
         <BatchActions
           selectedIds={selection}
@@ -124,7 +177,9 @@ export function DocumentsPage({
           onDocumentsChanged={onDocumentsChanged}
         />
         <DocumentList
-          documents={documents}
+          documents={visible}
+          totalCount={documents.length}
+          filtered={Boolean(status || search.trim())}
           loading={loading}
           selectedDocumentId={null}
           onRefresh={() => void onDocumentsChanged()}
