@@ -97,7 +97,7 @@ describe("DocumentDetailPage", () => {
     expect(screen.getAllByText("SUCCESS").length).toBeGreaterThan(0);
   });
 
-  it("switches sections without unmounting the page viewer", async () => {
+  it("shows the source and the extracted values side by side", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => {
@@ -105,6 +105,7 @@ describe("DocumentDetailPage", () => {
         if (url.endsWith("/parse-runs")) return { ok: true, json: async () => [] };
         if (url.endsWith("/pages")) return { ok: true, status: 200, json: async () => [] };
         if (url.includes("/extraction-runs")) return { ok: true, json: async () => [] };
+        if (url.includes("/validation-runs")) return { ok: true, json: async () => [] };
         if (url.includes("/api/schemas")) return { ok: true, json: async () => [] };
         return { ok: true, json: async () => record };
       }),
@@ -113,14 +114,27 @@ describe("DocumentDetailPage", () => {
     renderPage();
     await screen.findByText("invoice-1042.pdf");
 
-    expect(screen.getByRole("tab", { name: "Pages" })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(screen.getByRole("tab", { name: "Extraction" }));
-
+    // Extraction is the default, and the source is visible at the same time rather than
+    // behind its own tab, so citing a value never navigates away from the values.
+    expect(screen.getByRole("tab", { name: "Extraction" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     expect(
       await screen.findByRole("heading", { name: "Typed fields and source citations" }),
     ).toBeInTheDocument();
-    // The viewer stays mounted so its loaded image and zoom survive a tab switch, but while
-    // hidden it is correctly kept out of the accessibility tree.
+    expect(screen.getByRole("heading", { name: "Parsed page inspection" })).toBeInTheDocument();
+
+    // Validation swaps only the right-hand panel; the source stays put.
+    fireEvent.click(screen.getByRole("tab", { name: "Validation" }));
+    expect(
+      await screen.findByRole("heading", { name: "Explainable checks and exceptions" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Parsed page inspection" })).toBeInTheDocument();
+
+    // History needs the full width, so the source is hidden but stays mounted, keeping its
+    // loaded page image and zoom.
+    fireEvent.click(screen.getByRole("tab", { name: "History" }));
     expect(
       screen.queryByRole("heading", { name: "Parsed page inspection" }),
     ).not.toBeInTheDocument();

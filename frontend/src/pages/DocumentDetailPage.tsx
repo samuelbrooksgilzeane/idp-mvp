@@ -7,7 +7,7 @@ import { ExtractionPanel } from "../components/ExtractionPanel";
 import { ValidationPanel } from "../components/ValidationPanel";
 import type { ApiError, DocumentRecord, Notice, ParseRun } from "../types";
 
-const TABS = ["Pages", "Extraction", "Validation", "History"] as const;
+const TABS = ["Extraction", "Validation", "History"] as const;
 type Tab = (typeof TABS)[number];
 
 const RETRYABLE = [
@@ -35,7 +35,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  const [tab, setTab] = useState<Tab>("Pages");
+  const [tab, setTab] = useState<Tab>("Extraction");
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(null);
 
   // Fetched by id rather than read from a list, so a deep link or refresh resolves on its own.
@@ -67,7 +67,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
 
   useEffect(() => {
     setCitationTarget(null);
-    setTab("Pages");
+    setTab("Extraction");
     void loadDocument();
     void loadRuns();
   }, [loadDocument, loadRuns]);
@@ -141,8 +141,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
   }
 
   function showEvidence(target: CitationTarget) {
+    // The viewer sits alongside the panel, so citing a value only has to move the highlight.
     setCitationTarget(target);
-    setTab("Pages");
   }
 
   if (state === "loading") {
@@ -226,15 +226,21 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
         ))}
       </div>
 
-      <div className="detail-tab-panel" role="tabpanel">
-        {/* The viewer stays mounted so its loaded page image and zoom survive tab switches. */}
-        <div hidden={tab !== "Pages"}>
+      <div
+        className={`detail-workspace${tab === "History" ? " detail-workspace-single" : ""}`}
+      >
+        {/* The source stays on screen beside the values, so citing a field highlights its
+            region in place rather than navigating away. It also stays mounted while hidden,
+            keeping its loaded page image and zoom across tab switches. */}
+        <div className="detail-evidence" hidden={tab === "History"}>
           <DocumentViewer
             documentId={document.document_id}
             documentStatus={document.status}
             citationTarget={citationTarget}
           />
         </div>
+
+        <div className="detail-panel" role="tabpanel">
         {tab === "Extraction" ? (
           <ExtractionPanel
             document={document}
@@ -287,6 +293,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
             ) : null}
           </>
         ) : null}
+        </div>
       </div>
     </section>
   );

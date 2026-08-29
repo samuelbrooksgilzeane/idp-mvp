@@ -380,9 +380,21 @@ td:first-child { min-width: 190px; }
 .detail-tabs button:hover { color: #2d332d; }
 .detail-tabs button.active { border-bottom-color: #1f7a52; color: #202420; font-weight: 750; }
 .detail-tabs button:focus-visible { outline: 3px solid #1f7a52; outline-offset: -3px; }
-.detail-tab-panel { padding-top: 26px; }
-.detail-tab-panel .document-viewer, .detail-tab-panel .extraction-panel,
-.detail-tab-panel .validation-panel, .detail-tab-panel .schema-viewer { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+/* Source and extracted values sit side by side so evidence resolves in place. */
+/* The values pane takes the slightly larger half so its table clears its 640px minimum
+   without a horizontal scrollbar, while the page image still has room to read. */
+.detail-workspace { padding-top: 26px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); align-items: start; gap: 28px; }
+.detail-workspace-single { grid-template-columns: minmax(0, 1fr); }
+.detail-evidence { position: sticky; top: 16px; min-width: 0; }
+.detail-panel { min-width: 0; }
+.detail-workspace .document-viewer, .detail-workspace .extraction-panel,
+.detail-workspace .validation-panel, .detail-workspace .schema-viewer { margin-bottom: 0; padding-bottom: 0; border-bottom: 0; }
+/* In a narrower column the viewer stacks its element list under the page rather than beside it. */
+.detail-evidence .viewer-workspace { grid-template-columns: minmax(0, 1fr); }
+.detail-evidence .element-inspector { max-height: 260px; border-top: 1px solid #c9ccc5; border-left: 0; }
+.detail-evidence .page-viewport { min-height: 380px; max-height: 520px; padding: 20px; }
+.detail-evidence .element-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.detail-evidence .element-index li:nth-child(even) { border-left: 1px solid #dddfd9; }
 
 footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; align-items: center; justify-content: space-between; gap: 24px; color: #777c77; border-top: 1px solid #d7d8d1; font-size: 11px; }
 
@@ -395,6 +407,8 @@ footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; ali
   .workflow-steps li { flex: 1; }
   .intake-layout { grid-template-columns: 1fr; }
   .upload-panel { padding: 0 0 36px; border-right: 0; border-bottom: 1px solid #d7d8d1; }
+  .detail-workspace { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .detail-evidence { position: static; }
   .viewer-workspace { grid-template-columns: 1fr; }
   .element-inspector { max-height: none; border-top: 1px solid #c9ccc5; border-left: 0; }
   .element-index { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -426,7 +440,7 @@ footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; ali
   .viewer-control-group { justify-content: space-between; }
   .page-viewport { min-height: 360px; padding: 22px 14px; }
   .page-sheet { min-width: 280px; }
-  .element-index { grid-template-columns: 1fr; }
+  .element-index, .detail-evidence .element-index { grid-template-columns: 1fr; }
   .element-index li:nth-child(even) { border-left: 0; }
   footer { padding: 0 20px; }
   footer span:last-child { display: none; }

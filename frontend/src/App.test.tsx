@@ -134,7 +134,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Inspect a document" })).toBeInTheDocument(),
     );
-    expect(screen.getByRole("tab", { name: "Pages" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Extraction" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /All documents/ })).toBeInTheDocument();
   });
 
