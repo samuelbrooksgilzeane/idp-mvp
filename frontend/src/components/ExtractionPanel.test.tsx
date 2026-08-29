@@ -160,8 +160,15 @@ describe("ExtractionPanel", () => {
 
     // Raw value preserved, typed value projected, confidence framed as metadata.
     expect(await screen.findByText("28-Jul-2011")).toBeInTheDocument();
-    expect(screen.getByText("2011-07-28")).toBeInTheDocument();
-    expect(screen.getAllByText("Model confidence 100%").length).toBeGreaterThan(0);
+    // Confidence is model metadata, so the column header carries the label and the cell
+    // carries only the number.
+    expect(screen.getByRole("columnheader", { name: "Model confidence" })).toBeInTheDocument();
+    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
+    // The typed projection is not shown; the raw extracted value is what is reviewed.
+    expect(screen.queryByText("2011-07-28")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "Typed value" }),
+    ).not.toBeInTheDocument();
 
     // Null field renders an explicit state, not a blank cell.
     expect(screen.getAllByText("Not returned").length).toBeGreaterThan(0);
@@ -199,8 +206,8 @@ describe("ExtractionPanel", () => {
       <ExtractionPanel document={document} onViewEvidence={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
 
-    // Latest run first: 888.55 shows as both the raw and the typed value.
-    expect(await screen.findAllByText("888.55")).toHaveLength(2);
+    // Latest run first: the raw extracted value appears once, not duplicated by a typed column.
+    expect(await screen.findAllByText("888.55")).toHaveLength(1);
 
     fireEvent.change(screen.getByRole("combobox"), {
       target: { value: olderRunId },

@@ -302,7 +302,7 @@ td:first-child { min-width: 190px; }
 .extraction-status-running { border-color: #cdd0c8; background: #f2f2ec; color: #5b615a; }
 .extraction-disclaimer { display: flex; align-items: center; gap: 7px; margin: 14px 0 10px; color: #6e756e; font-size: 10px; line-height: 1.5; }
 .extraction-table-scroll { overflow-x: auto; }
-.extraction-table { min-width: 640px; }
+.extraction-table { min-width: 500px; }
 .extraction-table th { padding: 0 7px; }
 .extraction-table th:first-child { padding-left: 14px; }
 .extraction-table td { min-height: 0; padding: 13px 7px; vertical-align: top; white-space: nowrap; }

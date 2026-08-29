@@ -336,11 +336,7 @@ export function ExtractionPanel({
         <p className="extraction-error" role="alert">The extracted fields could not be loaded.</p>
       ) : null}
       {resultState === "ready" && result ? (
-        <FieldTable
-          fields={result.fields}
-          candidate={result.candidate}
-          onViewEvidence={handleViewEvidence}
-        />
+        <FieldTable fields={result.fields} onViewEvidence={handleViewEvidence} />
       ) : null}
     </section>
   );
@@ -361,11 +357,9 @@ function RunProvenance({ run }: { run: ExtractionRun }) {
 
 function FieldTable({
   fields,
-  candidate,
   onViewEvidence,
 }: {
   fields: ExtractedField[];
-  candidate: InvoiceCandidate | null;
   onViewEvidence: (field: ExtractedField) => void;
 }) {
   const header = fields.filter((field) => !field.field_path.includes("["));
@@ -382,14 +376,12 @@ function FieldTable({
             <tr>
               <th>Field</th>
               <th>Extracted value</th>
-              <th>Typed value</th>
-              <th>Confidence</th>
+              <th>Model confidence</th>
               <th>Evidence</th>
             </tr>
           </thead>
           <tbody>
             {header.map((field) => {
-              const typed = typedValue(field.field_path, candidate);
               const hasCitation = field.citations.some((citation) => citation.bbox.length > 0);
               return (
                 <tr key={field.field_path}>
@@ -401,7 +393,6 @@ function FieldTable({
                     ) : null}
                   </td>
                   <td>{field.value_string ?? <span className="value-null">Not returned</span>}</td>
-                  <td>{typed ?? <span className="value-null">—</span>}</td>
                   <td>{formatConfidence(field.confidence_score)}</td>
                   <td>
                     {hasCitation ? (
@@ -492,7 +483,9 @@ function RepeatedFieldTable({
                       <span className="line-value">
                         {field.value_string ?? <span className="value-null">Not returned</span>}
                       </span>
-                      <small>{formatConfidence(field.confidence_score)}</small>
+                      <small title="Model confidence">
+                        {formatConfidence(field.confidence_score)}
+                      </small>
                       {cited ? (
                         <button
                           type="button"
@@ -517,28 +510,9 @@ function RepeatedFieldTable({
   );
 }
 
-const CANDIDATE_BY_FIELD: Record<string, keyof InvoiceCandidate> = {
-  invoice_number: "invoice_number",
-  invoice_date: "invoice_date",
-  seller_name: "seller_name",
-  subtotal: "subtotal",
-  discount: "discount_amount",
-  tax: "tax_amount",
-  total: "total_amount",
-  currency: "currency",
-};
-
-function typedValue(fieldPath: string, candidate: InvoiceCandidate | null): string | null {
-  if (!candidate) return null;
-  const key = CANDIDATE_BY_FIELD[fieldPath];
-  if (!key) return null;
-  const value = candidate[key];
-  return value === null || value === undefined ? null : String(value);
-}
-
 function formatConfidence(confidence: number | null): string {
   if (confidence === null) return "Not reported";
-  return `Model confidence ${Math.round(confidence * 100)}%`;
+  return `${Math.round(confidence * 100)}%`;
 }
 
 function latestSuccessfulId(runs: ExtractionRun[]): string | null {
