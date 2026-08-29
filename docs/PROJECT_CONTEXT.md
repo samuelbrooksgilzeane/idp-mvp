@@ -8,10 +8,14 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/10-line-item-extraction`
+- Current implementation branch: `feat/13-batch-processing`
 - The Parsing MVP is accepted and tagged `mvp-parsing`.
 - The Extraction MVP (commits 6–8) is complete and tagged `mvp-extraction`.
-- Line-item extraction is implemented, deployed, verified live, and committed.
+- Batch processing is implemented, deployed, verified live, and committed.
+- **Branches form a linear stack**: each is built on the previous one, so
+  `feat/13-batch-processing` contains every change listed below. Start any new work from it.
+- Work now follows [the working plan](implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md),
+  an agreed insertion into the numbered pack. **Section D is next.**
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -29,6 +33,9 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 8: extraction evidence UI | `feat/08-extraction-evidence-ui` | `41ee11e` | Implemented, deployed, and verified live |
 | Commit 9: deterministic validation | `feat/09-deterministic-validation` | `5eec8b4` | Implemented, deployed, and verified live |
 | Line-item extraction (inserted) | `feat/10-line-item-extraction` | `0dbe759` | Implemented, deployed, and verified live |
+| Plan section A: multi-page UI | `feat/11-multi-page-ui` | `58cc981`, `7b37402`, `beda63b` | Implemented, deployed, and verified live |
+| Plan section B: typed line candidates | `feat/12-typed-line-candidates` | `60ccb00` | Implemented, deployed, and verified live |
+| Plan section C: batch processing | `feat/13-batch-processing` | `45f001a` | Implemented, deployed, and verified live |
 
 ## Implemented capabilities
 
@@ -195,6 +202,45 @@ Supporting decisions:
   confidence and its own evidence control into the page viewer.
 - Line items are deliberately not projected into `invoice_candidates`; a typed line table is
   deferred.
+
+### Multi-page workspace (plan section A)
+
+- `react-router-dom` routes: registry at `/`, a document at `/documents/:id`, results at
+  `/results`, and the extraction contract at `/schema`.
+- `SinglePageStaticFiles` in `main.py` falls back to the client entry point for extension-less
+  paths, so a deep link or refresh resolves; a genuinely missing asset still returns 404.
+- The document page keeps the **source viewer on the left and the panel on the right**, so citing
+  a value moves the highlight rather than navigating. Tabs (Extraction, Validation, History) swap
+  only the right pane; the viewer stays mounted while hidden so its page image and zoom survive.
+- The values table shows field, raw extracted value, model confidence and evidence. The typed
+  projection column was removed on request and the confidence unit lives in the column header.
+- Shared types live in `frontend/src/types.ts`; pages live in `frontend/src/pages/`.
+
+### Typed line-item candidates (plan section B)
+
+- Governed `invoice_line_candidates` table: `line_number`, `description`,
+  `quantity DECIMAL(18,4)`, and `unit_price`, `tax`, `amount` as `DECIMAL(18,2)`.
+- Written alongside the header candidate by both the Databricks task and the local executor.
+- `line_number` is **one-based** for reading; the matching evidence path is
+  `line_items[line_number - 1]`.
+- Only lines the model returned produce rows. An invoice with no line table yields none, never a
+  zero-valued row that could satisfy a later reconciliation.
+
+### Batch processing (plan section C)
+
+- `POST /api/batches/parse` and `POST /api/batches/extract` take a set of document IDs;
+  `GET /api/batches/{kind}/{job_run_id}` aggregates member runs into batch progress.
+- Both Jobs wrap their existing per-document task in a `for_each` whose inputs are a trusted job
+  parameter. **Concurrency is set explicitly from `batch_concurrency` (default 16) because
+  `for_each` defaults to 1 and would otherwise run sequentially**; `scripts/validate_configuration.py`
+  asserts this so the default cannot creep back in.
+- A batch is one job run, so members share a `job_run_id`; **no new table was needed**.
+- Preconditions are evaluated per document: an ineligible document is reported against itself and
+  the rest of the batch still runs.
+- A single document is a batch of one, so there is one submission path rather than two.
+- The API exposes documents and a batch identity but never the execution engine, so plan section F
+  can replace `for_each` without touching the contract or the client.
+- Registry multi-select and a batch action bar with per-batch progress.
 
 ## Local verification
 
@@ -431,14 +477,27 @@ One defect was found and fixed while verifying:
 
 ## Next review boundary
 
-Commit 9 is complete and pushed on `feat/09-deterministic-validation`.
+Everything through **plan section C is complete, verified live and pushed**. The authoritative
+plan, its decisions and the remaining sections are in
+[`implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md`](implementation/13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md).
 
-Line-item extraction is complete and pushed on `feat/10-line-item-extraction`.
+**Next: plan section D** — the `invoice_summary` view, the two-sheet XLSX export, and case
+filtering. Section B already reduces the aggregation to a plain `GROUP BY`, and
+`frontend/src/pages/ResultsPage.tsx` is an intentional placeholder waiting for it.
 
-The next increment is **Commit 10 (source-grounded LLM validation)**. Two prerequisites apply:
-`validation_endpoint` is still deployed as `unused`, so a Databricks-hosted serving endpoint must
-exist before it can be verified live; and `FieldPolicy` needs an optional `llm_validate` flag,
-following the same optional-field pattern that keeps registered hashes stable. `validation_results`
-already reserves `prompt_hash` and `validator_type`, so no table change is expected. Commit 11
-(evaluation and demo) then closes the Validated MVP milestone. Correction, approval, export
-and user-authored rules remain out of scope until their commits.
+**Then section E**, which is blocked on infrastructure: `validation_endpoint` is still deployed as
+the literal string `unused`, so a Databricks model serving endpoint must exist before LLM
+validation can be verified live. The Knowledge Assistant table requirements are recorded in the
+plan.
+
+To resume:
+
+```bash
+git checkout feat/13-batch-processing
+make check          # expect 132 backend and 29 frontend tests
+```
+
+Deploying to dev needs the two-step ordering whenever a release adds both a governed table and an
+App binding that references it: `bundle deploy` (the App update fails), then
+`bundle run … governed_data_bootstrap` to create the table, then `bundle deploy` again, then
+`bundle run … idp_app` to publish the App source.

@@ -43,6 +43,11 @@ Python 3.11+ FastAPI application, dependency definitions, and backend tests.
 | `dependencies.py` | Builds mock or Databricks service adapters from trusted settings. |
 | `documents.py` | Upload, document-list, and document-detail endpoints. |
 | `parsing.py` | Parse trigger, parse history, and run polling endpoints. |
+| `viewer.py` | Page metadata, page-image streaming, and filtered element endpoints. |
+| `schemas.py` | Production schema list and version-detail endpoints. |
+| `extraction.py` | Extraction trigger, run history, latest and per-run result endpoints. |
+| `validation.py` | Validation trigger, run history, latest, per-run and summary endpoints. |
+| `batches.py` | Batch submission and batch progress. Never exposes the execution engine. |
 
 ### `backend/src/idp_app/core/`
 
@@ -92,14 +97,24 @@ React, TypeScript, and Vite user interface.
 
 | File or folder | Purpose |
 |---|---|
-| `main.tsx` | Browser entry point that mounts the React application. |
-| `App.tsx` | Runtime health, document loading, selection, upload, parse triggering, polling, and top-level layout. |
+| `main.tsx` | Browser entry point that mounts the router and application. |
+| `App.tsx` | Application shell: runtime health, document loading, and route definitions. |
+| `types.ts` | Shared public API types used by pages and components. |
+| `pages/DocumentsPage.tsx` | Registry, upload, multi-select, and batch actions. |
+| `pages/DocumentDetailPage.tsx` | One document: source viewer beside tabbed extraction, validation and history. |
+| `pages/ResultsPage.tsx` | Cross-document summary and export. Placeholder until plan section D. |
+| `pages/SchemaPage.tsx` | The extraction contract, which is per use case rather than per document. |
 | `App.test.tsx` | Frontend workflow tests using mocked API responses. |
 | `styles.css` | Application-wide responsive visual system. |
-| `components/WorkflowHeader.tsx` | Ordered workflow navigation and active increment. |
+| `components/WorkflowHeader.tsx` | Section navigation with the active route highlighted. |
 | `components/UploadPanel.tsx` | PDF selection, case metadata, and upload controls. |
 | `components/DocumentList.tsx` | Registry table, refresh, status, and document selection. |
-| `components/DocumentDetail.tsx` | Parse/retry control, document metadata, and immutable parse history. |
+| `components/DocumentViewer.tsx` | Page image, element overlays, zoom, and citation evidence highlighting. |
+| `components/ExtractionPanel.tsx` | Extraction runs, provenance, field values with confidence and evidence. |
+| `components/ValidationPanel.tsx` | Validation runs, outcome summary, and filterable exceptions. |
+| `components/SchemaViewer.tsx` | Read-only registered extraction contract. |
+| `components/BatchActions.tsx` | Batch parse and extract for the current selection, with progress. |
+| `components/viewerGeometry.ts` | Bounding-box scaling shared by element and citation overlays. |
 | `test/setup.ts` | Vitest and DOM test setup. |
 
 Generated frontend dependencies and production output live in `frontend/node_modules/` and `frontend/dist/`. Both are ignored and must not be committed.
@@ -120,7 +135,8 @@ Databricks Asset Bundle resources and governed processing tasks. Browser input m
 | File | Purpose |
 |---|---|
 | `bootstrap.job.yml` | Runs governed object creation followed by the guarded parsing-column migration. |
-| `parsing.job.yml` | Defines the parameterized serverless document-parser Job. |
+| `parsing.job.yml` | Serverless document-parser Job. Runs its per-document task through a `for_each` at the trusted `batch_concurrency`. |
+| `extraction.job.yml` | Serverless document-extractor Job, batched the same way. |
 | `application.app.yml` | Creates the Databricks App and binds trusted runtime configuration plus least-privilege Job, warehouse, volume, and table resources. |
 
 ### `databricks_etl/sql/`
@@ -129,12 +145,15 @@ Databricks Asset Bundle resources and governed processing tasks. Browser input m
 |---|---|
 | `create_objects.sql` | Creates the project schema, volumes, seven Delta tables, and three views using trusted parameters. |
 | `migrate_parsing.sql` | Idempotently adds Commit 4 audit and polling columns to an existing parse-run table. |
+| `migrate_extraction.sql` | Idempotently adds the Commit 7 extraction-run polling column. |
 
 ### `databricks_etl/src/`
 
 | File | Purpose |
 |---|---|
 | `parse_document.py` | Validates Job parameters, calls `ai_parse_document` version `2.0`, retains raw `VARIANT`, derives parse fields, and updates terminal states. |
+| `extract_document.py` | Re-verifies the registered schema hash, selects the latest successful parse, calls `ai_extract` `2.1`, retains the raw result first, then flattens and projects typed candidates. |
+| `register_schemas.py` | Independently re-validates and idempotently registers a source-controlled schema manifest. |
 
 ## `docs/`
 
@@ -151,6 +170,8 @@ Project documentation and engineering handoff material.
 - `00_START_HERE.md` defines how to use the ordered pack.
 - `01_TECHNICAL_CONTRACTS.md` defines cross-increment technical contracts.
 - `02_...` through `12_...` define each ordered implementation increment.
+- `13_PLAN_BATCH_UI_EXPORT_ASSISTANT.md` is the current working plan, an agreed insertion
+  covering batch processing, the multi-page UI, export, and the conversational layer.
 - `PROGRESS_TRACKER.md` is the authoritative concise capability-status record.
 - `FIRST_CODEX_SESSION.md` retains the original first-session execution instructions.
 
