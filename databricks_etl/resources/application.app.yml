@@ -57,6 +57,12 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_parsed_documents
             permission: MODIFY
+        - name: schema-registry-table-select
+          description: Read access to approved extraction schema metadata.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry
+            permission: SELECT
       config:
         command:
           - uv

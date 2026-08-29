@@ -1,0 +1,108 @@
+{
+  "schema_id": "invoice",
+  "schema_version": 1,
+  "display_name": "Invoice v1",
+  "use_case": "invoice",
+  "status": "PRODUCTION",
+  "instructions": "Extract only values explicitly stated in the source invoice. Do not infer, calculate, reconcile, or populate a missing value. Preserve stated signs and currency context. Return null when the source does not state a value.",
+  "ai_extract_schema": {
+    "invoice_number": {
+      "type": "string",
+      "description": "Invoice identifier exactly as stated by the seller."
+    },
+    "invoice_date": {
+      "type": "string",
+      "description": "Invoice issue date exactly as stated in the source document."
+    },
+    "seller_name": {
+      "type": "string",
+      "description": "Legal or trading name of the seller issuing the invoice."
+    },
+    "subtotal": {
+      "type": "number",
+      "description": "Subtotal stated before discounts and tax, without a currency symbol."
+    },
+    "discount": {
+      "type": "number",
+      "description": "Discount amount explicitly stated on the invoice, without a currency symbol."
+    },
+    "tax": {
+      "type": "number",
+      "description": "Total tax amount explicitly stated on the invoice, without a currency symbol."
+    },
+    "total": {
+      "type": "number",
+      "description": "Final invoice total explicitly stated as payable, without a currency symbol."
+    },
+    "currency": {
+      "type": "string",
+      "description": "Currency code or currency name explicitly stated for the invoice amounts."
+    }
+  },
+  "field_policies": {
+    "invoice_number": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "invoice_date": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "seller_name": {
+      "required": true,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "subtotal": {
+      "required": false,
+      "confidence_threshold": 0.85,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "discount": {
+      "required": false,
+      "confidence_threshold": 0.8,
+      "citation_required": true,
+      "risk_tier": "medium"
+    },
+    "tax": {
+      "required": false,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "total": {
+      "required": true,
+      "confidence_threshold": 0.95,
+      "citation_required": true,
+      "risk_tier": "high"
+    },
+    "currency": {
+      "required": true,
+      "confidence_threshold": 0.9,
+      "citation_required": true,
+      "risk_tier": "high"
+    }
+  },
+  "document_rules": [
+    {
+      "rule_id": "invoice_total_reconciliation",
+      "rule_type": "arithmetic_reconciliation",
+      "description": "Check whether subtotal minus discount plus tax equals total.",
+      "field_paths": ["subtotal", "discount", "tax", "total"],
+      "tolerance": 0.01
+    },
+    {
+      "rule_id": "required_invoice_identity",
+      "rule_type": "required_fields",
+      "description": "Check that the invoice number, invoice date, seller name, total, and currency are present.",
+      "field_paths": ["invoice_number", "invoice_date", "seller_name", "total", "currency"],
+      "tolerance": null
+    }
+  ]
+}

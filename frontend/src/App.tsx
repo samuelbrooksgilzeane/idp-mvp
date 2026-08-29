@@ -235,13 +235,13 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} activeStep={2} />
+      <WorkflowHeader appName={appName} activeStep={3} />
       <main>
         <section className="page-heading" aria-labelledby="page-title">
           <div>
             <p className="eyebrow">Document processing</p>
-            <h1 id="page-title">Parse and inspect</h1>
-            <p>Register PDFs, run layout parsing, and inspect every detected region.</p>
+            <h1 id="page-title">Inspect and prepare extraction</h1>
+            <p>Parse PDFs, inspect detected regions, and review the approved extraction contract.</p>
           </div>
           <dl className="runtime-summary" aria-label="Runtime status">
             <div><dt>Runtime</dt><dd>{runtimeMode}</dd></div>
@@ -275,7 +275,7 @@ export function App() {
       </main>
       <footer>
         <span>Retained parser contract 2.0</span>
-        <span>Authenticated page inspection enabled</span>
+        <span>Approved schema registry enabled</span>
       </footer>
     </div>
   );

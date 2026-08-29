@@ -26,3 +26,22 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
+        - task_key: register_production_schemas
+          depends_on:
+            - task_key: migrate_parsing_columns
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/invoice_v1.json
+          environment_key: default
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"

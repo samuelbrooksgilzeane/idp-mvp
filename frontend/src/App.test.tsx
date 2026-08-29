@@ -39,7 +39,7 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Parse and inspect" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Inspect and prepare extraction" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "MVP workflow" })).toHaveTextContent("Ingest");
     await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());

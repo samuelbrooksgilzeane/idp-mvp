@@ -97,3 +97,37 @@ class PageResponse(BaseModel):
     element_count: int
     element_types: list[str]
     image_url: str
+
+
+class SchemaSummaryResponse(BaseModel):
+    schema_id: str
+    schema_version: int
+    display_name: str
+    use_case: str
+    schema_hash: str
+    status: Literal["PRODUCTION"]
+
+
+class SchemaFieldResponse(BaseModel):
+    field_path: str
+    label: str
+    field_type: str
+    description: str
+    required: bool
+    citation_required: bool
+    confidence_threshold: float
+    risk_tier: Literal["low", "medium", "high"]
+
+
+class SchemaRuleResponse(BaseModel):
+    rule_id: str
+    rule_type: str
+    description: str
+    field_paths: list[str]
+    tolerance: float | None
+
+
+class SchemaDetailResponse(SchemaSummaryResponse):
+    instructions: str
+    fields: list[SchemaFieldResponse]
+    document_rules: list[SchemaRuleResponse]

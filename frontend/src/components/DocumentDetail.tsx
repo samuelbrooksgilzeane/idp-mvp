@@ -2,6 +2,7 @@ import { Clock3, FileSearch, LoaderCircle, Play, RotateCcw } from "lucide-react"
 
 import type { DocumentRecord, ParseRun } from "../App";
 import { DocumentViewer } from "./DocumentViewer";
+import { SchemaViewer } from "./SchemaViewer";
 
 type DocumentDetailProps = {
   document: DocumentRecord | null;
@@ -67,6 +68,8 @@ export function DocumentDetail({
         documentId={document.document_id}
         documentStatus={document.status}
       />
+
+      <SchemaViewer useCase={document.use_case} />
 
       <div className="history-heading">
         <div><Clock3 size={16} aria-hidden="true" /><h3>Parse history</h3></div>

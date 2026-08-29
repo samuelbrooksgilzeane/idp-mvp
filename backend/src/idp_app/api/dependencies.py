@@ -19,6 +19,11 @@ from idp_app.services.parse_runs import (
     SQLiteParseRunRepository,
 )
 from idp_app.services.parsing import ParsingService
+from idp_app.services.schema_registry import (
+    DatabricksSchemaRepository,
+    SQLiteSchemaRepository,
+)
+from idp_app.services.schemas import SchemaService, load_source_manifests
 from idp_app.services.viewer import (
     DatabricksPageImageStorage,
     LocalPageImageStorage,
@@ -192,6 +197,55 @@ def build_viewer_service(settings: Settings) -> ViewerService:
             project_schema,
             artifacts_volume_name,
         ),
+    )
+
+
+def get_schema_service(request: Request) -> SchemaService:
+    existing = getattr(request.app.state, "schema_service", None)
+    if isinstance(existing, SchemaService):
+        return existing
+
+    settings = cast(Settings, request.app.state.settings)
+    service = build_schema_service(settings)
+    request.app.state.schema_service = service
+    return service
+
+
+def build_schema_service(settings: Settings) -> SchemaService:
+    if settings.mode is IdpMode.MOCK:
+        repository = SQLiteSchemaRepository(
+            settings.local_data_dir / "registry.sqlite3"
+        )
+        for manifest in load_source_manifests():
+            repository.register(manifest, "source-controlled-bootstrap")
+        return SchemaService(repository)
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    sql_client = DatabricksDocumentRegistry(
+        client,
+        warehouse_id,
+        catalog,
+        project_schema,
+        table_prefix,
+    )
+    return SchemaService(
+        DatabricksSchemaRepository(
+            sql_client,
+            catalog,
+            project_schema,
+            table_prefix,
+        )
     )
 
 

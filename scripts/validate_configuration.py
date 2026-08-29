@@ -88,8 +88,11 @@ def validate_data_bootstrap() -> None:
         raise ValueError("Bundle must define the governed_data_bootstrap job")
 
     tasks = bootstrap.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 2:
-        raise ValueError("Governed data bootstrap must contain two reviewed SQL tasks")
+    if not isinstance(tasks, list) or len(tasks) != 3:
+        raise ValueError(
+            "Governed data bootstrap must contain the reviewed creation, migration, "
+            "and schema-registration tasks"
+        )
     sql_task = tasks[0].get("sql_task", {})
     if sql_task.get("warehouse_id") != "${var.warehouse_id}":
         raise ValueError("Governed data bootstrap must use the trusted warehouse variable")
@@ -104,6 +107,27 @@ def validate_data_bootstrap() -> None:
         raise ValueError("Bootstrap must use the reviewed parsing migration")
     if migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
         raise ValueError("Parsing migration parameters must match the trusted contract")
+
+    registration_task = tasks[2]
+    registration_python = registration_task.get("spark_python_task", {})
+    if registration_task.get("depends_on") != [
+        {"task_key": "migrate_parsing_columns"}
+    ]:
+        raise ValueError("Schema registration must run after governed migrations")
+    if registration_python.get("python_file") != "../src/register_schemas.py":
+        raise ValueError("Bootstrap must use the reviewed schema registration task")
+    expected_registration_parameters = [
+        "--catalog",
+        "${var.catalog}",
+        "--project-schema",
+        "${var.project_schema}",
+        "--table-prefix",
+        "${var.table_prefix}",
+        "--manifest-path",
+        "${workspace.file_path}/schemas/invoice_v1.json",
+    ]
+    if registration_python.get("parameters") != expected_registration_parameters:
+        raise ValueError("Schema registration parameters must match the trusted contract")
 
     sql = (ROOT / "databricks_etl" / "sql" / "create_objects.sql").read_text(
         encoding="utf-8"
@@ -198,6 +222,7 @@ def validate_application_resource() -> None:
         "documents-table-modify",
         "parsed-documents-table-select",
         "parsed-documents-table-modify",
+        "schema-registry-table-select",
     }
     if not required_bindings.issubset(binding_names):
         raise ValueError("Databricks App resource bindings are incomplete")

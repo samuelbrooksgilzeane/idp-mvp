@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,8 @@ PARSING_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql"
 BUNDLE_RESOURCE = ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml"
 APP_RESOURCE = ROOT / "databricks_etl" / "resources" / "application.app.yml"
 BUNDLE_CONFIG = ROOT / "databricks_etl" / "databricks.yml"
+SCHEMA_REGISTRATION = ROOT / "databricks_etl" / "src" / "register_schemas.py"
+INVOICE_MANIFEST = ROOT / "schemas" / "invoice_v1.json"
 
 
 def test_object_names_resolve_only_to_configured_namespace() -> None:
@@ -86,6 +89,13 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
         "project_schema": "${var.project_schema}",
         "table_prefix": "${var.table_prefix}",
     }
+    assert tasks[2]["task_key"] == "register_production_schemas"
+    assert tasks[2]["depends_on"] == [{"task_key": "migrate_parsing_columns"}]
+    assert tasks[2]["spark_python_task"]["python_file"] == "../src/register_schemas.py"
+    assert tasks[2]["spark_python_task"]["parameters"][-1] == (
+        "${workspace.file_path}/schemas/invoice_v1.json"
+    )
+    assert tasks[2]["environment_key"] == "default"
 
 
 def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:
@@ -131,6 +141,27 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
     assert bindings["documents-table-modify"]["uc_securable"]["permission"] == (
         "MODIFY"
     )
+    assert bindings["schema-registry-table-select"]["uc_securable"] == {
+        "securable_type": "TABLE",
+        "securable_full_name": (
+            "${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry"
+        ),
+        "permission": "SELECT",
+    }
+
+
+def test_schema_registration_task_is_immutable_and_source_controlled() -> None:
+    registration = SCHEMA_REGISTRATION.read_text(encoding="utf-8")
+    normalized = " ".join(registration.upper().split())
+    manifest = json.loads(INVOICE_MANIFEST.read_text(encoding="utf-8"))
+
+    assert manifest["status"] == "PRODUCTION"
+    assert "WHEN NOT MATCHED THEN INSERT" in normalized
+    assert "SCHEMA_HASH" in normalized
+    assert "INCREMENT SCHEMA_VERSION" in normalized
+    assert " DELETE " not in f" {normalized} "
+    assert " DROP " not in f" {normalized} "
+    assert " TRUNCATE " not in f" {normalized} "
 
 
 def test_bundle_sync_includes_app_source_and_built_frontend() -> None:

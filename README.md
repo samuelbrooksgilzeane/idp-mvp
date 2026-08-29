@@ -1,6 +1,6 @@
 # IDP MVP
 
-Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, an idempotent document parsing workflow, and an authenticated parsed-page viewer. Extraction is not included.
+Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, an idempotent document parsing workflow, an authenticated parsed-page viewer, and a versioned read-only extraction schema registry. Extraction execution is not included.
 
 ## Prerequisites
 
@@ -111,6 +111,15 @@ GET /api/documents/{document_id}/elements?page_id={page_id}&type={optional_type}
 
 The viewer reads only the latest successful parse for the requested registered document. Page-image bytes are streamed through the authenticated backend, and responses never expose internal artifact paths or tokens. The React viewer supports page navigation, zoom, accessible element-type filters, scaled labelled overlays, and an element inspector with confidence and extracted content. Image loading remains incremental, one selected page at a time.
 
+## Extraction schema API
+
+```text
+GET /api/schemas?status=PRODUCTION&use_case=invoice
+GET /api/schemas/{schema_id}/versions/{schema_version}
+```
+
+`schemas/invoice_v1.json` is the source-controlled extraction contract. The governed bootstrap validates and registers it idempotently, hashes canonical JSON, and refuses to alter an existing `schema_id + schema_version` when its content differs. The browser receives only approved production metadata and a read-only field-policy view; it cannot submit raw schema JSON. Commit 6 does not call `ai_extract`.
+
 The Databricks Job reads only the server-registered source path, pins `ai_parse_document` to version `2.0`, leaves `descriptionElementTypes` empty, and renders images under the configured artifacts volume. It retains the complete `VARIANT` response before deriving text, page count, image references, and parse errors. Source PDFs are never moved or deleted. The App service principal needs `CAN MANAGE RUN` on the parser Job in addition to its intake grants. The Job run identity needs `READ VOLUME` on the source volume, `READ VOLUME` and `WRITE VOLUME` on the artifacts volume, and `SELECT` plus `MODIFY` on the documents and parsed-documents tables.
 
 In an authenticated environment, supply the required bundle variables through the approved deployment configuration and run:
@@ -130,6 +139,6 @@ Running the bootstrap twice is the live idempotency check. After both runs, insp
 
 The bundle also creates the Databricks App and binds its service principal to the
 configured SQL warehouse, parser Job, source/artifact volumes, documents table,
-and parsed-documents table with capability-specific permissions. The deployed App
+parsed-documents table, and schema-registry table with capability-specific permissions. The deployed App
 runs with `IDP_MODE=databricks`; resource IDs are injected from App resource
 bindings rather than copied into browser requests or committed configuration.
