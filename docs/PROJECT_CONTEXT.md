@@ -8,9 +8,9 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/06-schema-registry-viewer`
+- Current implementation branch: `feat/07-extraction-pipeline`
 - The Parsing MVP is accepted and tagged `mvp-parsing`.
-- Commit 6 is implemented, deployed, verified, and committed.
+- Commit 7 is implemented, deployed, verified live end to end, and committed.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -24,6 +24,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 4: parsing pipeline | `feat/04-parsing-pipeline` | `9ce5f16` | Pushed |
 | Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | `91e111c` | Pushed and accepted |
 | Commit 6: schema registry and viewer | `feat/06-schema-registry-viewer` | `727041c` | Implemented and deployed |
+| Commit 7: extraction pipeline | `feat/07-extraction-pipeline` | `72e0db3` | Implemented, deployed, and verified live |
 
 ## Implemented capabilities
 
@@ -91,6 +92,30 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Browser responses expose safe field and policy metadata, not raw schema JSON.
 - Read-only selector, provenance, field-policy table, and calibration notice in the document UI.
 - No `ai_extract`, extracted values, correction, or validation functionality yet.
+
+### Extraction pipeline
+
+- `POST /api/documents/{document_id}/extract` with a body restricted to governed schema identity.
+- `GET /api/documents/{document_id}/extraction-runs` and
+  `GET /api/documents/{document_id}/extractions/latest`.
+- Preconditions: a successful parse, a `PRODUCTION` schema version, and a schema/document
+  use-case match; the browser supplies only `schema_id` and `schema_version`.
+- Trusted Job parameters only: `document_id`, schema identity, and authenticated requester.
+- Parameterised Databricks extraction Job that independently reloads and hash-verifies the exact
+  schema row and deterministically selects the latest successful parse before calling `ai_extract`.
+- `ai_extract` version `2.1` in precision mode with citations and confidence scores enabled,
+  passing only `ai_extract_schema_json` and the versioned server-side instructions.
+- Complete raw `ai_result` persisted before any flattening; a returned error fails the run
+  without logging document text.
+- Generic scalar flattening driven by the registered schema, per-field confidence parsing and
+  range checking, and citation-ID resolution to page and bounding-box evidence (including
+  missing-citation handling).
+- Explicit typed projection: `DECIMAL(18,2)` amounts and unambiguous invoice dates, with the
+  original extracted value preserved alongside the typed value.
+- Typed `invoice_v1` candidate projection; candidate data is explicitly not approved data.
+- Immutable retries: each attempt is a new run; history is retained and the latest successful
+  run is selected deterministically.
+- No evidence interaction, validation, editing, approval, or export functionality yet.
 
 ## Local verification
 
@@ -168,8 +193,89 @@ Additional live hardening checks remain:
 Capabilities 2 through 6 are `COMPLETE`. The Parsing MVP is tagged and the first
 Extraction MVP capability is deployed. Extraction execution has not started.
 
+## Commit 7 continuation handoff
+
+Work began from `43c26b0` on branch `feat/07-extraction-pipeline`. The extraction pipeline is
+now implemented, deployed, verified live end to end, and committed. Existing untracked `output/`
+files remain present and were neither removed nor added to Git.
+
+Implemented locally:
+
+- `POST /api/documents/{document_id}/extract` with a body restricted to governed schema identity.
+- Immutable extraction history and deterministic latest-successful result APIs.
+- Exact production-schema, successful-parse, and use-case preconditions.
+- Fixed `ai_extract` 2.1 precision, citation, and confidence options plus the source
+  idempotency key `document_id + parse_run_id + schema_id + schema_version + extractor_version`.
+- SQLite and Databricks run repositories, complete raw-result retention, generic scalar
+  flattening, citation resolution, typed invoice projection, and visible immutable retries.
+- Parameterized Databricks extraction Job with an independent registry hash check and
+  deterministic latest-successful-parse check before calling `ai_extract`.
+- Guarded extraction-run `job_run_id` migration and least-privilege App bindings.
+- No evidence interaction, validation, editing, approval, or export functionality.
+
+Local evidence:
+
+- `make check` passed with 65 backend tests and 11 frontend tests, followed by Ruff,
+  mypy, ESLint, TypeScript checking, the production build, and offline bundle validation.
+- The Vite-to-FastAPI path completed extraction run
+  `beb9f4f9-71e9-4de0-85b1-7ddbee3d5890` for local document
+  `c7b2d26c-cefd-50b6-a6c0-b58af1de44ea`.
+- That run returned all eight schema fields with confidence and resolved page-zero boxes,
+  and projected invoice `INV-LOCAL-7`, date `2026-08-29`, seller
+  `Acme Supplies Ltd`, and `100.00 - 5.00 + 19.00 = 114.00 GBP` into typed values.
+- The preserved scanned invoice also reached `EXTRACTED` in mock mode with null values,
+  which is expected because the local PyMuPDF parser does not perform OCR.
+
+Databricks live verification (completed 2026-08-29):
+
+- Databricks CLI `1.14.1` (official Homebrew tap) with refreshed OAuth profile `idp-mvp` for
+  `https://dbc-97e4a372-40b1.cloud.databricks.com`.
+- Bootstrap Job `297705320672479` run `1031773756031830` succeeded, including
+  `create_governed_objects`, `migrate_parsing_columns`, and `migrate_extraction_columns`.
+- The bundle-managed `idp-mvp-dev` App deployment reached `SUCCEEDED`; `/api/health` reports
+  `mode=databricks` with `parse_job_id` and `extraction_job_id` present.
+- `POST /api/documents/d0ed9896-.../extract` with schema `invoice` v1 was triggered twice
+  through the authenticated App, producing extraction Job runs `222795856966902` and
+  `817490446741663`. Both reached `TERMINATED/SUCCESS`; both immutable extraction runs
+  (`19978032-845f-4831-a968-8dffcb54cef0` and `13e7ac76-093f-481d-8360-42375bc8bda8`) are
+  `EXTRACTED` and remain visible, with the latest deterministically the newest.
+- Latest run `13e7ac76-093f-481d-8360-42375bc8bda8` reconciles across the governed tables to
+  schema hash `b02b3c20d69e7f77ed76e45337107d4995aafab5ee411ab4f2e73b166876c640`:
+  raw `ai_result` retained; 8 `idp_dev_extracted_fields` rows; one `idp_dev_invoice_candidates`
+  row. Extracted fields include confidence `1.0` and resolved page-0 citation boxes
+  (for example `invoice_date` cites bbox `[3,112,417,304]` on page 0, `total` cites
+  `[893,1542,1222,1579]`).
+- Typed projection: `invoice_number=INV/06-92/543`, `seller_name=Mclean-Cochran`,
+  `discount_amount=29.87`, `total_amount=888.55`, `currency=EUR`, and `invoice_date=2011-07-28`.
+- Between the two runs the date typing was hardened: `parse_date` (Databricks Job) and
+  `_date_value` (local backend) now accept unambiguous four-digit-year named-month formats in
+  addition to ISO, so `28-Jul-2011` types to `2011-07-28` while the raw value stays preserved
+  in `extracted_fields`. Ambiguous numeric forms such as `dd/mm/yyyy` intentionally remain null.
+  The first run predates this fix and correctly shows a null typed `invoice_date` with the raw
+  value retained; the second run shows the typed date. `make check` (66 backend, 11 frontend
+  tests) was re-run and passed after the fix.
+
+Use these trusted dev values for subsequent bundle commands:
+
+```text
+catalog=workspace
+project_schema=idp_mvp
+source_volume_name=idp_source
+artifacts_volume_name=idp_artifacts
+warehouse_id=647704f77f24020a
+validation_endpoint=unused
+evaluation_experiment=unused
+app_name=idp-mvp
+```
+
+All six continuation steps are complete: the App deployment was confirmed and health-checked,
+extraction was triggered and polled to `EXTRACTED`, the raw/generic/typed outputs were
+reconciled against the governed tables, `make check` was re-run after the date-typing fix, this
+context and the progress tracker were updated, and the branch was committed and pushed. Capability
+7 is `COMPLETE`.
+
 ## Next review boundary
 
-1. Review the registered field names and initial policy thresholds before extraction.
-2. Perform the additional live hardening checks above when practical.
-3. Start `docs/implementation/08_COMMIT_EXTRACTION_PIPELINE.md` on its own feature branch.
+Commit 7 is complete and pushed on `feat/07-extraction-pipeline`. The next increment is
+Commit 8 (extraction evidence UI), which links typed fields to their supporting PDF regions.
+Evidence interaction, validation, editing, approval, and export remain out of scope until then.
