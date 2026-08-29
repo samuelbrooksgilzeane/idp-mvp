@@ -5,6 +5,7 @@ from idp_app.api.extraction import extraction_router
 from idp_app.api.models import HealthResponse
 from idp_app.api.parsing import parsing_router
 from idp_app.api.schemas import schemas_router
+from idp_app.api.validation import validation_router
 from idp_app.api.viewer import viewer_router
 from idp_app.core.config import Settings
 from idp_app.services.health import build_health_response
@@ -15,6 +16,7 @@ api_router.include_router(parsing_router)
 api_router.include_router(viewer_router)
 api_router.include_router(schemas_router)
 api_router.include_router(extraction_router)
+api_router.include_router(validation_router)
 
 
 @api_router.get("/health", response_model=HealthResponse, tags=["system"])

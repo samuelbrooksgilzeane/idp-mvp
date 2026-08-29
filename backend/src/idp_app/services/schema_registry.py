@@ -109,7 +109,7 @@ class SQLiteSchemaRepository:
         if use_case is not None:
             statement += " AND use_case = ?"
             parameters += (use_case,)
-        statement += " ORDER BY display_name, schema_version DESC"
+        statement += " ORDER BY schema_id, schema_version DESC"
         with self._connect() as connection:
             rows = connection.execute(statement, parameters).fetchall()
         return [_sqlite_row_to_record(row) for row in rows]
@@ -173,7 +173,7 @@ class DatabricksSchemaRepository:
         if use_case is not None:
             statement += " AND use_case = :use_case"
             values["use_case"] = use_case
-        statement += " ORDER BY display_name, schema_version DESC"
+        statement += " ORDER BY schema_id, schema_version DESC"
         return [
             _databricks_row_to_record(row)
             for row in self._sql_client.execute_sql(statement, values)

@@ -273,7 +273,7 @@ def _parsed_elements(parsed: dict[str, Any] | None) -> list[ParsedElement]:
         raw_boxes = raw_element.get("bbox")
         if isinstance(raw_boxes, list):
             for raw_box in raw_boxes:
-                box = _normalise_box(raw_box)
+                box = normalise_box(raw_box)
                 if box is not None:
                     boxes.append(box)
         confidence = _number(raw_element.get("confidence"))
@@ -292,7 +292,7 @@ def _parsed_elements(parsed: dict[str, Any] | None) -> list[ParsedElement]:
     return elements
 
 
-def _normalise_box(raw_box: object) -> BoundingBox | None:
+def normalise_box(raw_box: object) -> BoundingBox | None:
     if not isinstance(raw_box, dict):
         return None
     page_id = _integer(raw_box.get("page_id"))

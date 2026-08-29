@@ -87,7 +87,14 @@ export function ExtractionPanel({
   const [error, setError] = useState<string | null>(null);
   const evidenceNonce = useRef(0);
 
-  const parsed = ["PARSED", "EXTRACTING", "EXTRACTED", "EXTRACT_FAILED"].includes(document.status);
+  const parsed = [
+    "PARSED",
+    "EXTRACTING",
+    "EXTRACTED",
+    "EXTRACT_FAILED",
+    "VALIDATED_PASS",
+    "REVIEW_REQUIRED",
+  ].includes(document.status);
 
   const loadRuns = useCallback(
     async (signal?: AbortSignal): Promise<ExtractionRun[]> => {

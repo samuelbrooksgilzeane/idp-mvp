@@ -158,6 +158,25 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
 USING DELTA
 COMMENT 'Immutable technical, arithmetic, model, and future reconciliation results';
 
+CREATE TABLE IF NOT EXISTS IDENTIFIER(
+  :catalog || '.' || :project_schema || '.' || :table_prefix || '_validation_runs'
+) (
+  validation_run_id STRING COMMENT 'Immutable validation attempt identifier',
+  document_id STRING COMMENT 'Registered source document identifier',
+  extraction_run_id STRING COMMENT 'Extraction attempt evaluated by this validation run',
+  schema_id STRING COMMENT 'Registered extraction schema identifier',
+  schema_version INT COMMENT 'Registered extraction schema version',
+  schema_hash STRING COMMENT 'Immutable hash of the evaluated schema contract',
+  validator_version STRING COMMENT 'Deterministic validator version that produced the results',
+  status STRING COMMENT 'Validation attempt lifecycle status',
+  document_status STRING COMMENT 'Resulting document status, which is not an approval',
+  requested_by STRING COMMENT 'Authenticated application user who requested validation',
+  started_at TIMESTAMP COMMENT 'Validation attempt start time',
+  completed_at TIMESTAMP COMMENT 'Validation attempt completion time'
+)
+USING DELTA
+COMMENT 'Immutable deterministic validation attempts and their resulting document status';
+
 CREATE OR REPLACE VIEW IDENTIFIER(
   :catalog || '.' || :project_schema || '.' || :table_prefix || '_latest_successful_parses'
 )

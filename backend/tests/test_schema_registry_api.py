@@ -96,17 +96,17 @@ def test_production_schema_list_filters_by_use_case(client: TestClient) -> None:
     response = client.get("/api/schemas?status=PRODUCTION&use_case=invoice")
 
     assert response.status_code == 200
-    assert response.json() == [
-        {
-            "schema_id": "invoice",
-            "schema_version": 1,
-            "display_name": "Invoice v1",
-            "use_case": "invoice",
-            "schema_hash": response.json()[0]["schema_hash"],
-            "status": "PRODUCTION",
-        }
+    payload = response.json()
+    # Every registered production version stays listed, newest first, so a prior version
+    # remains selectable and inspectable.
+    assert [(item["schema_id"], item["schema_version"]) for item in payload] == [
+        ("invoice", 2),
+        ("invoice", 1),
     ]
-    assert len(response.json()[0]["schema_hash"]) == 64
+    assert payload[0]["display_name"] == "Invoice v2"
+    assert all(len(item["schema_hash"]) == 64 for item in payload)
+    assert payload[0]["schema_hash"] != payload[1]["schema_hash"]
+    assert all(item["status"] == "PRODUCTION" for item in payload)
     assert client.get("/api/schemas?status=PRODUCTION&use_case=contract").json() == []
 
 

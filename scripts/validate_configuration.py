@@ -88,10 +88,17 @@ def validate_data_bootstrap() -> None:
         raise ValueError("Bundle must define the governed_data_bootstrap job")
 
     tasks = bootstrap.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 4:
+    expected_tasks = [
+        "create_governed_objects",
+        "migrate_parsing_columns",
+        "migrate_extraction_columns",
+        "register_production_schemas",
+        "register_production_schemas_v2",
+    ]
+    if not isinstance(tasks, list) or [t.get("task_key") for t in tasks] != expected_tasks:
         raise ValueError(
             "Governed data bootstrap must contain the reviewed creation, migration, "
-            "and schema-registration tasks"
+            "and schema-registration tasks in order"
         )
     sql_task = tasks[0].get("sql_task", {})
     if sql_task.get("warehouse_id") != "${var.warehouse_id}":

@@ -22,7 +22,13 @@ from idp_app.services.parse_runs import ParseRunRepository
 from idp_app.services.schema_registry import SchemaRepository
 
 EXTRACTOR_VERSION = "2.1"
-ELIGIBLE_DOCUMENT_STATES = {"PARSED", "EXTRACTED", "EXTRACT_FAILED"}
+ELIGIBLE_DOCUMENT_STATES = {
+    "PARSED",
+    "EXTRACTED",
+    "EXTRACT_FAILED",
+    "VALIDATED_PASS",
+    "REVIEW_REQUIRED",
+}
 
 
 class ExtractionService:

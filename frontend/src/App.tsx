@@ -19,7 +19,10 @@ export type DocumentStatus =
   | "PARSE_FAILED"
   | "EXTRACTING"
   | "EXTRACTED"
-  | "EXTRACT_FAILED";
+  | "EXTRACT_FAILED"
+  | "VALIDATING"
+  | "VALIDATED_PASS"
+  | "REVIEW_REQUIRED";
 
 export type DocumentRecord = {
   document_id: string;

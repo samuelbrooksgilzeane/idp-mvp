@@ -410,11 +410,9 @@ export function DocumentViewer({
                     aria-label={`Evidence for ${citationTarget.fieldLabel}`}
                   >
                     {citationBoxes.map((citation, index) => {
-                      const scaled = scaleBoundingBox(
-                        citationToBox(citation),
-                        naturalSize,
-                        renderedSize,
-                      );
+                      const box = citationToBox(citation);
+                      if (box === null) return null;
+                      const scaled = scaleBoundingBox(box, naturalSize, renderedSize);
                       return (
                         <div
                           className="citation-box"

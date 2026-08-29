@@ -10,6 +10,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,149}$")
+# A rule may target a top-level field ("total"), a repeated element ("line_items[0].amount")
+# or every element of a repeated field ("line_items[*].amount"). Repeated forms are accepted
+# now so the rule engine needs no redesign when nested extraction lands.
+_SEGMENT = r"[A-Za-z_][A-Za-z0-9_]{0,149}(?:\[(?:\*|\d+)\])?"
+RULE_PATH = re.compile(rf"^{_SEGMENT}(?:\.{_SEGMENT})*$")
+
+
+def rule_path_root(path: str) -> str:
+    """Return the top-level extraction field that a rule path targets."""
+    return re.split(r"[.\[]", path, maxsplit=1)[0]
 
 
 class ExtractField(BaseModel):
@@ -38,16 +48,52 @@ class FieldPolicy(BaseModel):
     confidence_threshold: float = Field(ge=0, le=1)
     citation_required: bool
     risk_tier: Literal["low", "medium", "high"]
+    # Optional declared meaning behind a raw string field, so semantic casting is validated from
+    # the registered contract rather than hardcoded per use case. Optional keeps existing
+    # manifests byte-identical under `canonical_json`.
+    semantic_type: Literal["date", "currency_code"] | None = None
+
+
+class RuleTerm(BaseModel):
+    """One signed operand of an arithmetic reconciliation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_path: str = Field(min_length=1, max_length=200)
+    sign: Literal["+", "-"] = "+"
 
 
 class DocumentRule(BaseModel):
+    """A declarative business rule.
+
+    Every parameter beyond the original contract is optional and defaults to None so that
+    `SchemaManifest.canonical_json` (which excludes null values) keeps already-registered
+    manifests byte-identical, preserving their immutable `schema_hash`.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     rule_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
-    rule_type: Literal["arithmetic_reconciliation", "required_fields"]
+    rule_type: Literal[
+        "arithmetic_reconciliation",
+        "required_fields",
+        "allowed_values",
+        "range",
+        "format",
+        "comparison",
+    ]
     description: str = Field(min_length=1, max_length=1000)
     field_paths: list[str] = Field(min_length=1)
     tolerance: float | None = Field(default=None, ge=0)
+    severity: Literal["INFO", "WARNING", "BLOCKING"] | None = None
+    terms: list[RuleTerm] | None = Field(default=None, min_length=1)
+    target: str | None = None
+    allowed_values: list[str] | None = Field(default=None, min_length=1)
+    minimum: float | None = None
+    maximum: float | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=500)
+    comparator: Literal["lt", "le", "gt", "ge", "eq", "ne"] | None = None
+    compare_to: str | None = None
 
 
 class SchemaManifest(BaseModel):
@@ -71,13 +117,57 @@ class SchemaManifest(BaseModel):
         schema_fields = set(self.ai_extract_schema)
         if set(self.field_policies) != schema_fields:
             raise ValueError("field_policies must define every extraction field exactly once")
+        rule_ids: set[str] = set()
         for rule in self.document_rules:
-            unknown = set(rule.field_paths) - schema_fields
-            if unknown:
-                raise ValueError(f"document rule references unknown field: {sorted(unknown)[0]}")
-            if rule.rule_type == "arithmetic_reconciliation" and rule.tolerance is None:
-                raise ValueError("arithmetic reconciliation rules require a tolerance")
+            if rule.rule_id in rule_ids:
+                raise ValueError(f"duplicate document rule: {rule.rule_id}")
+            rule_ids.add(rule.rule_id)
+            self._validate_rule(rule, schema_fields)
         return self
+
+    @staticmethod
+    def _validate_rule(rule: DocumentRule, schema_fields: set[str]) -> None:
+        """Reject a malformed rule at registration so the schema hash covers valid config only."""
+        referenced = list(rule.field_paths)
+        if rule.terms:
+            referenced.extend(term.field_path for term in rule.terms)
+        if rule.target:
+            referenced.append(rule.target)
+        if rule.compare_to:
+            referenced.append(rule.compare_to)
+        for path in referenced:
+            if RULE_PATH.fullmatch(path) is None:
+                raise ValueError(f"document rule references an invalid field path: {path}")
+            if rule_path_root(path) not in schema_fields:
+                raise ValueError(f"document rule references unknown field: {path}")
+
+        if rule.rule_type == "arithmetic_reconciliation":
+            if rule.tolerance is None:
+                raise ValueError("arithmetic reconciliation rules require a tolerance")
+            if rule.terms is not None and rule.target is None:
+                raise ValueError("arithmetic reconciliation terms require a target")
+        elif rule.rule_type == "allowed_values":
+            if not rule.allowed_values:
+                raise ValueError("allowed_values rules require allowed_values")
+        elif rule.rule_type == "range":
+            if rule.minimum is None and rule.maximum is None:
+                raise ValueError("range rules require a minimum or a maximum")
+            if (
+                rule.minimum is not None
+                and rule.maximum is not None
+                and rule.minimum > rule.maximum
+            ):
+                raise ValueError("range rules require minimum <= maximum")
+        elif rule.rule_type == "format":
+            if not rule.pattern:
+                raise ValueError("format rules require a pattern")
+            try:
+                re.compile(rule.pattern)
+            except re.error as error:
+                raise ValueError(f"format rule pattern is invalid: {error}") from error
+        elif rule.rule_type == "comparison":
+            if rule.comparator is None or rule.compare_to is None:
+                raise ValueError("comparison rules require a comparator and compare_to")
 
     def canonical_json(self) -> str:
         return json.dumps(

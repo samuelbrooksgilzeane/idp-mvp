@@ -96,3 +96,41 @@ class InvoiceCandidateRecord:
     currency: str | None
     extraction_run_id: str
     schema_version: int
+
+
+@dataclass(frozen=True)
+class ValidationResultRecord:
+    """One immutable observation produced by a validator. It never edits extracted data."""
+
+    validation_run_id: str
+    extraction_run_id: str
+    document_id: str
+    rule_id: str
+    field_path: str | None
+    validator_type: str
+    severity: str
+    status: str
+    message: str
+    actual_value: str | None
+    expected_value: str | None
+    suggested_value: str | None
+    evidence: str | None
+    validator_version: str
+    prompt_hash: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ValidationRunRecord:
+    validation_run_id: str
+    document_id: str
+    extraction_run_id: str
+    schema_id: str
+    schema_version: int
+    schema_hash: str
+    validator_version: str
+    status: str
+    document_status: str
+    requested_by: str
+    started_at: datetime
+    completed_at: datetime | None

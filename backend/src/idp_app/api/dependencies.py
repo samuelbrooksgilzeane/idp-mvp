@@ -33,6 +33,11 @@ from idp_app.services.schema_registry import (
     SQLiteSchemaRepository,
 )
 from idp_app.services.schemas import SchemaService, load_source_manifests
+from idp_app.services.validation_runs import (
+    DatabricksValidationRunRepository,
+    SQLiteValidationRunRepository,
+)
+from idp_app.services.validation_service import ValidationService
 from idp_app.services.viewer import (
     DatabricksPageImageStorage,
     LocalPageImageStorage,
@@ -337,3 +342,52 @@ def _required(value: str | None, name: str) -> str:
     if value is None:
         raise RuntimeError(f"Required trusted setting is absent: {name}")
     return value
+
+
+def get_validation_service(request: Request) -> ValidationService:
+    existing = getattr(request.app.state, "validation_service", None)
+    if isinstance(existing, ValidationService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    service = build_validation_service(settings)
+    request.app.state.validation_service = service
+    return service
+
+
+def build_validation_service(settings: Settings) -> ValidationService:
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    if settings.mode is IdpMode.MOCK:
+        mock_documents = SQLiteDocumentRegistry(database_path)
+        mock_schemas = SQLiteSchemaRepository(database_path)
+        for manifest in load_source_manifests():
+            mock_schemas.register(manifest, "source-controlled-bootstrap")
+        return ValidationService(
+            mock_documents,
+            SQLiteParseRunRepository(database_path),
+            SQLiteExtractionRunRepository(database_path),
+            mock_schemas,
+            SQLiteValidationRunRepository(database_path),
+        )
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    documents = DatabricksDocumentRegistry(
+        client, warehouse_id, catalog, project_schema, table_prefix
+    )
+    return ValidationService(
+        documents,
+        DatabricksParseRunRepository(documents, catalog, project_schema, table_prefix),
+        DatabricksExtractionRunRepository(documents, catalog, project_schema, table_prefix),
+        DatabricksSchemaRepository(documents, catalog, project_schema, table_prefix),
+        DatabricksValidationRunRepository(documents, catalog, project_schema, table_prefix),
+    )

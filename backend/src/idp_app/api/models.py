@@ -44,6 +44,9 @@ class DocumentResponse(BaseModel):
         "EXTRACTING",
         "EXTRACTED",
         "EXTRACT_FAILED",
+        "VALIDATING",
+        "VALIDATED_PASS",
+        "REVIEW_REQUIRED",
     ]
     uploaded_by: str
     uploaded_at: datetime
@@ -204,3 +207,58 @@ class ExtractionResultResponse(BaseModel):
     run: ExtractionRunResponse
     fields: list[ExtractedFieldResponse]
     candidate: InvoiceCandidateResponse | None
+
+
+class ValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    extraction_run_id: str | None = None
+
+
+class ValidationResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    rule_id: str
+    field_path: str | None
+    validator_type: str
+    severity: Literal["INFO", "WARNING", "BLOCKING"]
+    status: Literal["PASS", "FAIL", "UNCERTAIN", "SKIPPED"]
+    message: str
+    actual_value: str | None
+    expected_value: str | None
+    evidence: str | None
+    validator_version: str
+
+
+class ValidationRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    validation_run_id: str
+    document_id: str
+    extraction_run_id: str
+    schema_id: str
+    schema_version: int
+    schema_hash: str
+    validator_version: str
+    status: str
+    document_status: Literal["VALIDATED_PASS", "REVIEW_REQUIRED"]
+    requested_by: str
+    started_at: datetime
+    completed_at: datetime | None
+
+
+class ValidationSummaryResponse(BaseModel):
+    total: int
+    passed: int
+    failed: int
+    uncertain: int
+    skipped: int
+    blocking: int
+    warning: int
+    info: int
+
+
+class ValidationReportResponse(BaseModel):
+    run: ValidationRunResponse
+    summary: ValidationSummaryResponse
+    results: list[ValidationResultResponse]

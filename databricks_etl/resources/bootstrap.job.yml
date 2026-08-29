@@ -52,6 +52,21 @@ resources:
               - --manifest-path
               - ${workspace.file_path}/schemas/invoice_v1.json
           environment_key: default
+        - task_key: register_production_schemas_v2
+          depends_on:
+            - task_key: register_production_schemas
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/invoice_v2.json
+          environment_key: default
       environments:
         - environment_key: default
           spec:

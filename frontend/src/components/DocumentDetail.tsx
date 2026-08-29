@@ -5,6 +5,7 @@ import type { DocumentRecord, ParseRun } from "../App";
 import { DocumentViewer, type CitationTarget } from "./DocumentViewer";
 import { ExtractionPanel } from "./ExtractionPanel";
 import { SchemaViewer } from "./SchemaViewer";
+import { ValidationPanel } from "./ValidationPanel";
 
 type DocumentDetailProps = {
   document: DocumentRecord | null;
@@ -45,9 +46,14 @@ export function DocumentDetail({
     );
   }
 
-  const retry = ["PARSED", "PARSE_FAILED", "EXTRACTED", "EXTRACT_FAILED"].includes(
-    document.status,
-  );
+  const retry = [
+    "PARSED",
+    "PARSE_FAILED",
+    "EXTRACTED",
+    "EXTRACT_FAILED",
+    "VALIDATED_PASS",
+    "REVIEW_REQUIRED",
+  ].includes(document.status);
   const unavailable = ["PARSING", "EXTRACTING"].includes(document.status) || starting;
 
   return (
@@ -90,6 +96,12 @@ export function DocumentDetail({
       />
 
       <ExtractionPanel
+        document={document}
+        onViewEvidence={setCitationTarget}
+        onDocumentsChanged={onDocumentsChanged}
+      />
+
+      <ValidationPanel
         document={document}
         onViewEvidence={setCitationTarget}
         onDocumentsChanged={onDocumentsChanged}

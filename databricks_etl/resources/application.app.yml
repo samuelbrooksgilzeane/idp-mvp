@@ -92,6 +92,18 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_candidates
             permission: SELECT
+        - name: validation-runs-modify
+          description: Record immutable deterministic validation attempts.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_validation_runs
+            permission: MODIFY
+        - name: validation-results-modify
+          description: Record immutable deterministic validation observations.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_validation_results
+            permission: MODIFY
       config:
         command:
           - uv

@@ -8,6 +8,7 @@ TABLE_NAMES = (
     "extracted_fields",
     "invoice_candidates",
     "validation_results",
+    "validation_runs",
 )
 
 VIEW_NAMES = (

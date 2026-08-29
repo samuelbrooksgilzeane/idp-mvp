@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+ALLOWED_MANIFESTS = frozenset({"invoice_v1.json", "invoice_v2.json"})
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SCHEMA_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
 FIELD_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,149}$")
@@ -49,8 +50,8 @@ def validate_parameters(parameters: Parameters) -> None:
     )
     if any(SIMPLE_IDENTIFIER.fullmatch(value) is None for value in identifiers):
         raise ValueError("Databricks object configuration contains an invalid identifier")
-    if parameters.manifest_path.name != "invoice_v1.json":
-        raise ValueError("Only the source-controlled invoice_v1 manifest may be registered")
+    if parameters.manifest_path.name not in ALLOWED_MANIFESTS:
+        raise ValueError("Only source-controlled invoice manifests may be registered")
 
 
 def load_manifest(path: Path) -> dict[str, Any]:

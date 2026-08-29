@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from idp_app.core.config import Settings
 from idp_app.main import create_app
 from idp_app.services.parse_runs import SQLiteParseRunRepository
-from idp_app.services.viewer import _normalise_box
+from idp_app.services.viewer import normalise_box
 
 
 def _pdf_bytes(text: str = "Invoice 5814\nService fee GBP 842.75") -> bytes:
@@ -171,8 +171,8 @@ def test_page_image_cannot_cross_parse_run_boundary(tmp_path: Path) -> None:
 
 
 def test_bounding_boxes_normalise_databricks_rectangles_and_mock_polygons() -> None:
-    rectangle = _normalise_box({"page_id": 0, "coord": [17, 850, 1425, 1310]})
-    polygon = _normalise_box(
+    rectangle = normalise_box({"page_id": 0, "coord": [17, 850, 1425, 1310]})
+    polygon = normalise_box(
         {"page_id": 2, "coord": [10, 20, 90, 20, 90, 70, 10, 70]}
     )
 
