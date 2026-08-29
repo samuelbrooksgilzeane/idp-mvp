@@ -203,6 +203,23 @@ class InvoiceCandidateResponse(BaseModel):
     schema_version: int
 
 
+class InvoiceSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    document_id: str
+    file_name: str
+    case_id: str | None
+    invoice_number: str | None
+    invoice_date: date | None
+    seller_name: str | None
+    currency: str | None
+    line_item_count: int
+    line_items_sum: Decimal | None
+    total_amount: Decimal | None
+    reconciliation_delta: Decimal | None
+    document_status: Literal["VALIDATED_PASS", "REVIEW_REQUIRED"] | None
+
+
 class ExtractionResultResponse(BaseModel):
     run: ExtractionRunResponse
     fields: list[ExtractedFieldResponse]

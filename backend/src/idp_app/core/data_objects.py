@@ -16,6 +16,7 @@ VIEW_NAMES = (
     "latest_successful_parses",
     "latest_successful_extractions",
     "validation_summary",
+    "invoice_summary",
 )
 
 

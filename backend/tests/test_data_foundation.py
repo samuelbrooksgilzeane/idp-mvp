@@ -69,6 +69,11 @@ def test_views_declare_stable_empty_result_schemas() -> None:
     assert "WHERE STATUS = 'EXTRACTED'" in sql
     assert "'_VALIDATION_SUMMARY'" in sql
     assert "COUNT_IF(STATUS = 'PASS') AS PASS_COUNT" in sql
+    assert "'_INVOICE_SUMMARY'" in sql
+    assert "SUM(AMOUNT) AS LINE_ITEMS_SUM" in sql
+    assert "AS RECONCILIATION_DELTA" in sql
+    assert "LATEST_VALIDATIONS.DOCUMENT_STATUS" in sql
+    assert "COALESCE(CANDIDATES.DISCOUNT_AMOUNT" not in sql
 
 
 def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
@@ -167,6 +172,13 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
         "securable_type": "TABLE",
         "securable_full_name": (
             "${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry"
+        ),
+        "permission": "SELECT",
+    }
+    assert bindings["invoice-summary-select"]["uc_securable"] == {
+        "securable_type": "TABLE",
+        "securable_full_name": (
+            "${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_summary"
         ),
         "permission": "SELECT",
     }

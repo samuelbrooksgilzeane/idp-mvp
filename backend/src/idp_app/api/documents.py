@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 
 from idp_app.api.dependencies import get_authenticated_user, get_document_service
 from idp_app.api.models import (
@@ -79,9 +79,18 @@ async def upload_documents(
 @documents_router.get("", response_model=list[DocumentResponse])
 async def list_documents(
     service: Annotated[DocumentService, Depends(get_document_service)],
+    case_id: Annotated[str | None, Query(max_length=200)] = None,
 ) -> list[DocumentResponse]:
-    documents = await service.list_documents()
+    selected_case = case_id.strip() if case_id and case_id.strip() else None
+    documents = await service.list_documents(selected_case)
     return [DocumentResponse.model_validate(document) for document in documents]
+
+
+@documents_router.get("/cases", response_model=list[str])
+async def list_document_cases(
+    service: Annotated[DocumentService, Depends(get_document_service)],
+) -> list[str]:
+    return await service.list_case_ids()
 
 
 @documents_router.get(

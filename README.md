@@ -64,7 +64,7 @@ Databricks mode validates all required settings before application startup and d
 
 ## Governed data bootstrap
 
-`databricks_etl/sql/create_objects.sql` creates the configured project schema, source and artifacts volumes, seven governed Delta tables, and three views. All table and view names use the target-specific prefix. The migration uses `IF NOT EXISTS`, never creates a catalog, and contains no `DROP` or `TRUNCATE` operation. Reverting application code does not remove persisted objects.
+`databricks_etl/sql/create_objects.sql` creates the configured project schema, source and artifacts volumes, nine governed Delta tables, and four views. All table and view names use the target-specific prefix. The migration uses `IF NOT EXISTS`, never creates a catalog, and contains no `DROP` or `TRUNCATE` operation. Reverting application code does not remove persisted objects.
 
 The bundle defines dev and prod targets in the same project schema, using `idp_dev` and `idp` table prefixes respectively. It deliberately contains no workspace hostname or credentials.
 
@@ -84,12 +84,27 @@ For document intake, the Databricks App service principal additionally needs `RE
 ```text
 POST /api/documents
 GET  /api/documents
+GET  /api/documents?case_id={case_id}
+GET  /api/documents/cases
 GET  /api/documents/{document_id}
 ```
 
 `POST /api/documents` accepts one or more multipart `files` fields plus optional `case_id`; the server fixes the current profile to `invoice_v1`. Files must have a `.pdf` extension, `application/pdf` media type, and `%PDF-` signature. Uploads are streamed and hashed with SHA-256. Duplicate content is rejected before another active registry row is created, even when the filename changes.
 
 Stable errors include `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `DOCUMENT_DUPLICATE`, `FILE_STORAGE_FAILED`, and `REGISTRY_WRITE_FAILED`. A mixed multi-file result uses HTTP 207 and reports each rejected file explicitly. No route accepts a volume or table path.
+
+## Results and export API
+
+```text
+GET /api/results/invoices?case_id={optional_case_id}
+GET /api/exports/invoices.xlsx?case_id={optional_case_id}
+```
+
+The results route reads the latest successful extraction for each invoice and returns its line
+count, line sum, stated total, reconciliation delta, and latest completed validation outcome. The
+XLSX export applies the same optional case scope and contains `Summary` and `Line items` sheets so
+the aggregate can be checked against its billed-line detail. Neither response exposes source paths
+or extraction-run identifiers.
 
 ## Parsing API
 

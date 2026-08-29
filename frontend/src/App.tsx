@@ -49,12 +49,15 @@ export function App() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [documentsLoading, setDocumentsLoading] = useState(true);
+  const [caseIds, setCaseIds] = useState<string[]>([]);
+  const [documentCaseId, setDocumentCaseId] = useState<string | null>(null);
   const location = useLocation();
 
-  const loadDocuments = useCallback(async (signal?: AbortSignal) => {
+  const loadDocuments = useCallback(async (caseId: string | null, signal?: AbortSignal) => {
     setDocumentsLoading(true);
     try {
-      const response = await fetch("/api/documents", { signal });
+      const query = caseId ? `?case_id=${encodeURIComponent(caseId)}` : "";
+      const response = await fetch(`/api/documents${query}`, { signal });
       if (!response.ok) throw new Error("Documents request failed");
       setDocuments((await response.json()) as DocumentRecord[]);
     } catch (error: unknown) {
@@ -65,6 +68,25 @@ export function App() {
       if (!signal?.aborted) setDocumentsLoading(false);
     }
   }, []);
+
+  const loadCaseIds = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch("/api/documents/cases", { signal });
+      if (!response.ok) throw new Error("Cases request failed");
+      const payload = (await response.json()) as unknown;
+      setCaseIds(
+        Array.isArray(payload)
+          ? payload.filter((item): item is string => typeof item === "string")
+          : [],
+      );
+    } catch (error: unknown) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setCaseIds([]);
+    }
+  }, []);
+
+  const refreshDocuments = useCallback(async () => {
+    await Promise.all([loadDocuments(documentCaseId), loadCaseIds()]);
+  }, [documentCaseId, loadCaseIds, loadDocuments]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,9 +101,10 @@ export function App() {
           setRuntime({ kind: "unavailable" });
         }
       });
-    void loadDocuments(controller.signal);
+    void loadDocuments(null, controller.signal);
+    void loadCaseIds(controller.signal);
     return () => controller.abort();
-  }, [loadDocuments]);
+  }, [loadCaseIds, loadDocuments]);
 
   const appName = runtime.kind === "ready" ? runtime.health.application_name : "IDP MVP";
   const runtimeMode = runtime.kind === "ready" ? runtime.health.mode : "unknown";
@@ -117,15 +140,21 @@ export function App() {
               <DocumentsPage
                 documents={documents}
                 loading={documentsLoading}
-                onDocumentsChanged={loadDocuments}
+                caseIds={caseIds}
+                selectedCaseId={documentCaseId}
+                onCaseChanged={(caseId) => {
+                  setDocumentCaseId(caseId);
+                  void loadDocuments(caseId);
+                }}
+                onDocumentsChanged={refreshDocuments}
               />
             }
           />
           <Route
             path="/documents/:documentId"
-            element={<DocumentDetailPage onDocumentsChanged={() => void loadDocuments()} />}
+            element={<DocumentDetailPage onDocumentsChanged={() => void refreshDocuments()} />}
           />
-          <Route path="/results" element={<ResultsPage />} />
+          <Route path="/results" element={<ResultsPage caseIds={caseIds} />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
       </main>

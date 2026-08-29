@@ -46,3 +46,18 @@ export type ParseRun = {
 export type ApiError = { error: { code: string; message: string } };
 
 export type Notice = { kind: "success" | "error"; message: string } | null;
+
+export type InvoiceSummary = {
+  document_id: string;
+  file_name: string;
+  case_id: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  seller_name: string | null;
+  currency: string | null;
+  line_item_count: number;
+  line_items_sum: string | number | null;
+  total_amount: string | number | null;
+  reconciliation_delta: string | number | null;
+  document_status: string | null;
+};

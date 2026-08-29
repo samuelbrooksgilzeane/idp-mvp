@@ -48,6 +48,7 @@ Python 3.11+ FastAPI application, dependency definitions, and backend tests.
 | `extraction.py` | Extraction trigger, run history, latest and per-run result endpoints. |
 | `validation.py` | Validation trigger, run history, latest, per-run and summary endpoints. |
 | `batches.py` | Batch submission and batch progress. Never exposes the execution engine. |
+| `results.py` | Case-filtered invoice summary and streaming two-sheet XLSX export endpoints. |
 
 ### `backend/src/idp_app/core/`
 
@@ -68,6 +69,7 @@ Python 3.11+ FastAPI application, dependency definitions, and backend tests.
 | `parse_jobs.py` | Local parsing executor and Databricks Jobs trigger/poll adapter. |
 | `parsing.py` | Parsing state machine, eligibility, retry handling, artifact-root construction, and polling orchestration. |
 | `health.py` | Safe health response with configuration-presence booleans only. |
+| `reporting.py` | Shared SQLite/Databricks summary queries and styled XLSX workbook generation. |
 
 ### `backend/tests/`
 
@@ -78,6 +80,7 @@ Python 3.11+ FastAPI application, dependency definitions, and backend tests.
 | `test_data_foundation.py` | Governed names, non-destructive SQL, views, migrations, and trusted bundle parameters. |
 | `test_documents_api.py` | PDF validation, uploads, deduplication, identity, storage, registry, and failure handling. |
 | `test_parsing_api.py` | Parse status sequences, failure, retries, history, retained raw output, image confinement, and Job failures. |
+| `test_reporting_api.py` | Summary scope and reconciliation, case filtering, public-field confinement, and workbook contents. |
 
 ## `frontend/`
 
@@ -102,7 +105,8 @@ React, TypeScript, and Vite user interface.
 | `types.ts` | Shared public API types used by pages and components. |
 | `pages/DocumentsPage.tsx` | Registry, upload, multi-select, and batch actions. |
 | `pages/DocumentDetailPage.tsx` | One document: source viewer beside tabbed extraction, validation and history. |
-| `pages/ResultsPage.tsx` | Cross-document summary and export. Placeholder until plan section D. |
+| `pages/ResultsPage.tsx` | Case-filtered cross-document invoice metrics, summary table, and XLSX export. |
+| `pages/ResultsPage.test.tsx` | Summary rendering plus filter/export scope parity. |
 | `pages/SchemaPage.tsx` | The extraction contract, which is per use case rather than per document. |
 | `App.test.tsx` | Frontend workflow tests using mocked API responses. |
 | `styles.css` | Application-wide responsive visual system. |
@@ -143,7 +147,7 @@ Databricks Asset Bundle resources and governed processing tasks. Browser input m
 
 | File | Purpose |
 |---|---|
-| `create_objects.sql` | Creates the project schema, volumes, seven Delta tables, and three views using trusted parameters. |
+| `create_objects.sql` | Creates the project schema, volumes, nine Delta tables, and four views using trusted parameters. |
 | `migrate_parsing.sql` | Idempotently adds Commit 4 audit and polling columns to an existing parse-run table. |
 | `migrate_extraction.sql` | Idempotently adds the Commit 7 extraction-run polling column. |
 

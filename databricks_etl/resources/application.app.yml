@@ -98,6 +98,13 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_line_candidates
             permission: MODIFY
+        - name: invoice-summary-select
+          description: Read the governed cross-document invoice summary.
+          uc_securable:
+            # Databricks App resources model Unity Catalog views as TABLE securables.
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_summary
+            permission: SELECT
         - name: validation-runs-modify
           description: Record immutable deterministic validation attempts.
           uc_securable:

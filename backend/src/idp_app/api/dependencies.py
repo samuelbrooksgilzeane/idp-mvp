@@ -28,6 +28,11 @@ from idp_app.services.parse_runs import (
     SQLiteParseRunRepository,
 )
 from idp_app.services.parsing import ParsingService
+from idp_app.services.reporting import (
+    DatabricksReportingRepository,
+    ReportingService,
+    SQLiteReportingRepository,
+)
 from idp_app.services.schema_registry import (
     DatabricksSchemaRepository,
     SQLiteSchemaRepository,
@@ -390,4 +395,46 @@ def build_validation_service(settings: Settings) -> ValidationService:
         DatabricksExtractionRunRepository(documents, catalog, project_schema, table_prefix),
         DatabricksSchemaRepository(documents, catalog, project_schema, table_prefix),
         DatabricksValidationRunRepository(documents, catalog, project_schema, table_prefix),
+    )
+
+
+def get_reporting_service(request: Request) -> ReportingService:
+    existing = getattr(request.app.state, "reporting_service", None)
+    if isinstance(existing, ReportingService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    service = build_reporting_service(settings)
+    request.app.state.reporting_service = service
+    return service
+
+
+def build_reporting_service(settings: Settings) -> ReportingService:
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    if settings.mode is IdpMode.MOCK:
+        # Reporting can be the first feature opened in local mode. Initialise the
+        # projection tables before its read-only query is issued.
+        SQLiteDocumentRegistry(database_path)
+        SQLiteExtractionRunRepository(database_path)
+        SQLiteValidationRunRepository(database_path)
+        return ReportingService(SQLiteReportingRepository(database_path))
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    sql_client = DatabricksDocumentRegistry(
+        client, warehouse_id, catalog, project_schema, table_prefix
+    )
+    return ReportingService(
+        DatabricksReportingRepository(
+            sql_client, catalog, project_schema, table_prefix
+        )
     )

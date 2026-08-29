@@ -17,10 +17,20 @@ type UploadBatchResponse = { documents: DocumentRecord[]; errors: UploadFailure[
 type DocumentsPageProps = {
   documents: DocumentRecord[];
   loading: boolean;
+  caseIds: string[];
+  selectedCaseId: string | null;
+  onCaseChanged: (caseId: string | null) => void;
   onDocumentsChanged: () => Promise<void> | void;
 };
 
-export function DocumentsPage({ documents, loading, onDocumentsChanged }: DocumentsPageProps) {
+export function DocumentsPage({
+  documents,
+  loading,
+  caseIds,
+  selectedCaseId,
+  onCaseChanged,
+  onDocumentsChanged,
+}: DocumentsPageProps) {
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -49,6 +59,11 @@ export function DocumentsPage({ documents, loading, onDocumentsChanged }: Docume
     setSelectedIds((current) =>
       current.size === documents.length ? new Set() : new Set(knownIds),
     );
+  }
+
+  function changeCase(caseId: string | null) {
+    setSelectedIds(new Set());
+    onCaseChanged(caseId);
   }
 
   async function handleUpload(input: UploadInput) {
@@ -90,6 +105,18 @@ export function DocumentsPage({ documents, loading, onDocumentsChanged }: Docume
     <section className="intake-layout" aria-label="PDF parsing workspace">
       <UploadPanel uploading={uploading} notice={notice} onUpload={handleUpload} />
       <div className="registry-workspace">
+        <div className="case-filter case-filter-documents">
+          <label htmlFor="document-case-filter">Case</label>
+          <select
+            id="document-case-filter"
+            value={selectedCaseId ?? ""}
+            onChange={(event) => changeCase(event.target.value || null)}
+          >
+            <option value="">All cases</option>
+            {caseIds.map((caseId) => <option key={caseId} value={caseId}>{caseId}</option>)}
+          </select>
+          <span>Filters the registry and available batch selection.</span>
+        </div>
         <BatchActions
           selectedIds={selection}
           useCase="invoice"

@@ -145,13 +145,25 @@ class DocumentService:
             ) from error
         return document
 
-    async def list_documents(self) -> list[DocumentRecord]:
+    async def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
         try:
-            return await run_in_threadpool(self._registry.list_documents)
+            if case_id is None:
+                return await run_in_threadpool(self._registry.list_documents)
+            return await run_in_threadpool(self._registry.list_documents, case_id)
         except Exception as error:
             raise DocumentServiceError(
                 "REGISTRY_READ_FAILED",
                 "Documents could not be loaded from the registry.",
+                502,
+            ) from error
+
+    async def list_case_ids(self) -> list[str]:
+        try:
+            return await run_in_threadpool(self._registry.list_case_ids)
+        except Exception as error:
+            raise DocumentServiceError(
+                "REGISTRY_READ_FAILED",
+                "Document cases could not be loaded from the registry.",
                 502,
             ) from error
 

@@ -47,7 +47,9 @@ class DocumentRegistry(Protocol):
 
     def add(self, document: DocumentRecord) -> None: ...
 
-    def list_documents(self) -> list[DocumentRecord]: ...
+    def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]: ...
+
+    def list_case_ids(self) -> list[str]: ...
 
     def get(self, document_id: str) -> DocumentRecord | None: ...
 
@@ -125,12 +127,27 @@ class SQLiteDocumentRegistry:
                 raise DuplicateDocumentError(duplicate) from error
             raise
 
-    def list_documents(self) -> list[DocumentRecord]:
+    def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
+        with self._connect() as connection:
+            if case_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM documents ORDER BY uploaded_at DESC, document_id DESC"
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM documents WHERE case_id = ? "
+                    "ORDER BY uploaded_at DESC, document_id DESC",
+                    (case_id,),
+                ).fetchall()
+        return [_sqlite_row_to_document(row) for row in rows]
+
+    def list_case_ids(self) -> list[str]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM documents ORDER BY uploaded_at DESC, document_id DESC"
+                "SELECT DISTINCT case_id FROM documents "
+                "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' ORDER BY case_id"
             ).fetchall()
-        return [_sqlite_row_to_document(row) for row in rows]
+        return [str(row["case_id"]) for row in rows]
 
     def get(self, document_id: str) -> DocumentRecord | None:
         with self._connect() as connection:
@@ -248,12 +265,24 @@ class DatabricksDocumentRegistry:
         if registered.document_id != document.document_id:
             raise DuplicateDocumentError(registered)
 
-    def list_documents(self) -> list[DocumentRecord]:
+    def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
+        statement = f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
+        values: dict[str, object] = {}
+        if case_id is not None:
+            statement += "WHERE case_id = :case_id "
+            values["case_id"] = case_id
         rows = self.execute_sql(
-            f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
-            "ORDER BY uploaded_at DESC, document_id DESC LIMIT 500"
+            statement + "ORDER BY uploaded_at DESC, document_id DESC LIMIT 500",
+            values,
         )
         return [_databricks_row_to_document(row) for row in rows]
+
+    def list_case_ids(self) -> list[str]:
+        rows = self.execute_sql(
+            f"SELECT DISTINCT case_id FROM {self._table} "
+            "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' ORDER BY case_id LIMIT 500"
+        )
+        return [str(row[0]) for row in rows]
 
     def get(self, document_id: str) -> DocumentRecord | None:
         rows = self.execute_sql(
