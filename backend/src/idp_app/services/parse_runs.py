@@ -50,6 +50,8 @@ class ParseRunRepository(Protocol):
 
     def list_for_document(self, document_id: str) -> list[ParseRunRecord]: ...
 
+    def list_for_job_run(self, job_run_id: int) -> list[ParseRunRecord]: ...
+
     def latest_successful(self, document_id: str) -> ParseRunRecord | None: ...
 
 
@@ -177,6 +179,14 @@ class SQLiteParseRunRepository:
             ).fetchall()
         return [_sqlite_row_to_parse_run(row) for row in rows]
 
+    def list_for_job_run(self, job_run_id: int) -> list[ParseRunRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM parse_runs WHERE job_run_id = ? ORDER BY started_at, parse_run_id",
+                (job_run_id,),
+            ).fetchall()
+        return [_sqlite_row_to_parse_run(row) for row in rows]
+
     def latest_successful(self, document_id: str) -> ParseRunRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -273,6 +283,14 @@ class DatabricksParseRunRepository:
             + " WHERE document_id = :document_id "
             "ORDER BY started_at DESC, parse_run_id DESC LIMIT 100",
             {"document_id": document_id},
+        )
+        return [_databricks_row_to_parse_run(row) for row in rows]
+
+    def list_for_job_run(self, job_run_id: int) -> list[ParseRunRecord]:
+        rows = self._sql.execute_sql(
+            self._select_sql()
+            + " WHERE job_run_id = :job_run_id ORDER BY started_at, parse_run_id LIMIT 500",
+            {"job_run_id": job_run_id},
         )
         return [_databricks_row_to_parse_run(row) for row in rows]
 

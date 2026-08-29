@@ -262,3 +262,49 @@ class ValidationReportResponse(BaseModel):
     run: ValidationRunResponse
     summary: ValidationSummaryResponse
     results: list[ValidationResultResponse]
+
+
+class ParseBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    document_ids: list[str] = Field(min_length=1, max_length=200)
+
+
+class ExtractionBatchRequest(ParseBatchRequest):
+    schema_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    schema_version: int = Field(ge=1)
+
+
+class BatchFailureResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    document_id: str
+    code: str
+    message: str
+
+
+class BatchMemberResponse(BaseModel):
+    document_id: str
+    run_id: str
+    status: str
+
+
+class BatchResponse(BaseModel):
+    """One submission of a set of documents. The execution engine is deliberately not exposed."""
+
+    kind: Literal["parse", "extract"]
+    job_run_id: int | None
+    requested: int
+    accepted: int
+    members: list[BatchMemberResponse]
+    errors: list[BatchFailureResponse]
+
+
+class BatchStatusResponse(BaseModel):
+    kind: Literal["parse", "extract"]
+    job_run_id: int
+    total: int
+    running: int
+    succeeded: int
+    failed: int
+    members: list[BatchMemberResponse]

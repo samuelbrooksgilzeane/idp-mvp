@@ -66,6 +66,8 @@ class ExtractionRunRepository(Protocol):
 
     def list_for_document(self, document_id: str) -> list[ExtractionRunRecord]: ...
 
+    def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]: ...
+
     def latest_successful(self, document_id: str) -> ExtractionRunRecord | None: ...
 
     def list_fields(self, extraction_run_id: str) -> list[ExtractedFieldRecord]: ...
@@ -245,6 +247,15 @@ class SQLiteExtractionRunRepository:
             ).fetchall()
         return [_sqlite_row_to_run(row) for row in rows]
 
+    def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM extraction_runs WHERE job_run_id = ? "
+                "ORDER BY started_at, extraction_run_id",
+                (job_run_id,),
+            ).fetchall()
+        return [_sqlite_row_to_run(row) for row in rows]
+
     def latest_successful(self, document_id: str) -> ExtractionRunRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -412,6 +423,14 @@ class DatabricksExtractionRunRepository:
             self._select_runs() + " WHERE document_id = :document_id "
             "ORDER BY started_at DESC, extraction_run_id DESC LIMIT 100",
             {"document_id": document_id},
+        )
+        return [_databricks_row_to_run(row) for row in rows]
+
+    def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
+        rows = self._sql.execute_sql(
+            self._select_runs()
+            + " WHERE job_run_id = :job_run_id ORDER BY started_at, extraction_run_id LIMIT 500",
+            {"job_run_id": job_run_id},
         )
         return [_databricks_row_to_run(row) for row in rows]
 

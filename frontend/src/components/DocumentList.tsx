@@ -8,6 +8,9 @@ type DocumentListProps = {
   selectedDocumentId: string | null;
   onRefresh: () => void;
   onSelect: (document: DocumentRecord) => void;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (documentId: string) => void;
+  onToggleAll?: () => void;
 };
 
 const formatter = new Intl.DateTimeFormat(undefined, {
@@ -26,7 +29,14 @@ export function DocumentList({
   selectedDocumentId,
   onRefresh,
   onSelect,
+  selectedIds,
+  onToggleSelect,
+  onToggleAll,
 }: DocumentListProps) {
+  const selectable = Boolean(selectedIds && onToggleSelect && onToggleAll);
+  const allSelected = Boolean(
+    selectable && documents.length > 0 && documents.every((item) => selectedIds?.has(item.document_id)),
+  );
   return (
     <section className="registry" aria-labelledby="registry-title">
       <div className="registry-header">
@@ -60,7 +70,19 @@ export function DocumentList({
         <div className="table-scroll">
           <table>
             <thead>
-              <tr><th>Document</th><th>Case</th><th>Status</th><th>Uploaded</th><th>Size</th></tr>
+              <tr>
+                {selectable ? (
+                  <th className="select-cell">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={onToggleAll}
+                      aria-label={allSelected ? "Clear selection" : "Select all documents"}
+                    />
+                  </th>
+                ) : null}
+                <th>Document</th><th>Case</th><th>Status</th><th>Uploaded</th><th>Size</th>
+              </tr>
             </thead>
             <tbody>
               {documents.map((document) => (
@@ -68,6 +90,16 @@ export function DocumentList({
                   className={document.document_id === selectedDocumentId ? "selected-row" : undefined}
                   key={document.document_id}
                 >
+                  {selectable ? (
+                    <td className="select-cell">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds?.has(document.document_id) ?? false}
+                        onChange={() => onToggleSelect?.(document.document_id)}
+                        aria-label={`Select ${document.file_name}`}
+                      />
+                    </td>
+                  ) : null}
                   <td>
                     <button
                       className="document-link"
@@ -79,7 +111,11 @@ export function DocumentList({
                     <span className="document-id">{document.document_id.slice(0, 8)}</span>
                   </td>
                   <td>{document.case_id ?? "-"}</td>
-                  <td><span className="status-label">{document.status}</span></td>
+                  <td>
+                    <span className={`status-label status-${document.status.toLowerCase()}`}>
+                      {document.status}
+                    </span>
+                  </td>
                   <td>{formatter.format(new Date(document.uploaded_at))}</td>
                   <td>{formatBytes(document.file_size)}</td>
                 </tr>

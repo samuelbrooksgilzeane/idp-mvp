@@ -1,9 +1,10 @@
 import { useNavigate } from "react-router-dom";
 
+import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
 import { UploadPanel, type UploadInput } from "../components/UploadPanel";
 import type { ApiError, DocumentRecord, Notice } from "../types";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 type UploadFailure = {
   file_name: string;
@@ -23,6 +24,32 @@ export function DocumentsPage({ documents, loading, onDocumentsChanged }: Docume
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const knownIds = useMemo(
+    () => new Set(documents.map((item) => item.document_id)),
+    [documents],
+  );
+  // A selection only ever refers to documents still in the registry.
+  const selection = useMemo(
+    () => [...selectedIds].filter((id) => knownIds.has(id)),
+    [selectedIds, knownIds],
+  );
+
+  function toggleSelect(documentId: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelectedIds((current) =>
+      current.size === documents.length ? new Set() : new Set(knownIds),
+    );
+  }
 
   async function handleUpload(input: UploadInput) {
     setUploading(true);
@@ -63,12 +90,21 @@ export function DocumentsPage({ documents, loading, onDocumentsChanged }: Docume
     <section className="intake-layout" aria-label="PDF parsing workspace">
       <UploadPanel uploading={uploading} notice={notice} onUpload={handleUpload} />
       <div className="registry-workspace">
+        <BatchActions
+          selectedIds={selection}
+          useCase="invoice"
+          onClear={() => setSelectedIds(new Set())}
+          onDocumentsChanged={onDocumentsChanged}
+        />
         <DocumentList
           documents={documents}
           loading={loading}
           selectedDocumentId={null}
           onRefresh={() => void onDocumentsChanged()}
           onSelect={(document) => navigate(`/documents/${document.document_id}`)}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
+          onToggleAll={toggleAll}
         />
       </div>
     </section>

@@ -30,6 +30,9 @@ variables:
   app_name:
     description: Databricks App name
     default: idp-mvp
+  batch_concurrency:
+    description: Documents processed in parallel within one batch job run
+    default: 16
 
 targets:
   dev:

@@ -2,7 +2,7 @@ resources:
   jobs:
     document_parser:
       name: ${var.app_name}-${bundle.target}-document-parser
-      description: Parses one registered PDF into retained layout data and page images.
+      description: Parses registered PDFs into retained layout data and page images.
       max_concurrent_runs: 4
       parameters:
         - name: catalog
@@ -15,38 +15,38 @@ resources:
           default: ${var.source_volume_name}
         - name: artifacts_volume_name
           default: ${var.artifacts_volume_name}
-        - name: document_id
-          default: ""
-        - name: parse_run_id
-          default: ""
-        - name: source_path
-          default: ""
-        - name: image_output_path
-          default: ""
+        - name: inputs
+          default: "[]"
       tasks:
-        - task_key: parse_registered_document
-          spark_python_task:
-            python_file: ../src/parse_document.py
-            parameters:
-              - --catalog
-              - "{{job.parameters.catalog}}"
-              - --project-schema
-              - "{{job.parameters.project_schema}}"
-              - --table-prefix
-              - "{{job.parameters.table_prefix}}"
-              - --source-volume-name
-              - "{{job.parameters.source_volume_name}}"
-              - --artifacts-volume-name
-              - "{{job.parameters.artifacts_volume_name}}"
-              - --document-id
-              - "{{job.parameters.document_id}}"
-              - --parse-run-id
-              - "{{job.parameters.parse_run_id}}"
-              - --source-path
-              - "{{job.parameters.source_path}}"
-              - --image-output-path
-              - "{{job.parameters.image_output_path}}"
-          environment_key: default
+        - task_key: parse_document_batch
+          for_each_task:
+            inputs: "{{job.parameters.inputs}}"
+            # Concurrency must be explicit: the default of 1 processes a batch sequentially.
+            concurrency: ${var.batch_concurrency}
+            task:
+              task_key: parse_registered_document
+              spark_python_task:
+                python_file: ../src/parse_document.py
+                parameters:
+                  - --catalog
+                  - "{{job.parameters.catalog}}"
+                  - --project-schema
+                  - "{{job.parameters.project_schema}}"
+                  - --table-prefix
+                  - "{{job.parameters.table_prefix}}"
+                  - --source-volume-name
+                  - "{{job.parameters.source_volume_name}}"
+                  - --artifacts-volume-name
+                  - "{{job.parameters.artifacts_volume_name}}"
+                  - --document-id
+                  - "{{input.document_id}}"
+                  - --parse-run-id
+                  - "{{input.parse_run_id}}"
+                  - --source-path
+                  - "{{input.source_path}}"
+                  - --image-output-path
+                  - "{{input.image_output_path}}"
+              environment_key: default
       environments:
         - environment_key: default
           spec:

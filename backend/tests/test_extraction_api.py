@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import time
 from dataclasses import replace
@@ -6,6 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pymupdf
+import pytest
 from databricks.sdk.service import jobs
 from fastapi.testclient import TestClient
 
@@ -22,6 +24,7 @@ from idp_app.services.extraction_jobs import (
 )
 from idp_app.services.extraction_result import build_invoice_candidate, flatten_result
 from idp_app.services.extraction_runs import SQLiteExtractionRunRepository
+from idp_app.services.job_batches import batch_idempotency_token
 from idp_app.services.parse_runs import SQLiteParseRunRepository
 from idp_app.services.schema_registry import SQLiteSchemaRepository
 from idp_app.services.schemas import load_source_manifests
@@ -399,19 +402,77 @@ def test_databricks_submission_contains_trusted_parameters_only(tmp_path: Path) 
     workspace = _WorkspaceClient()
     runner = DatabricksExtractionJobRunner(workspace, 123)  # type: ignore[arg-type]
 
-    job_run_id = runner.trigger(ExtractionJobRequest(run, document, parse_run, schema))
+    job_run_id = runner.trigger([ExtractionJobRequest(run, document, parse_run, schema)])
 
     assert job_run_id == 456
-    assert workspace.jobs.parameters == {
-        "idempotency_token": run.extraction_run_id,
-        "job_parameters": {
+    submitted = workspace.jobs.parameters
+    # Per-document values travel as for_each inputs; nothing else is submitted.
+    assert set(submitted["job_parameters"]) == {"inputs"}
+    assert json.loads(submitted["job_parameters"]["inputs"]) == [
+        {
             "document_id": run.document_id,
             "extraction_run_id": run.extraction_run_id,
             "schema_id": "invoice",
             "schema_version": "1",
             "requested_by": "test@example.com",
-        },
-    }
+        }
+    ]
+    assert submitted["idempotency_token"] == batch_idempotency_token([run.extraction_run_id])
+
+
+def test_a_batch_submits_every_document_as_one_job_run(tmp_path: Path) -> None:
+    schema_repository = SQLiteSchemaRepository(tmp_path / "registry.sqlite3")
+    schema = schema_repository.register(load_source_manifests()[0], "test")
+    workspace = _WorkspaceClient()
+    runner = DatabricksExtractionJobRunner(workspace, 123)  # type: ignore[arg-type]
+
+    requests = []
+    for index in range(3):
+        run = replace(
+            _extraction_record(schema),
+            extraction_run_id=f"f5369a2d-aa62-47bd-b075-417b25e2b4e{index}",
+            document_id=f"ce584838-9345-4223-a035-21337274dce{index}",
+        )
+        document = replace(_document_record(), document_id=run.document_id)
+        parse_run = replace(_parse_record(), parse_run_id=run.parse_run_id)
+        requests.append(ExtractionJobRequest(run, document, parse_run, schema))
+
+    runner.trigger(requests)
+
+    inputs = json.loads(workspace.jobs.parameters["job_parameters"]["inputs"])
+    assert [item["document_id"] for item in inputs] == [
+        request.document.document_id for request in requests
+    ]
+    # A batch is one job run, so its members share a single job_run_id.
+    assert len(inputs) == 3
+
+
+def test_an_empty_batch_is_rejected_before_reaching_databricks(tmp_path: Path) -> None:
+    workspace = _WorkspaceClient()
+    runner = DatabricksExtractionJobRunner(workspace, 123)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="at least one document"):
+        runner.trigger([])
+    assert workspace.jobs.parameters is None
+
+
+def _extraction_record(schema: object) -> ExtractionRunRecord:
+    return ExtractionRunRecord(
+        extraction_run_id="f5369a2d-aa62-47bd-b075-417b25e2b4eb",
+        document_id="ce584838-9345-4223-a035-21337274dce1",
+        parse_run_id="b580cfb4-e31c-49f4-a921-4d0e5ae634ab",
+        schema_id="invoice",
+        schema_version=1,
+        schema_hash=schema.schema_hash,  # type: ignore[attr-defined]
+        extractor_version="2.1",
+        options={},
+        ai_result=None,
+        error_message=None,
+        status="RUNNING",
+        requested_by="test@example.com",
+        job_run_id=None,
+        started_at=datetime.now(UTC),
+        completed_at=None,
+    )
 
 
 def _extracted_field(field_path: str, value: object) -> ExtractedFieldRecord:

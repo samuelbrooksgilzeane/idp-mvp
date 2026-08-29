@@ -15,6 +15,7 @@ from databricks.sdk.service import jobs
 
 from idp_app.services.document_models import DocumentRecord
 from idp_app.services.document_registry import DocumentRegistry
+from idp_app.services.job_batches import batch_idempotency_token, encode_inputs
 from idp_app.services.parse_runs import ParseRunRepository
 
 
@@ -39,7 +40,7 @@ class ParseJobPoll:
 
 
 class ParseJobRunner(Protocol):
-    def trigger(self, request: ParseJobRequest) -> int: ...
+    def trigger(self, requests: list[ParseJobRequest]) -> int: ...
 
     def poll(self, job_run_id: int) -> ParseJobPoll: ...
 
@@ -57,24 +58,28 @@ class MockParseJobRunner:
         self._delay_seconds = delay_seconds
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="idp-parser")
         self._ids = itertools.count(1)
-        self._futures: dict[int, Future[None]] = {}
+        self._futures: dict[int, list[Future[None]]] = {}
         self._lock = Lock()
 
-    def trigger(self, request: ParseJobRequest) -> int:
+    def trigger(self, requests: list[ParseJobRequest]) -> int:
+        if not requests:
+            raise ValueError("A parse batch requires at least one document")
         job_run_id = next(self._ids)
-        future = self._executor.submit(self._execute, request)
+        submitted = [self._executor.submit(self._execute, request) for request in requests]
         with self._lock:
-            self._futures[job_run_id] = future
+            self._futures[job_run_id] = submitted
         return job_run_id
 
     def poll(self, job_run_id: int) -> ParseJobPoll:
         with self._lock:
-            future = self._futures.get(job_run_id)
-        if future is None:
+            futures = self._futures.get(job_run_id)
+        if futures is None:
             return ParseJobPoll(ParseJobState.FAILED, "Mock parse job was not found.")
-        if not future.done():
+        if any(not item.done() for item in futures):
             return ParseJobPoll(ParseJobState.RUNNING)
-        if future.exception() is not None:
+        # One failing document fails the run, matching a for_each iteration failure. Each
+        # document's own terminal state is already recorded against its immutable run.
+        if any(item.exception() is not None for item in futures):
             return ParseJobPoll(ParseJobState.FAILED, "Mock parse job failed.")
         return ParseJobPoll(ParseJobState.SUCCEEDED)
 
@@ -117,16 +122,24 @@ class DatabricksParseJobRunner:
         self._client = client
         self._job_id = job_id
 
-    def trigger(self, request: ParseJobRequest) -> int:
-        wait = self._client.jobs.run_now(
-            self._job_id,
-            idempotency_token=request.parse_run_id,
-            job_parameters={
+    def trigger(self, requests: list[ParseJobRequest]) -> int:
+        if not requests:
+            raise ValueError("A parse batch requires at least one document")
+        inputs = [
+            {
                 "document_id": request.document.document_id,
                 "parse_run_id": request.parse_run_id,
                 "source_path": request.document.source_path,
                 "image_output_path": f"{request.page_image_root.rstrip('/')}/",
-            },
+            }
+            for request in requests
+        ]
+        wait = self._client.jobs.run_now(
+            self._job_id,
+            idempotency_token=batch_idempotency_token(
+                request.parse_run_id for request in requests
+            ),
+            job_parameters={"inputs": encode_inputs(inputs)},
         )
         run = cast(jobs.Run, wait.response)
         if run.run_id is None:

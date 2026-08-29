@@ -189,20 +189,31 @@ def test_schema_registration_task_is_immutable_and_source_controlled() -> None:
 def test_extraction_job_pins_evidence_contract_and_retains_raw_first() -> None:
     resource = yaml.safe_load(EXTRACTION_JOB.read_text(encoding="utf-8"))
     job = resource["resources"]["jobs"]["document_extractor"]
-    task = job["tasks"][0]["spark_python_task"]
+    for_each = job["tasks"][0]["for_each_task"]
+    task = for_each["task"]["spark_python_task"]
     source = EXTRACTION_SOURCE.read_text(encoding="utf-8")
 
     assert task["python_file"] == "../src/extract_document.py"
+    # Per-document values arrive as for_each inputs; only trusted configuration is a job
+    # parameter, so the browser can never supply an identifier or table name.
     assert set(item["name"] for item in job["parameters"]) == {
         "catalog",
         "project_schema",
         "table_prefix",
-        "document_id",
-        "extraction_run_id",
-        "schema_id",
-        "schema_version",
-        "requested_by",
+        "inputs",
     }
+    assert for_each["inputs"] == "{{job.parameters.inputs}}"
+    # for_each defaults to concurrency 1, which would process a batch sequentially.
+    assert for_each["concurrency"] == "${var.batch_concurrency}"
+    assert [
+        parameter for parameter in task["parameters"] if parameter.startswith("{{input.")
+    ] == [
+        "{{input.document_id}}",
+        "{{input.extraction_run_id}}",
+        "{{input.schema_id}}",
+        "{{input.schema_version}}",
+        "{{input.requested_by}}",
+    ]
     for required in (
         "ai_extract(",
         "'version', '2.1'",

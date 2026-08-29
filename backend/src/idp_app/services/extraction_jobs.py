@@ -20,6 +20,7 @@ from idp_app.services.extraction_result import (
     flatten_result,
 )
 from idp_app.services.extraction_runs import ExtractionRunRepository
+from idp_app.services.job_batches import batch_idempotency_token, encode_inputs
 from idp_app.services.schema_models import ExtractField, SchemaRecord
 
 
@@ -44,7 +45,7 @@ class ExtractionJobPoll:
 
 
 class ExtractionJobRunner(Protocol):
-    def trigger(self, request: ExtractionJobRequest) -> int: ...
+    def trigger(self, requests: list[ExtractionJobRequest]) -> int: ...
 
     def poll(self, job_run_id: int) -> ExtractionJobPoll: ...
 
@@ -62,26 +63,30 @@ class MockExtractionJobRunner:
         self._delay_seconds = delay_seconds
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="idp-extractor")
         self._ids = itertools.count(10_001)
-        self._futures: dict[int, Future[None]] = {}
+        self._futures: dict[int, list[Future[None]]] = {}
         self._lock = Lock()
 
-    def trigger(self, request: ExtractionJobRequest) -> int:
+    def trigger(self, requests: list[ExtractionJobRequest]) -> int:
+        if not requests:
+            raise ValueError("An extraction batch requires at least one document")
         job_run_id = next(self._ids)
-        future = self._executor.submit(self._execute, request)
+        submitted = [self._executor.submit(self._execute, request) for request in requests]
         with self._lock:
-            self._futures[job_run_id] = future
+            self._futures[job_run_id] = submitted
         return job_run_id
 
     def poll(self, job_run_id: int) -> ExtractionJobPoll:
         with self._lock:
-            future = self._futures.get(job_run_id)
-        if future is None:
+            futures = self._futures.get(job_run_id)
+        if futures is None:
             return ExtractionJobPoll(
                 ExtractionJobState.FAILED, "Mock extraction job was not found."
             )
-        if not future.done():
+        if any(not item.done() for item in futures):
             return ExtractionJobPoll(ExtractionJobState.RUNNING)
-        if future.exception() is not None:
+        # One failing document fails the run, matching a for_each iteration failure. Each
+        # document's own terminal state is already recorded against its immutable run.
+        if any(item.exception() is not None for item in futures):
             return ExtractionJobPoll(ExtractionJobState.FAILED, "Mock extraction job failed.")
         return ExtractionJobPoll(ExtractionJobState.SUCCEEDED)
 
@@ -118,19 +123,27 @@ class DatabricksExtractionJobRunner:
         self._client = client
         self._job_id = job_id
 
-    def trigger(self, request: ExtractionJobRequest) -> int:
-        wait = self._client.jobs.run_now(
-            self._job_id,
-            # Each immutable retry is a distinct Jobs invocation. The governed source
-            # idempotency key remains visible in extraction_runs.options.
-            idempotency_token=request.run.extraction_run_id,
-            job_parameters={
+    def trigger(self, requests: list[ExtractionJobRequest]) -> int:
+        if not requests:
+            raise ValueError("An extraction batch requires at least one document")
+        inputs = [
+            {
                 "document_id": request.document.document_id,
                 "extraction_run_id": request.run.extraction_run_id,
                 "schema_id": request.schema.schema_id,
                 "schema_version": str(request.schema.schema_version),
                 "requested_by": request.run.requested_by,
-            },
+            }
+            for request in requests
+        ]
+        wait = self._client.jobs.run_now(
+            self._job_id,
+            # Each immutable retry is a distinct Jobs invocation. The governed source
+            # idempotency key remains visible in extraction_runs.options.
+            idempotency_token=batch_idempotency_token(
+                request.run.extraction_run_id for request in requests
+            ),
+            job_parameters={"inputs": encode_inputs(inputs)},
         )
         run = cast(jobs.Run, wait.response)
         if run.run_id is None:

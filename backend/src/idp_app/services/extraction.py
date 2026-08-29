@@ -18,6 +18,7 @@ from idp_app.services.extraction_jobs import (
     ExtractionJobState,
 )
 from idp_app.services.extraction_runs import ExtractionRunRepository
+from idp_app.services.job_batches import BatchFailure
 from idp_app.services.parse_runs import ParseRunRepository
 from idp_app.services.schema_registry import SchemaRepository
 
@@ -53,6 +54,54 @@ class ExtractionService:
         schema_version: int,
         requested_by: str,
     ) -> ExtractionRunRecord:
+        prepared = await self._prepare(document_id, schema_id, schema_version, requested_by)
+        await self._submit([prepared])
+        created = await run_in_threadpool(self._runs.get, prepared[0].extraction_run_id)
+        if created is None:
+            raise RuntimeError("Created extraction run could not be loaded")
+        return created
+
+    async def start_batch(
+        self,
+        document_ids: list[str],
+        schema_id: str,
+        schema_version: int,
+        requested_by: str,
+    ) -> tuple[list[ExtractionRunRecord], list[BatchFailure]]:
+        """Prepare every eligible document, then submit them as one job run.
+
+        A document that fails its own preconditions is reported against that document and does
+        not prevent the rest of the batch from running.
+        """
+        prepared: list[tuple[ExtractionRunRecord, ExtractionJobRequest]] = []
+        failures: list[BatchFailure] = []
+        for document_id in dict.fromkeys(document_ids):
+            try:
+                prepared.append(
+                    await self._prepare(document_id, schema_id, schema_version, requested_by)
+                )
+            except DocumentServiceError as error:
+                failures.append(
+                    BatchFailure(document_id=document_id, code=error.code, message=error.message)
+                )
+        if not prepared:
+            return [], failures
+
+        await self._submit(prepared)
+        runs: list[ExtractionRunRecord] = []
+        for run, _ in prepared:
+            created = await run_in_threadpool(self._runs.get, run.extraction_run_id)
+            if created is not None:
+                runs.append(created)
+        return runs, failures
+
+    async def _prepare(
+        self,
+        document_id: str,
+        schema_id: str,
+        schema_version: int,
+        requested_by: str,
+    ) -> tuple[ExtractionRunRecord, ExtractionJobRequest]:
         document = await run_in_threadpool(self._documents.get, document_id)
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
@@ -127,37 +176,63 @@ class ExtractionService:
                 document_id=document_id,
             ) from error
 
+        await run_in_threadpool(self._runs.create, run)
+        return run, ExtractionJobRequest(run, document, parse_run, schema)
+
+    async def _submit(
+        self, prepared: list[tuple[ExtractionRunRecord, ExtractionJobRequest]]
+    ) -> None:
+        """Submit every prepared document as a single job run and record its identifier."""
         try:
-            await run_in_threadpool(self._runs.create, run)
             job_run_id = await run_in_threadpool(
-                self._jobs.trigger,
-                ExtractionJobRequest(run, document, parse_run, schema),
+                self._jobs.trigger, [request for _, request in prepared]
             )
-            await run_in_threadpool(self._runs.assign_job_run, extraction_run_id, job_run_id)
+            for run, _ in prepared:
+                await run_in_threadpool(
+                    self._runs.assign_job_run, run.extraction_run_id, job_run_id
+                )
         except Exception as error:
-            current = await run_in_threadpool(self._runs.get, extraction_run_id)
-            if current and current.status == "RUNNING":
-                await run_in_threadpool(
-                    self._runs.fail, extraction_run_id, "Extraction job could not be started."
-                )
-            current_document = await run_in_threadpool(self._documents.get, document_id)
-            if current_document and current_document.status == "EXTRACTING":
-                await run_in_threadpool(
-                    self._documents.update_status,
-                    document_id,
-                    {"EXTRACTING"},
-                    "EXTRACT_FAILED",
-                )
+            for run, _ in prepared:
+                await self._roll_back(run.extraction_run_id, run.document_id)
             raise DocumentServiceError(
                 "EXTRACTION_JOB_TRIGGER_FAILED",
                 "The extraction job could not be started.",
                 502,
-                document_id=document_id,
+                document_id=prepared[0][0].document_id if len(prepared) == 1 else None,
             ) from error
-        created = await run_in_threadpool(self._runs.get, extraction_run_id)
-        if created is None:
-            raise RuntimeError("Created extraction run could not be loaded")
-        return created
+
+    async def _roll_back(self, extraction_run_id: str, document_id: str) -> None:
+        current = await run_in_threadpool(self._runs.get, extraction_run_id)
+        if current and current.status == "RUNNING":
+            await run_in_threadpool(
+                self._runs.fail, extraction_run_id, "Extraction job could not be started."
+            )
+        current_document = await run_in_threadpool(self._documents.get, document_id)
+        if current_document and current_document.status == "EXTRACTING":
+            await run_in_threadpool(
+                self._documents.update_status, document_id, {"EXTRACTING"}, "EXTRACT_FAILED"
+            )
+
+    async def batch(self, job_run_id: int) -> list[ExtractionRunRecord]:
+        """Every immutable run submitted under one job run, refreshed to a terminal state.
+
+        A per-document task records its own outcome, so the job state only settles runs that
+        never committed one.
+        """
+        runs = await run_in_threadpool(self._runs.list_for_job_run, job_run_id)
+        if not runs:
+            raise DocumentServiceError("BATCH_NOT_FOUND", "Batch not found.", 404)
+        if any(run.status == "RUNNING" for run in runs):
+            poll = await run_in_threadpool(self._jobs.poll, job_run_id)
+            if poll.state is not ExtractionJobState.RUNNING:
+                for run in runs:
+                    refreshed = await run_in_threadpool(self._runs.get, run.extraction_run_id)
+                    if refreshed and refreshed.status == "RUNNING":
+                        await self._fail_running(
+                            refreshed, poll.message or "Extraction job failed."
+                        )
+                runs = await run_in_threadpool(self._runs.list_for_job_run, job_run_id)
+        return runs
 
     async def list_runs(self, document_id: str) -> list[ExtractionRunRecord]:
         document = await run_in_threadpool(self._documents.get, document_id)

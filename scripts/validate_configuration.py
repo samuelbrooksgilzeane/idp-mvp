@@ -16,6 +16,7 @@ TRUSTED_VARIABLES = {
     "validation_endpoint",
     "evaluation_experiment",
     "app_name",
+    "batch_concurrency",
 }
 EXPECTED_BOOTSTRAP_PARAMETERS = {
     "catalog": "${var.catalog}",
@@ -183,18 +184,37 @@ def validate_data_bootstrap() -> None:
             )
 
 
+def reviewed_batch_task(tasks: object, python_file: str, label: str) -> None:
+    """A batch job runs exactly one reviewed task per document, in parallel.
+
+    for_each defaults to a concurrency of 1, which would process a batch sequentially, so the
+    trusted deployment variable must always be supplied.
+    """
+    if not isinstance(tasks, list) or len(tasks) != 1:
+        raise ValueError(f"{label} must contain exactly one reviewed task")
+    for_each = tasks[0].get("for_each_task")
+    if not isinstance(for_each, dict):
+        raise ValueError(f"{label} must submit its documents through a for_each task")
+    if for_each.get("inputs") != "{{job.parameters.inputs}}":
+        raise ValueError(f"{label} must take its documents from the trusted inputs parameter")
+    if for_each.get("concurrency") != "${var.batch_concurrency}":
+        raise ValueError(f"{label} must set concurrency from the trusted deployment variable")
+    nested = for_each.get("task", {})
+    if nested.get("spark_python_task", {}).get("python_file") != python_file:
+        raise ValueError(f"{label} must use the reviewed task source")
+    if nested.get("environment_key") != "default":
+        raise ValueError(f"{label} must run its task in the reviewed environment")
+
+
 def validate_parsing_job() -> None:
     resource = load_yaml(ROOT / "databricks_etl" / "resources" / "parsing.job.yml")
     jobs = resource.get("resources", {}).get("jobs", {})
     parsing = jobs.get("document_parser")
     if not isinstance(parsing, dict):
         raise ValueError("Bundle must define the document_parser job")
-    tasks = parsing.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 1:
-        raise ValueError("Document parser must contain exactly one reviewed task")
-    python_task = tasks[0].get("spark_python_task", {})
-    if python_task.get("python_file") != "../src/parse_document.py":
-        raise ValueError("Document parser must use the reviewed parsing task")
+    reviewed_batch_task(
+        parsing.get("tasks"), "../src/parse_document.py", "Document parser"
+    )
 
     source = (ROOT / "databricks_etl" / "src" / "parse_document.py").read_text(
         encoding="utf-8"
@@ -219,12 +239,9 @@ def validate_extraction_job() -> None:
     extraction = jobs.get("document_extractor")
     if not isinstance(extraction, dict):
         raise ValueError("Bundle must define the document_extractor job")
-    tasks = extraction.get("tasks")
-    if not isinstance(tasks, list) or len(tasks) != 1:
-        raise ValueError("Document extractor must contain exactly one reviewed task")
-    python_task = tasks[0].get("spark_python_task", {})
-    if python_task.get("python_file") != "../src/extract_document.py":
-        raise ValueError("Document extractor must use the reviewed extraction task")
+    reviewed_batch_task(
+        extraction.get("tasks"), "../src/extract_document.py", "Document extractor"
+    )
     source = (ROOT / "databricks_etl" / "src" / "extract_document.py").read_text(
         encoding="utf-8"
     )
