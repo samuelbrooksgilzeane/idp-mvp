@@ -569,6 +569,37 @@ The sync honours `sync.include` regardless. `databricks bundle sync -t dev --dry
 lists `frontend/dist/index.html` and the current hashed assets in its `put` payload; confirm the
 hashes there match the local build rather than trusting the warning. This does not block a release.
 
+### Schema v4: repeated invoices per document (2026-08-30)
+
+`invoice_v4` is registered in dev (`a5e00f5671d2…`); v1, v2 and v3 hashes are unchanged. It nests
+every invoice under `invoices[*]`, carries v3's exact thresholds and risk tiers, and **declares no
+arithmetic reconciliation or comparison rule** — those checks now happen in Excel against the
+exported lines and totals.
+
+Live evidence: a two-page document holding three invoices (two on page 1, one on page 2; three
+sellers, three currencies) extracted as three instances with 2, 1 and 3 lines attached to the
+correct parents, every value correct at confidence 1.0, and citations resolving to the right
+regions — including distinct vertical positions for the two invoices sharing page 1. Validation
+returned 229 observations, all passing, with one observation per invoice for each declared rule.
+Extraction run `60df80ab-21a2-4d09-846b-097fa4809920`.
+
+Three things to know before building on this:
+
+- A v4 document is **captured but not projected**. `build_candidate` now returns nothing for a
+  shape it cannot describe, rather than writing a row of nulls that the summary would render as a
+  blank invoice. So a v4 document never reaches `invoice_candidates`, the summary or the export.
+- Registering v4 as PRODUCTION means validating a v3 extraction now reports
+  `schema_version_currency` as `UNCERTAIN` at `WARNING`. It is not blocking and stored runs are
+  untouched.
+- Adding one schema version required **three** coordinated edits: the bootstrap job task, the
+  `ALLOWED_MANIFESTS` allowlist in `register_schemas.py`, and the expected task list in
+  `scripts/validate_configuration.py`. The allowlist is a deliberate control worth keeping; the
+  per-version task should become a loop over the manifests.
+
+Real sample data worth noting: three documents in case `new_batch` extracted a seller, total and
+line items under v3 but **no invoice number**, and one returned no seller either. Field presence
+across real templates is the thing the sampling exercise needs to settle.
+
 ### Trusted dev variables
 
 ```text

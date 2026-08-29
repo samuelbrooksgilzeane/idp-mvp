@@ -14,6 +14,7 @@ Sections are lettered to avoid colliding with the pack's numbering.
 | C | Batch parse and extract | **COMPLETE** | `feat/13-batch-processing` — `45f001a` |
 | D | Summary view, XLSX export, case filter | **COMPLETE** | `feat/13-batch-processing` — verified live in dev |
 | E | LLM validation and Knowledge Assistant | **NOT STARTED** (blocked, see below) | — |
+| G | Repeated entities: nested schema v4 | **EXTRACTION VERIFIED** | `feat/13-batch-processing` — projection not yet built |
 | F | Set-based batch engine | **DEFERRED** by decision | — |
 
 Branches are a **linear stack**: each is built on the one above it, and
@@ -39,6 +40,13 @@ These were settled with the project owner. Do not silently revisit them.
 - **Typed values in the UI**: the extraction table deliberately shows raw extracted value,
   model confidence and evidence. The typed projection column was **removed** on request; the typed
   data is still stored and queryable. Do not reintroduce the column without asking.
+- **Arithmetic reconciliation is not a contract**: the `arithmetic_reconciliation` and
+  `comparison` rules were removed from the contract at v4. The arithmetic convention varies
+  between invoice formats, and encoding one made the governed result fragile. The reported
+  `reconciliation_delta` and the billed lines are still exported, so a reviewer performs the
+  check in Excel where the convention can vary per invoice.
+- **Users do not author schemas**: schemas stay source-controlled and allow-listed, so a
+  registered hash keeps meaning something. Reviewed and rejected as more chaos than value.
 - **Set-based engine (F)**: deferred. At ~100 documents it saves only a few minutes for a
   substantial rewrite. Revisit when batches reach the high hundreds.
 
@@ -116,6 +124,42 @@ Two separable pieces. **Both are blocked on infrastructure the project owner mus
   would index superseded parses alongside current ones, and the file metadata lives on
   `documents`, not on the parse row. A derived table keeps the immutable audit trail intact and
   gives the assistant exactly the shape it requires.
+
+## Section G — Repeated entities per document (schema v4)
+
+One PDF may contain several invoices. Under a flat schema the model returns one of them and the
+others are silently absent from the export, which is worse than an error: the result validates
+cleanly while under-reporting. `invoice_v4` states `invoices[*]`, each with its own
+`line_items[*]`, so the count of invoices is data rather than an assumption.
+
+**Verified in dev on 2026-08-30.** A two-page document holding three invoices — two stacked on
+page 1, one on page 2, from three sellers in three currencies — extracted under v4 as three
+separate instances, each with the right lines (2, 1 and 3) and every field correct at confidence
+1.0. Citations resolved to the correct regions, including the two invoices sharing page 1, which
+were cited at distinct vertical positions on that page. Validation returned 229 observations, all
+passing, and each declared document rule produced one observation per invoice.
+
+Three changes were needed beyond the manifest:
+
+- **Rule paths expand over instances.** `required_fields`, `range`, `format` and `allowed_values`
+  resolved exact paths only, so a rule naming `invoices[*].currency` would have reported every
+  invoice's value missing and failed wrongly. They now expand a wildcard into every extracted
+  instance; a wildcard matching nothing counts as missing rather than vacuously satisfied.
+  `comparison` refuses wildcards outright, because pairing an instance with its own sibling is
+  not something that rule type can express.
+- **Required-ness is owned by the rule, not the policy.** `FieldPolicy.required` is not read by
+  any per-leaf validator, so dropping the `required_fields` rule would silently remove the check.
+  Worth revisiting: the policy is the more natural owner now that policies are per-instance.
+- **The typed projection refuses shapes it cannot describe.** `build_candidate` reads top-level
+  leaves and writes one row per document. Under v4 it would have written a row of nulls that the
+  summary would show as a blank invoice, so it now returns nothing and records the extracted
+  fields alone.
+
+**Not yet built**: the typed projection for repeated invoices. A v4 document is captured, validated
+and inspectable, but does not reach `invoice_candidates`, the summary view or the XLSX export. The
+open decision is whether to add an invoice index to the candidate tables per use case, or to drive
+the projection generically from the registered manifest, which already declares every leaf, its
+type and its order.
 
 ## Section F — Set-based batch engine (deferred, recorded)
 
