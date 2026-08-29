@@ -8,10 +8,10 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/09-deterministic-validation`
+- Current implementation branch: `feat/10-line-item-extraction`
 - The Parsing MVP is accepted and tagged `mvp-parsing`.
 - The Extraction MVP (commits 6–8) is complete and tagged `mvp-extraction`.
-- Commit 9 is implemented, deployed, verified live, and committed.
+- Line-item extraction is implemented, deployed, verified live, and committed.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -28,6 +28,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 7: extraction pipeline | `feat/07-extraction-pipeline` | `72e0db3` | Implemented, deployed, and verified live |
 | Commit 8: extraction evidence UI | `feat/08-extraction-evidence-ui` | `41ee11e` | Implemented, deployed, and verified live |
 | Commit 9: deterministic validation | `feat/09-deterministic-validation` | `5eec8b4` | Implemented, deployed, and verified live |
+| Line-item extraction (inserted) | `feat/10-line-item-extraction` | `0dbe759` | Implemented, deployed, and verified live |
 
 ## Implemented capabilities
 
@@ -173,6 +174,27 @@ Supporting decisions:
   builder could emit it later behind schema registration and approval.
 - Repeated-field rule paths (`line_items[*].amount`) already validate at registration, so the
   engine needs no redesign when nested line-item extraction lands.
+
+### Line-item extraction
+
+- Recursive `ExtractField` supporting `array` and `object`, matching the documented `ai_extract`
+  nested-schema shape, with the documented 256-leaf and 12-level limits enforced at registration.
+- `field_policies` are keyed by scalar **leaf**: a header field keeps its bare name (`total`) and a
+  nested leaf uses the wildcard form (`line_items[*].amount`), so a line amount can carry its own
+  risk tier and citation requirement.
+- Both flatteners walk the contract recursively and emit one row per leaf at `line_items[0].amount`.
+  `field_path` is already a `STRING`, so **no table change was required**. An absent or empty
+  repeated field emits no rows and is never treated as an implicit zero.
+- `RuleTerm.aggregate` folds a repeated field inside the existing `arithmetic_reconciliation`
+  rule, so line-item totals needed **no new rule type**. An aggregate over zero returned instances
+  is missing, not zero, so it can never let a calculation pass.
+- `invoice_v3` adds five line leaves and two rules: `line_items_reconcile_to_total` (blocking) and
+  `line_items_sum_to_subtotal`, which is declared `WARNING` because it corroborates the primary
+  chain rather than gating it. v1 and v2 remain registered and immutable.
+- The extraction panel groups repeated leaves into a per-line table, each cell keeping its
+  confidence and its own evidence control into the page viewer.
+- Line items are deliberately not projected into `invoice_candidates`; a typed line table is
+  deferred.
 
 ## Local verification
 
@@ -382,20 +404,41 @@ Two defects were found and fixed while verifying:
 - Re-parsing and re-extracting are now permitted from `VALIDATED_PASS` and `REVIEW_REQUIRED`, so a
   validated document can still be corrected.
 
+## Line-item verification (2026-08-29)
+
+- `make check` passed: 119 backend tests, 21 frontend tests, and the full lint, type, build and
+  configuration gate.
+- Bootstrap registered `invoice_v3` in dev alongside the immutable v1 and v2.
+- **Live on the real invoice `d0ed9896`**, re-extracted under v3: all five line items were
+  extracted with citations — `3 x 91.65 = 274.95`, `2 x 33.01 = 66.02`, `6 x 3.98 = 23.88`,
+  `1 x 45.86 = 45.86`, `6 x 78.40 = 470.40` — summing to exactly **881.11**, matching the source
+  table. 139 observations, 132 passed. `line_items_reconcile_to_total` **FAILED as BLOCKING, out
+  by 37.31** (881.11 − 29.87 + 0.00 = 851.24 against a stated total of 888.55), and
+  `line_items_sum_to_subtotal` returned `UNCERTAIN` at `WARNING` severity because that invoice
+  states no subtotal. This is a genuine inconsistency caught in real data, not a synthetic fixture.
+- A balanced synthetic invoice with two line rows reached `VALIDATED_PASS` with 85 of 85 checks
+  passing and both line rules `PASS`.
+
+One defect was found and fixed while verifying:
+
+- The manifest hash is computed independently by the backend, the registration task and the
+  extraction task. JSON does not distinguish `0` from `0.0`, but typed loading does, so a rule
+  parameter written as `"minimum": 0` hashed differently in the backend (`0.0`) than in the two
+  Databricks tasks (`0`). Runtime was self-consistent because the registry value is authoritative,
+  but the implementations disagreed. All three now normalise integral numbers identically, which
+  leaves every already-registered hash unchanged, and a test pins the three implementations
+  together so they cannot drift again.
+
 ## Next review boundary
 
 Commit 9 is complete and pushed on `feat/09-deterministic-validation`.
 
-The agreed next increment is **line-item extraction**, which the Databricks documentation confirms
-is supported: `ai_extract` accepts `{"type": "array", "items": {"type": "object", "properties": …}}`
-with up to 256 fields and 12 levels of nesting, and returns `value`, `confidence_score` and
-`citation_ids` on each scalar leaf. That maps directly onto `extracted_fields` rows, so no table
-change is expected. Scope: a recursive `ExtractField`, reworking the `field_policies`
-"every field exactly once" rule for nested leaves, registering `invoice` v3, a recursive flattener
-emitting `line_items[0].unit_price`, and UI grouping for repeated fields. The
-`aggregate_comparison` rule type then slots into the existing engine to deliver
-`sum(line_items[*].amount) = total`, which is the check that most directly answers "how do we trust
-this?".
+Line-item extraction is complete and pushed on `feat/10-line-item-extraction`.
 
-Commit 10 (LLM validation) and Commit 11 (evaluation and demo) follow. Correction, approval, export
+The next increment is **Commit 10 (source-grounded LLM validation)**. Two prerequisites apply:
+`validation_endpoint` is still deployed as `unused`, so a Databricks-hosted serving endpoint must
+exist before it can be verified live; and `FieldPolicy` needs an optional `llm_validate` flag,
+following the same optional-field pattern that keeps registered hashes stable. `validation_results`
+already reserves `prompt_hash` and `validator_type`, so no table change is expected. Commit 11
+(evaluation and demo) then closes the Validated MVP milestone. Correction, approval, export
 and user-authored rules remain out of scope until their commits.
