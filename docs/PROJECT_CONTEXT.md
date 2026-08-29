@@ -8,9 +8,10 @@ This document is a concise engineering handoff. The authoritative requirements r
 
 - Local repository: `/Users/samb/Documents/coding projects/idp_databricks/idp-mvp`
 - Origin: `https://github.com/samuelbrooksgilzeane/idp-mvp.git`
-- Current implementation branch: `feat/07-extraction-pipeline`
+- Current implementation branch: `feat/08-extraction-evidence-ui`
 - The Parsing MVP is accepted and tagged `mvp-parsing`.
-- Commit 7 is implemented, deployed, verified live end to end, and committed.
+- The Extraction MVP (commits 6–8) is complete and tagged `mvp-extraction`.
+- Commit 8 is implemented, deployed, verified live, and committed.
 - `main` contains only the ordered implementation-plan commit. Feature branches have not been merged into `main`.
 
 ## Commit sequence
@@ -25,6 +26,7 @@ This document is a concise engineering handoff. The authoritative requirements r
 | Commit 5: parsed-document viewer | `feat/05-parsed-document-viewer` | `91e111c` | Pushed and accepted |
 | Commit 6: schema registry and viewer | `feat/06-schema-registry-viewer` | `727041c` | Implemented and deployed |
 | Commit 7: extraction pipeline | `feat/07-extraction-pipeline` | `72e0db3` | Implemented, deployed, and verified live |
+| Commit 8: extraction evidence UI | `feat/08-extraction-evidence-ui` | `41ee11e` | Implemented, deployed, and verified live |
 
 ## Implemented capabilities
 
@@ -116,6 +118,24 @@ This document is a concise engineering handoff. The authoritative requirements r
 - Immutable retries: each attempt is a new run; history is retained and the latest successful
   run is selected deterministically.
 - No evidence interaction, validation, editing, approval, or export functionality yet.
+
+### Extraction evidence UI
+
+- Per-run result API `GET /api/documents/{document_id}/extractions/{extraction_run_id}` returning
+  the same run/fields/candidate shape as the latest endpoint, with 404 for unknown or
+  cross-document run identifiers.
+- `ExtractionPanel` with a run selector that defaults to the latest successful run and keeps prior
+  runs inspectable, plus run provenance (schema id, version, hash, status, `ai_extract 2.1`).
+- A "Run extraction" trigger that resolves the production schema for the document use case,
+  submits only the governed schema identity, and polls extraction history to a terminal state.
+- A field table showing each field's raw extracted value, typed candidate value, model confidence
+  framed as metadata, and citation status, with an explicit `No citation returned` state and
+  visible per-field extraction errors.
+- Citation evidence overlay reusing the parse viewer's page-image, natural-to-rendered scaling, and
+  zoom/resize contract; selecting a cited field navigates to its page and draws citation boxes that
+  are visually and accessibly distinct from parse-element overlays.
+- All volume paths, artifact paths, and credentials remain behind the backend.
+- No validation, arithmetic or required-field checks, correction, editing, approval, or export.
 
 ## Local verification
 
@@ -274,8 +294,27 @@ reconciled against the governed tables, `make check` was re-run after the date-t
 context and the progress tracker were updated, and the branch was committed and pushed. Capability
 7 is `COMPLETE`.
 
+## Commit 8 verification (2026-08-29)
+
+- `make check` passed: 67 backend tests, 16 frontend tests, Ruff, mypy, ESLint, TypeScript,
+  production build, and offline configuration/YAML validation.
+- New frontend tests cover the citation overlay page-jump and scaled geometry, and the panel's
+  field rendering, provenance, `No citation returned` state, multi-citation evidence, and
+  historical run selection. New backend tests cover the per-run endpoint for a non-latest run and
+  its 404s for unknown and cross-document run identifiers.
+- The dev bundle was redeployed and the `idp-mvp-dev` App source was updated
+  (`databricks bundle run … idp_app`); `/api/health` reports Databricks mode and the deployed root
+  serves the new frontend bundle.
+- Citation-coordinate alignment was verified against invoice `d0ed9896`: the page-0 image is
+  1653×2336 pixels, and all six returned citations fall within those bounds and overlap the same
+  page-0 parse-element boxes the viewer already renders (invoice number/date → the header element,
+  seller → its element, discount → its element, total/currency → the totals line). Because the
+  overlay reuses the identical `scaleBoundingBox` contract, citation boxes land on the cited
+  regions.
+
 ## Next review boundary
 
-Commit 7 is complete and pushed on `feat/07-extraction-pipeline`. The next increment is
-Commit 8 (extraction evidence UI), which links typed fields to their supporting PDF regions.
-Evidence interaction, validation, editing, approval, and export remain out of scope until then.
+Commit 8 is complete and pushed on `feat/08-extraction-evidence-ui`; the Extraction MVP is tagged
+`mvp-extraction`. The next increment is Commit 9 (deterministic validation): technical and
+arithmetic exceptions identified server-side with `Decimal`, no LLM. Correction, approval, LLM
+validation, and export remain out of scope until their commits.
