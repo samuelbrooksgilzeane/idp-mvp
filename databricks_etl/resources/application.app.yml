@@ -99,7 +99,7 @@ resources:
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_records
             permission: SELECT
         - name: extracted-records-table-modify
-          description: Write access for the write-through cache that persists a run's record tree on first read. Extracted_fields itself is read-only here (no MODIFY slot available under the 20-resource app cap), so fields are never cached -- only the record tree is; get_records/list_summaries still recompute fields from the raw ai_extract result on every read.
+          description: Write-through cache that persists a run's record tree on first read (fields stay read-only; no MODIFY slot left under the 20-resource cap).
           uc_securable:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_records
