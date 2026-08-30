@@ -38,10 +38,10 @@ export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
           value={caseId}
         />
 
-        <div className="fixed-metadata" aria-label="Upload profile">
-          <div><span>Template</span><strong>invoice_v1</strong></div>
-          <div><span>Use case</span><strong>Invoice</strong></div>
-        </div>
+        <p className="upload-hint">
+          A document is parsed once. Choose which extraction schema to apply afterwards, on
+          the documents page.
+        </p>
 
         <label className="file-picker" htmlFor="pdf-files">
           <Upload size={22} aria-hidden="true" />

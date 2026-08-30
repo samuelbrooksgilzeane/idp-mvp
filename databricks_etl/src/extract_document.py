@@ -176,8 +176,8 @@ def main() -> None:
             """,
             args={"schema_id": parameters.schema_id, "schema_version": parameters.schema_version},
         ).first()
-        if schema_row is None or schema_row["status"] != "PRODUCTION":
-            raise ValueError("The exact production extraction schema is not registered")
+        if schema_row is None or schema_row["status"] not in ("PRODUCTION", "PUBLISHED"):
+            raise ValueError("The exact production or published extraction schema is not registered")
         schema_json = schema_row["ai_extract_schema_json"]
         manifest = {
             "schema_id": parameters.schema_id,
@@ -197,7 +197,7 @@ def main() -> None:
 
         document = spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""
-            SELECT case_id, source_path, template_id, use_case
+            SELECT case_id, source_path, template_id
             FROM {documents}
             WHERE document_id = :document_id AND status = 'EXTRACTING'
             LIMIT 1
@@ -206,8 +206,6 @@ def main() -> None:
         ).first()
         if document is None:
             raise ValueError("The document is not in the extraction state")
-        if document["use_case"] != schema_row["use_case"]:
-            raise ValueError("The schema use case does not match the document use case")
 
         latest_parse = spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""

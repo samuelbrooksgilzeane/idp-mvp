@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BatchActions } from "./BatchActions";
 
-const schema = { schema_id: "invoice", schema_version: 3, status: "PRODUCTION" };
+const schema = {
+  schema_id: "invoice",
+  schema_version: 3,
+  display_name: "Invoice",
+  status: "PRODUCTION",
+};
 const ids = ["doc-a", "doc-b"];
 
 afterEach(() => {
@@ -42,7 +47,7 @@ describe("BatchActions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <BatchActions selectedIds={ids} useCase="invoice" onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
+      <BatchActions selectedIds={ids} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
 
     expect(screen.getByText("2 selected")).toBeInTheDocument();
@@ -87,7 +92,7 @@ describe("BatchActions", () => {
     );
 
     render(
-      <BatchActions selectedIds={ids} useCase="invoice" onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
+      <BatchActions selectedIds={ids} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
 
     await waitFor(() =>
@@ -122,7 +127,7 @@ describe("BatchActions", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(
-      <BatchActions selectedIds={ids} useCase="invoice" onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
+      <BatchActions selectedIds={ids} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Extract selected/ })).toBeEnabled(),
@@ -142,7 +147,7 @@ describe("BatchActions", () => {
   it("stays hidden when nothing is selected", () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => [] })));
     const { container } = render(
-      <BatchActions selectedIds={[]} useCase="invoice" onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
+      <BatchActions selectedIds={[]} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
     expect(container).toBeEmptyDOMElement();
   });

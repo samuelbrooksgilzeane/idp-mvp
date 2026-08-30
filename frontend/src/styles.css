@@ -566,3 +566,12 @@ footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; ali
 .schema-readonly-tree { margin: 0; padding-left: 18px; font-size: 10px; }
 .schema-readonly-tree li { margin: 4px 0; }
 .limit-exceeded { color: #a8473f; font-weight: 700; }
+.batch-schema-select { display: grid; gap: 4px; }
+.batch-schema-select label { display: grid; gap: 3px; color: #303630; font-size: 11px; font-weight: 700; }
+.batch-schema-select label span { color: #7d837d; font-size: 9px; font-weight: 450; }
+.batch-schema-select select { height: 34px; padding: 0 10px; border: 1px solid #c9ccc5; border-radius: 4px; background: #fff; font-size: 11px; }
+.upload-hint { margin: 16px 0; color: #6e756e; font-size: 10px; line-height: 1.5; }
+
+@media (max-width: 720px) {
+  .schema-editor-layout { grid-template-columns: 1fr; }
+}

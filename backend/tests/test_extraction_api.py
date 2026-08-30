@@ -169,7 +169,7 @@ def test_extract_requires_successful_parse(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "SUCCESSFUL_PARSE_REQUIRED"
 
 
-def test_extract_rejects_missing_nonproduction_and_use_case_mismatch(
+def test_extract_rejects_missing_or_nonproduction_schema(
     tmp_path: Path,
 ) -> None:
     client, settings = _client(tmp_path)
@@ -195,17 +195,19 @@ def test_extract_rejects_missing_nonproduction_and_use_case_mismatch(
     assert nonproduction.status_code == 409
     assert nonproduction.json()["error"]["code"] == "SCHEMA_NOT_PRODUCTION"
 
+    # A document is no longer tied to one use case at upload time (the generalized IDP plan
+    # decouples schema selection from upload): a schema tagged for a different use case may
+    # still be applied, once it is production/published again.
     with sqlite3.connect(database) as connection:
         connection.execute(
             "UPDATE schema_registry SET status = 'PRODUCTION', use_case = 'receipt' "
             "WHERE schema_id = 'invoice' AND schema_version = 1"
         )
-    mismatch = client.post(
+    decoupled = client.post(
         f"/api/documents/{document['document_id']}/extract",
         json={"schema_id": "invoice", "schema_version": 1},
     )
-    assert mismatch.status_code == 409
-    assert mismatch.json()["error"]["code"] == "SCHEMA_USE_CASE_MISMATCH"
+    assert decoupled.status_code == 202
 
 
 def test_request_rejects_untrusted_fields_and_schema_identifier_injection(

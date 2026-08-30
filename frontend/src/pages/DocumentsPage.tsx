@@ -99,8 +99,8 @@ export function DocumentsPage({
     const body = new FormData();
     input.files.forEach((file) => body.append("files", file));
     if (input.caseId.trim()) body.append("case_id", input.caseId.trim());
-    body.append("template_id", "invoice_v1");
-    body.append("use_case", "invoice");
+    // Upload no longer assigns any one extraction schema: a schema is chosen separately, at
+    // extraction time, from whichever published schemas exist (see BatchActions / SchemaPage).
     try {
       const response = await fetch("/api/documents", { method: "POST", body });
       const payload = (await response.json()) as UploadBatchResponse | ApiError;
@@ -172,7 +172,6 @@ export function DocumentsPage({
         </div>
         <BatchActions
           selectedIds={selection}
-          useCase="invoice"
           onClear={() => setSelectedIds(new Set())}
           onDocumentsChanged={onDocumentsChanged}
         />

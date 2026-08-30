@@ -23,22 +23,26 @@ type BatchStatus = {
   failed: number;
 };
 
-type ProductionSchema = { schema_id: string; schema_version: number; status: string };
+type ExtractableSchema = {
+  schema_id: string;
+  schema_version: number;
+  display_name: string;
+  status: string;
+};
 
 type BatchActionsProps = {
   selectedIds: string[];
-  useCase: string;
   onClear: () => void;
   onDocumentsChanged: () => Promise<void> | void;
 };
 
 export function BatchActions({
   selectedIds,
-  useCase,
   onClear,
   onDocumentsChanged,
 }: BatchActionsProps) {
-  const [schema, setSchema] = useState<ProductionSchema | null>(null);
+  const [schemas, setSchemas] = useState<ExtractableSchema[]>([]);
+  const [schemaKey, setSchemaKey] = useState<string>("");
   const [running, setRunning] = useState<BatchKind | null>(null);
   const [progress, setProgress] = useState<BatchStatus | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
@@ -46,17 +50,23 @@ export function BatchActions({
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/schemas?status=PRODUCTION&use_case=${encodeURIComponent(useCase)}`, {
-      signal: controller.signal,
-    })
+    // Any published (or governed production) schema may be applied to any document: a
+    // document is no longer tied to one schema at upload time.
+    fetch("/api/schemas?status=ALL", { signal: controller.signal })
       .then((response) => (response.ok ? (response.json() as Promise<unknown>) : []))
       .then((payload) => {
         if (controller.signal.aborted || !Array.isArray(payload)) return;
-        setSchema((payload[0] as ProductionSchema) ?? null);
+        const extractable = (payload as ExtractableSchema[]).filter(
+          (item) => item.status === "PRODUCTION" || item.status === "PUBLISHED",
+        );
+        setSchemas(extractable);
+        setSchemaKey(extractable.length ? `${extractable[0].schema_id}:${extractable[0].schema_version}` : "");
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [useCase]);
+  }, []);
+
+  const schema = schemas.find((item) => `${item.schema_id}:${item.schema_version}` === schemaKey) ?? null;
 
   const poll = useCallback(async () => {
     const current = active.current;
@@ -93,7 +103,7 @@ export function BatchActions({
     try {
       const body: Record<string, unknown> = { document_ids: selectedIds };
       if (kind === "extract") {
-        if (!schema) throw new Error("No production schema is available for this use case.");
+        if (!schema) throw new Error("No extractable schema is available. Publish one first.");
         body.schema_id = schema.schema_id;
         body.schema_version = schema.schema_version;
       }
@@ -155,6 +165,28 @@ export function BatchActions({
             {progress.failed ? ` · ${progress.failed} failed` : ""}
           </span>
         ) : null}
+      </div>
+      <div className="batch-schema-select">
+        <label htmlFor="batch-schema">
+          Extraction schema
+          <span>Applies to whichever documents are selected below.</span>
+        </label>
+        <select
+          id="batch-schema"
+          value={schemaKey}
+          disabled={busy || !schemas.length}
+          onChange={(event) => setSchemaKey(event.target.value)}
+        >
+          {schemas.length === 0 ? <option value="">No extractable schema published</option> : null}
+          {schemas.map((item) => {
+            const key = `${item.schema_id}:${item.schema_version}`;
+            return (
+              <option key={key} value={key}>
+                {item.display_name} · v{item.schema_version}
+              </option>
+            );
+          })}
+        </select>
       </div>
       <div className="batch-buttons">
         <button

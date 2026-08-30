@@ -116,16 +116,17 @@ class ExtractionService:
         schema = await run_in_threadpool(self._schemas.get, schema_id, schema_version)
         if schema is None:
             raise DocumentServiceError("SCHEMA_NOT_FOUND", "Extraction schema not found.", 404)
-        if schema.status != "PRODUCTION":
+        # PRODUCTION is the governed-bootstrap status; PUBLISHED is its user-editable-schema
+        # equivalent. Either is immutable and may be extracted. A document is no longer tied
+        # to one use case at upload time: any published schema may be applied to any parsed
+        # document, so the same document can be extracted again with a different schema, and a
+        # schema authored for one purpose is not locked to documents uploaded under a matching
+        # tag.
+        if schema.status not in ("PRODUCTION", "PUBLISHED"):
             raise DocumentServiceError(
-                "SCHEMA_NOT_PRODUCTION", "Only a production schema can be extracted.", 409
-            )
-        if schema.use_case != document.use_case:
-            raise DocumentServiceError(
-                "SCHEMA_USE_CASE_MISMATCH",
-                "The extraction schema does not match the document use case.",
+                "SCHEMA_NOT_PRODUCTION",
+                "Only a published (or production) schema can be extracted.",
                 409,
-                document_id=document_id,
             )
 
         extraction_run_id = str(uuid4())
