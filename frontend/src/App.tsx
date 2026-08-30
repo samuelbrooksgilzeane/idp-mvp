@@ -4,6 +4,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { WorkflowHeader } from "./components/WorkflowHeader";
 import { DocumentDetailPage } from "./pages/DocumentDetailPage";
 import { DocumentsPage } from "./pages/DocumentsPage";
+import { ResultDetailPage } from "./pages/ResultDetailPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import { SchemaPage } from "./pages/SchemaPage";
 import type { DocumentRecord, HealthResponse } from "./types";
@@ -36,7 +37,12 @@ const HEADINGS: Record<string, { eyebrow: string; title: string; blurb: string }
   results: {
     eyebrow: "Reporting",
     title: "Results and export",
-    blurb: "Compare invoices across a case and export the detail for review.",
+    blurb: "Review every extraction run and export the ones you need.",
+  },
+  "result-detail": {
+    eyebrow: "Reporting",
+    title: "Extraction run",
+    blurb: "Review one run's result beside its source, with citations and confidence.",
   },
   schema: {
     eyebrow: "Governance",
@@ -155,6 +161,7 @@ export function App() {
             element={<DocumentDetailPage onDocumentsChanged={() => void refreshDocuments()} />}
           />
           <Route path="/results" element={<ResultsPage caseIds={caseIds} />} />
+          <Route path="/results/:runId" element={<ResultDetailPage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
       </main>
@@ -168,6 +175,7 @@ export function App() {
 
 function sectionFor(pathname: string): string {
   if (pathname.startsWith("/documents/")) return "detail";
+  if (pathname.startsWith("/results/")) return "result-detail";
   if (pathname.startsWith("/results")) return "results";
   if (pathname.startsWith("/schema")) return "schema";
   return "documents";

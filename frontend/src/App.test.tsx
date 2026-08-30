@@ -153,6 +153,6 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Extraction contract" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Approved field specification" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Schema library" })).toBeInTheDocument();
   });
 });
