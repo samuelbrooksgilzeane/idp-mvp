@@ -282,6 +282,87 @@ class ExtractionResultResponse(BaseModel):
     candidates: list[InvoiceCandidateResponse]
 
 
+class GenericExtractionResponse(BaseModel):
+    """The schema-agnostic replacement for the invoice-only result above (`GET
+    /api/extractions/{run_id}`): the run, the schema it used, and the hierarchical result
+    exactly as `ai_extract` returned it -- suitable for a recursive results UI to render
+    directly (repeated root records as "Record 1", "Record 2", nested objects and arrays as
+    nested tables) without any invoice-specific field names.
+    """
+
+    run: ExtractionRunResponse
+    schema_id: str
+    schema_version: int
+    root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
+    result: dict[str, Any]
+
+
+class ExtractionRunSummaryResponse(BaseModel):
+    """One row of the run-centric Results list (`GET /api/extractions`): a run plus the
+    document/schema context needed to display and filter it without a per-row round trip."""
+
+    extraction_run_id: str
+    document_id: str
+    document_name: str
+    case_id: str | None
+    schema_id: str
+    schema_version: int
+    schema_display_name: str
+    status: Literal["RUNNING", "EXTRACTED", "FAILED"]
+    started_at: datetime
+    completed_at: datetime | None
+    is_latest: bool
+    records_count: int
+    issues_count: int
+
+
+class GenericRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    record_id: str
+    parent_record_id: str | None
+    schema_path: str
+    instance_path: str
+    ordinal: int | None
+
+
+class GenericFieldResultResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    record_id: str
+    schema_path: str
+    instance_path: str
+    field_name: str
+    declared_type: str
+    value: Any
+    value_string: str | None
+    confidence_score: float | None
+    citation_ids: list[int]
+    citations: list[dict[str, Any]]
+    validation_status: str | None
+    validation_message: str | None
+
+
+class GenericExtractionRecordsResponse(BaseModel):
+    """`GET /api/extractions/{run_id}/records`: the flat, generic record/field tables that
+    back a review grid or an export, for any schema shape -- flat, singly-nested, or nested to
+    several levels."""
+
+    run: ExtractionRunResponse
+    schema_id: str
+    schema_version: int
+    root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
+    records: list[GenericRecordResponse]
+    fields: list[GenericFieldResultResponse]
+
+
+class ExportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_ids: list[str] = Field(min_length=1, max_length=500)
+    format: Literal["xlsx", "csv"] = "xlsx"
+
+
 class ValidationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -13,6 +13,7 @@ from idp_app.services.document_storage import (
     LocalVolumeStorage,
 )
 from idp_app.services.documents import DocumentService, DocumentServiceError
+from idp_app.services.export_service import ExportService
 from idp_app.services.extraction import ExtractionService
 from idp_app.services.extraction_jobs import (
     DatabricksExtractionJobRunner,
@@ -22,6 +23,7 @@ from idp_app.services.extraction_runs import (
     DatabricksExtractionRunRepository,
     SQLiteExtractionRunRepository,
 )
+from idp_app.services.generic_results import ExtractionResultsService
 from idp_app.services.parse_jobs import DatabricksParseJobRunner, MockParseJobRunner
 from idp_app.services.parse_runs import (
     DatabricksParseRunRepository,
@@ -326,6 +328,60 @@ def build_extraction_service(settings: Settings) -> ExtractionService:
         databricks_runs,
         databricks_jobs,
     )
+
+
+def get_extraction_results_service(request: Request) -> ExtractionResultsService:
+    existing = getattr(request.app.state, "extraction_results_service", None)
+    if isinstance(existing, ExtractionResultsService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    service = build_extraction_results_service(settings)
+    request.app.state.extraction_results_service = service
+    return service
+
+
+def build_extraction_results_service(settings: Settings) -> ExtractionResultsService:
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    if settings.mode is IdpMode.MOCK:
+        mock_schemas = SQLiteSchemaRepository(database_path)
+        for manifest in load_source_manifests():
+            mock_schemas.register(manifest, "source-controlled-bootstrap")
+        return ExtractionResultsService(
+            SQLiteExtractionRunRepository(database_path),
+            mock_schemas,
+            SQLiteDocumentRegistry(database_path),
+        )
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    documents = DatabricksDocumentRegistry(
+        client, warehouse_id, catalog, project_schema, table_prefix
+    )
+    return ExtractionResultsService(
+        DatabricksExtractionRunRepository(documents, catalog, project_schema, table_prefix),
+        DatabricksSchemaRepository(documents, catalog, project_schema, table_prefix),
+        documents,
+    )
+
+
+def get_export_service(request: Request) -> ExportService:
+    existing = getattr(request.app.state, "export_service", None)
+    if isinstance(existing, ExportService):
+        return existing
+    results_service = get_extraction_results_service(request)
+    service = ExportService(results_service)
+    request.app.state.export_service = service
+    return service
 
 
 def get_authenticated_user(request: Request) -> str:
