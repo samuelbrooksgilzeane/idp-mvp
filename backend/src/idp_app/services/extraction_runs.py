@@ -36,6 +36,7 @@ RUN_COLUMNS = (
 LINE_COLUMNS = (
     "extraction_run_id",
     "document_id",
+    "invoice_index",
     "line_number",
     "description",
     "quantity",
@@ -56,7 +57,7 @@ class ExtractionRunRepository(Protocol):
         self,
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
-        candidate: InvoiceCandidateRecord,
+        candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
     ) -> None: ...
 
@@ -72,7 +73,7 @@ class ExtractionRunRepository(Protocol):
 
     def list_fields(self, extraction_run_id: str) -> list[ExtractedFieldRecord]: ...
 
-    def get_candidate(self, extraction_run_id: str) -> InvoiceCandidateRecord | None: ...
+    def list_candidates(self, extraction_run_id: str) -> list[InvoiceCandidateRecord]: ...
 
     def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]: ...
 
@@ -127,13 +128,14 @@ class SQLiteExtractionRunRepository:
                 CREATE TABLE IF NOT EXISTS invoice_line_candidates (
                     extraction_run_id TEXT NOT NULL,
                     document_id TEXT NOT NULL,
+                    invoice_index INTEGER NOT NULL DEFAULT 0,
                     line_number INTEGER NOT NULL,
                     description TEXT,
                     quantity TEXT,
                     unit_price TEXT,
                     tax TEXT,
                     amount TEXT,
-                    PRIMARY KEY (extraction_run_id, line_number)
+                    PRIMARY KEY (extraction_run_id, invoice_index, line_number)
                 );
                 CREATE TABLE IF NOT EXISTS invoice_candidates (
                     case_id TEXT,
@@ -148,8 +150,10 @@ class SQLiteExtractionRunRepository:
                     tax_amount TEXT,
                     total_amount TEXT,
                     currency TEXT,
-                    extraction_run_id TEXT PRIMARY KEY,
-                    schema_version INTEGER NOT NULL
+                    extraction_run_id TEXT NOT NULL,
+                    schema_version INTEGER NOT NULL,
+                    invoice_index INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (extraction_run_id, invoice_index)
                 );
                 """
             )
@@ -186,7 +190,7 @@ class SQLiteExtractionRunRepository:
         self,
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
-        candidate: InvoiceCandidateRecord,
+        candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
     ) -> None:
         with self._connect() as connection:
@@ -198,13 +202,13 @@ class SQLiteExtractionRunRepository:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     _field_values(field),
                 )
-            connection.execute(
+            connection.executemany(
                 "INSERT INTO invoice_candidates "
                 "(case_id, document_id, source_path, template_id, invoice_number, invoice_date, "
                 "seller_name, subtotal, discount_amount, tax_amount, total_amount, currency, "
-                "extraction_run_id, schema_version) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                _candidate_values(candidate),
+                "extraction_run_id, schema_version, invoice_index) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [_candidate_values(candidate) for candidate in candidates],
             )
             connection.executemany(
                 f"INSERT INTO invoice_line_candidates ({', '.join(LINE_COLUMNS)}) "
@@ -273,19 +277,20 @@ class SQLiteExtractionRunRepository:
             ).fetchall()
         return [_sqlite_row_to_field(row) for row in rows]
 
-    def get_candidate(self, extraction_run_id: str) -> InvoiceCandidateRecord | None:
+    def list_candidates(self, extraction_run_id: str) -> list[InvoiceCandidateRecord]:
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM invoice_candidates WHERE extraction_run_id = ? LIMIT 1",
+            rows = connection.execute(
+                "SELECT * FROM invoice_candidates WHERE extraction_run_id = ? "
+                "ORDER BY invoice_index",
                 (extraction_run_id,),
-            ).fetchone()
-        return _sqlite_row_to_candidate(row) if row else None
+            ).fetchall()
+        return [_sqlite_row_to_candidate(row) for row in rows]
 
     def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM invoice_line_candidates WHERE extraction_run_id = ? "
-                "ORDER BY line_number",
+                "ORDER BY invoice_index, line_number",
                 (extraction_run_id,),
             ).fetchall()
         return [_line_from_values([row[column] for column in LINE_COLUMNS]) for row in rows]
@@ -349,7 +354,7 @@ class DatabricksExtractionRunRepository:
         self,
         extraction_run_id: str,
         fields: list[ExtractedFieldRecord],
-        candidate: InvoiceCandidateRecord,
+        candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
     ) -> None:
         for field in fields:
@@ -371,23 +376,27 @@ class DatabricksExtractionRunRepository:
                     "extraction_error": field.extraction_error,
                 },
             )
-        self._sql.execute_sql(
-            f"INSERT INTO {self._candidates} VALUES (:case_id, :document_id, :source_path, "
-            ":template_id, :invoice_number, CAST(:invoice_date AS DATE), :seller_name, "
-            "CAST(:subtotal AS DECIMAL(18,2)), CAST(:discount_amount AS DECIMAL(18,2)), "
-            "CAST(:tax_amount AS DECIMAL(18,2)), CAST(:total_amount AS DECIMAL(18,2)), "
-            ":currency, :extraction_run_id, CAST(:schema_version AS INT))",
-            _candidate_parameters(candidate),
-        )
+        for candidate in candidates:
+            self._sql.execute_sql(
+                f"INSERT INTO {self._candidates} VALUES (:case_id, :document_id, :source_path, "
+                ":template_id, :invoice_number, CAST(:invoice_date AS DATE), :seller_name, "
+                "CAST(:subtotal AS DECIMAL(18,2)), CAST(:discount_amount AS DECIMAL(18,2)), "
+                "CAST(:tax_amount AS DECIMAL(18,2)), CAST(:total_amount AS DECIMAL(18,2)), "
+                ":currency, :extraction_run_id, CAST(:schema_version AS INT), "
+                "CAST(:invoice_index AS INT))",
+                _candidate_parameters(candidate),
+            )
         for line in lines:
             self._sql.execute_sql(
                 f"INSERT INTO {self._lines} VALUES (:extraction_run_id, :document_id, "
                 "CAST(:line_number AS INT), :description, "
                 "CAST(:quantity AS DECIMAL(18,4)), CAST(:unit_price AS DECIMAL(18,2)), "
-                "CAST(:tax AS DECIMAL(18,2)), CAST(:amount AS DECIMAL(18,2)))",
+                "CAST(:tax AS DECIMAL(18,2)), CAST(:amount AS DECIMAL(18,2)), "
+                "CAST(:invoice_index AS INT))",
                 {
                     "extraction_run_id": line.extraction_run_id,
                     "document_id": line.document_id,
+                    "invoice_index": line.invoice_index,
                     "line_number": line.line_number,
                     "description": line.description,
                     "quantity": _text(line.quantity),
@@ -452,24 +461,25 @@ class DatabricksExtractionRunRepository:
         )
         return [_databricks_row_to_field(row) for row in rows]
 
-    def get_candidate(self, extraction_run_id: str) -> InvoiceCandidateRecord | None:
+    def list_candidates(self, extraction_run_id: str) -> list[InvoiceCandidateRecord]:
         rows = self._sql.execute_sql(
             "SELECT case_id, document_id, source_path, template_id, invoice_number, "
             "CAST(invoice_date AS STRING), seller_name, CAST(subtotal AS STRING), "
             "CAST(discount_amount AS STRING), CAST(tax_amount AS STRING), "
-            "CAST(total_amount AS STRING), currency, extraction_run_id, schema_version "
-            f"FROM {self._candidates} "
-            "WHERE extraction_run_id = :extraction_run_id LIMIT 1",
+            "CAST(total_amount AS STRING), currency, extraction_run_id, schema_version, "
+            f"CAST(invoice_index AS STRING) FROM {self._candidates} "
+            "WHERE extraction_run_id = :extraction_run_id ORDER BY invoice_index",
             {"extraction_run_id": extraction_run_id},
         )
-        return _values_to_candidate(rows[0]) if rows else None
+        return [_values_to_candidate(row) for row in rows]
 
     def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]:
         rows = self._sql.execute_sql(
-            "SELECT extraction_run_id, document_id, CAST(line_number AS STRING), description, "
+            "SELECT extraction_run_id, document_id, CAST(invoice_index AS STRING), "
+            "CAST(line_number AS STRING), description, "
             "CAST(quantity AS STRING), CAST(unit_price AS STRING), CAST(tax AS STRING), "
             f"CAST(amount AS STRING) FROM {self._lines} "
-            "WHERE extraction_run_id = :extraction_run_id ORDER BY line_number",
+            "WHERE extraction_run_id = :extraction_run_id ORDER BY invoice_index, line_number",
             {"extraction_run_id": extraction_run_id},
         )
         return [_line_from_values(row) for row in rows]
@@ -537,6 +547,7 @@ def _candidate_values(candidate: InvoiceCandidateRecord) -> tuple[object, ...]:
         candidate.currency,
         candidate.extraction_run_id,
         candidate.schema_version,
+        candidate.invoice_index,
     )
 
 
@@ -544,7 +555,7 @@ def _candidate_parameters(candidate: InvoiceCandidateRecord) -> dict[str, object
     names = (
         "case_id", "document_id", "source_path", "template_id", "invoice_number",
         "invoice_date", "seller_name", "subtotal", "discount_amount", "tax_amount",
-        "total_amount", "currency", "extraction_run_id", "schema_version",
+        "total_amount", "currency", "extraction_run_id", "schema_version", "invoice_index",
     )
     return dict(zip(names, _candidate_values(candidate), strict=True))
 
@@ -603,7 +614,7 @@ def _sqlite_row_to_candidate(row: sqlite3.Row) -> InvoiceCandidateRecord:
     names = (
         "case_id", "document_id", "source_path", "template_id", "invoice_number",
         "invoice_date", "seller_name", "subtotal", "discount_amount", "tax_amount",
-        "total_amount", "currency", "extraction_run_id", "schema_version",
+        "total_amount", "currency", "extraction_run_id", "schema_version", "invoice_index",
     )
     return _values_to_candidate([row[name] for name in names])
 
@@ -617,6 +628,7 @@ def _values_to_candidate(row: list[str]) -> InvoiceCandidateRecord:
         tax_amount=Decimal(row[9]) if row[9] else None,
         total_amount=Decimal(row[10]) if row[10] else None, currency=row[11] or None,
         extraction_run_id=row[12], schema_version=int(row[13]),
+        invoice_index=int(row[14]),
     )
 
 
@@ -631,7 +643,8 @@ def _text(value: Decimal | None) -> str | None:
 
 def _line_values(line: InvoiceLineCandidateRecord) -> tuple[Any, ...]:
     return (
-        line.extraction_run_id, line.document_id, line.line_number, line.description,
+        line.extraction_run_id, line.document_id, line.invoice_index, line.line_number,
+        line.description,
         _text(line.quantity), _text(line.unit_price), _text(line.tax), _text(line.amount),
     )
 
@@ -643,10 +656,11 @@ def _line_from_values(values: Any) -> InvoiceLineCandidateRecord:
     return InvoiceLineCandidateRecord(
         extraction_run_id=str(values[0]),
         document_id=str(values[1]),
-        line_number=int(values[2]),
-        description=str(values[3]) if values[3] is not None else None,
-        quantity=amount(values[4]),
-        unit_price=amount(values[5]),
-        tax=amount(values[6]),
-        amount=amount(values[7]),
+        invoice_index=int(values[2]),
+        line_number=int(values[3]),
+        description=str(values[4]) if values[4] is not None else None,
+        quantity=amount(values[5]),
+        unit_price=amount(values[6]),
+        tax=amount(values[7]),
+        amount=amount(values[8]),
     )

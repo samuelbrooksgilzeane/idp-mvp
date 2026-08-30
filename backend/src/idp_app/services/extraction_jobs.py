@@ -15,7 +15,7 @@ from databricks.sdk.service import jobs
 from idp_app.services.document_models import DocumentRecord, ExtractionRunRecord, ParseRunRecord
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.extraction_result import (
-    build_invoice_candidate,
+    build_invoice_candidates,
     build_invoice_line_candidates,
     flatten_result,
 )
@@ -100,9 +100,9 @@ class MockExtractionJobRunner:
             if isinstance(error_message, str) and error_message:
                 raise RuntimeError(error_message)
             fields = flatten_result(request.run, request.schema, ai_result)
-            candidate = build_invoice_candidate(request.run, request.document, fields)
+            candidates = build_invoice_candidates(request.run, request.document, fields)
             lines = build_invoice_line_candidates(request.run, fields)
-            self._runs.complete(request.run.extraction_run_id, fields, candidate, lines)
+            self._runs.complete(request.run.extraction_run_id, fields, candidates, lines)
             self._documents.update_status(request.document.document_id, {"EXTRACTING"}, "EXTRACTED")
         except Exception as error:
             current = self._runs.get(request.run.extraction_run_id)

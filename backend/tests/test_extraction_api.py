@@ -5,6 +5,8 @@ from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pymupdf
 import pytest
@@ -22,7 +24,7 @@ from idp_app.services.extraction_jobs import (
     ExtractionJobRequest,
     ExtractionJobState,
 )
-from idp_app.services.extraction_result import build_invoice_candidate, flatten_result
+from idp_app.services.extraction_result import build_invoice_candidates, flatten_result
 from idp_app.services.extraction_runs import SQLiteExtractionRunRepository
 from idp_app.services.job_batches import batch_idempotency_token
 from idp_app.services.parse_runs import SQLiteParseRunRepository
@@ -135,12 +137,12 @@ def test_extracts_typed_invoice_with_confidence_and_resolved_citations(
     assert fields["total"]["confidence_score"] == 0.99
     assert fields["total"]["citation_ids"] == [0]
     assert fields["total"]["citations"][0]["bbox"][0]["page_id"] == 0
-    assert latest["candidate"]["invoice_date"] == "2026-08-29"
-    assert latest["candidate"]["subtotal"] == "100.00"
-    assert latest["candidate"]["discount_amount"] == "5.00"
-    assert latest["candidate"]["tax_amount"] == "19.00"
-    assert latest["candidate"]["total_amount"] == "114.00"
-    assert latest["candidate"]["currency"] == "GBP"
+    assert latest["candidates"][0]["invoice_date"] == "2026-08-29"
+    assert latest["candidates"][0]["subtotal"] == "100.00"
+    assert latest["candidates"][0]["discount_amount"] == "5.00"
+    assert latest["candidates"][0]["tax_amount"] == "19.00"
+    assert latest["candidates"][0]["total_amount"] == "114.00"
+    assert latest["candidates"][0]["currency"] == "GBP"
 
     repository = SQLiteExtractionRunRepository(
         settings.local_data_dir / "registry.sqlite3"
@@ -510,17 +512,17 @@ def test_candidate_types_unambiguous_named_month_dates_and_leaves_ambiguous_null
     )
     document = _document_record()
 
-    named_month = build_invoice_candidate(
+    [named_month] = build_invoice_candidates(
         run, document, [_extracted_field("invoice_date", "28-Jul-2011")]
     )
     assert named_month.invoice_date == date(2011, 7, 28)
 
-    iso = build_invoice_candidate(
+    [iso] = build_invoice_candidates(
         run, document, [_extracted_field("invoice_date", "2026-08-29")]
     )
     assert iso.invoice_date == date(2026, 8, 29)
 
-    ambiguous = build_invoice_candidate(
+    [ambiguous] = build_invoice_candidates(
         run, document, [_extracted_field("invoice_date", "07/08/2011")]
     )
     assert ambiguous.invoice_date is None
@@ -612,7 +614,7 @@ def test_extraction_result_endpoint_serves_historical_run_and_rejects_foreign(
     payload = historical.json()
     assert payload["run"]["extraction_run_id"] == older_run_id
     assert len(payload["fields"]) == 8
-    assert payload["candidate"]["extraction_run_id"] == older_run_id
+    assert payload["candidates"][0]["extraction_run_id"] == older_run_id
 
     # An unknown run id is not found.
     unknown = client.get(
@@ -719,3 +721,80 @@ def test_line_candidates_are_immutable_per_run(tmp_path: Path) -> None:
     # Each attempt keeps its own typed lines rather than overwriting the earlier ones.
     for run in runs:
         assert len(repository.list_lines(run["extraction_run_id"])) == 2
+
+
+def _etl_module() -> Any:
+    """Load the Databricks projection the way the schema-hash test loads it."""
+    import importlib.util
+    import sys
+    from pathlib import Path as _Path
+
+    root = _Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "extract_document", root / "databricks_etl/src/extract_document.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["extract_document"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _leaves(*paths_and_values: tuple[str, Any]) -> list[dict[str, Any]]:
+    return [{"field_path": path, "value": value} for path, value in paths_and_values]
+
+
+def test_the_two_projections_agree_on_a_document_stating_several_invoices() -> None:
+    """The Databricks and local projections must group repeated invoices identically.
+
+    A nested path that the line regex failed to recognise would silently produce no typed
+    lines at all, so both implementations are pinned to the same grouping here.
+    """
+    etl = _etl_module()
+    fields = _leaves(
+        ("invoices[0].invoice_number", "INV-1"),
+        ("invoices[0].total", 100),
+        ("invoices[0].line_items[0].amount", 60),
+        ("invoices[0].line_items[1].amount", 40),
+        ("invoices[1].invoice_number", "INV-2"),
+        ("invoices[1].total", 250),
+        ("invoices[1].line_items[0].amount", 250),
+    )
+    assert sorted(etl.invoice_leaves(fields)) == [0, 1]
+    assert etl.invoice_leaves(fields)[1]["invoice_number"] == "INV-2"
+
+    parameters = SimpleNamespace(
+        document_id="doc-1", extraction_run_id="run-1", schema_version=4
+    )
+    lines = etl.build_line_candidates(parameters, fields)
+    # (extraction_run_id, document_id, line_number, ..., invoice_index)
+    assert [(line[2], line[-1]) for line in lines] == [(1, 0), (2, 0), (1, 1)]
+    assert [line[-2] for line in lines] == [Decimal("60.00"), Decimal("40.00"), Decimal("250.00")]
+
+
+def test_a_flat_contract_still_projects_one_invoice_at_index_zero() -> None:
+    """Documents extracted under v1 to v3 keep projecting exactly as they always have."""
+    etl = _etl_module()
+    fields = _leaves(
+        ("invoice_number", "INV-FLAT"),
+        ("total", 75),
+        ("line_items[0].amount", 50),
+        ("line_items[1].amount", 25),
+    )
+    assert list(etl.invoice_leaves(fields)) == [0]
+    parameters = SimpleNamespace(
+        document_id="doc-1", extraction_run_id="run-1", schema_version=3
+    )
+    lines = etl.build_line_candidates(parameters, fields)
+    assert [(line[2], line[-1]) for line in lines] == [(1, 0), (2, 0)]
+
+
+def test_a_shape_with_no_invoice_leaves_projects_nothing() -> None:
+    """A schema this projection cannot describe is captured, never written as nulls."""
+    etl = _etl_module()
+    parameters = SimpleNamespace(
+        document_id="doc-1", extraction_run_id="run-1", schema_version=9
+    )
+    document = {"case_id": None, "source_path": "/x", "template_id": "t"}
+    fields = _leaves(("account_number", "123"), ("transactions[0].amount", 5))
+    assert etl.build_candidates(parameters, document, fields) == []

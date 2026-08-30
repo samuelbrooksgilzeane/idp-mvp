@@ -40,6 +40,7 @@ def test_summary_case_filter_and_workbook_share_the_same_rows(
         "document_id": first,
         "file_name": "invoice-a.pdf",
         "case_id": "CASE-A",
+        "invoice_index": 0,
         "invoice_number": "INV-A",
         "invoice_date": "2026-08-28",
         "seller_name": "Seller A",
@@ -75,11 +76,11 @@ def test_summary_case_filter_and_workbook_share_the_same_rows(
     lines = list(workbook["Line items"].values)
     assert summary[0][-2:] == ("Reconciliation delta", "Validation outcome")
     assert len(summary) == 2
-    assert summary[1][0:4] == (first, "invoice-a.pdf", "CASE-A", "INV-A")
+    assert summary[1][0:5] == (first, "invoice-a.pdf", "CASE-A", 1, "INV-A")
     assert summary[1][-2:] == (0, "VALIDATED_PASS")
     assert len(lines) == 3
     assert {row[0] for row in lines[1:]} == {first}
-    assert {row[1] for row in lines[1:]} == {"INV-A"}
+    assert {row[2] for row in lines[1:]} == {"INV-A"}
 
     unicode_case = client.get(
         "/api/exports/invoices.xlsx", params={"case_id": "客户 1"}
@@ -88,8 +89,8 @@ def test_summary_case_filter_and_workbook_share_the_same_rows(
     assert unicode_case.headers["content-disposition"].isascii()
     assert workbook["Summary"].freeze_panes == "A2"
     assert workbook["Summary"].sheet_view.showGridLines is False
-    assert workbook["Summary"]["I2"].number_format == '#,##0.00;[Red]-#,##0.00'
-    assert workbook["Line items"]["E2"].number_format == "#,##0.0000"
+    assert workbook["Summary"]["J2"].number_format == '#,##0.00;[Red]-#,##0.00'
+    assert workbook["Line items"]["F2"].number_format == "#,##0.0000"
 
     # The verified calculation never assumes a missing signed term is zero.
     with sqlite3.connect(database_path) as connection:
@@ -172,23 +173,24 @@ def _seed_report_rows(database_path: Path, first: str, second: str) -> None:
             ],
         )
         connection.executemany(
-            "INSERT INTO invoice_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO invoice_candidates "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 ("CASE-A", first, "/Volumes/private/old.pdf", "invoice_v1", "INV-OLD",
-                 "2026-08-26", "Seller A", "999", "0", "0", "999", "GBP", "run-a-old", 1),
+                 "2026-08-26", "Seller A", "999", "0", "0", "999", "GBP", "run-a-old", 1, 0),
                 ("CASE-A", first, "/Volumes/private/a.pdf", "invoice_v1", "INV-A",
-                 "2026-08-28", "Seller A", "70", "5", "10", "75", "GBP", "run-a", 1),
+                 "2026-08-28", "Seller A", "70", "5", "10", "75", "GBP", "run-a", 1, 0),
                 ("CASE-B", second, "/Volumes/private/b.pdf", "invoice_v1", "INV-B",
-                 "2026-08-27", "Seller B", "10", "0", "2", "12", "GBP", "run-b", 1),
+                 "2026-08-27", "Seller B", "10", "0", "2", "12", "GBP", "run-b", 1, 0),
             ],
         )
         connection.executemany(
-            "INSERT INTO invoice_line_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO invoice_line_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
-                ("run-a-old", first, 1, "Superseded", "1", "999", "0", "999"),
-                ("run-a", first, 1, "Advisory", "1", "50", "0", "50"),
-                ("run-a", first, 2, "Research", "2", "15", "0", "30"),
-                ("run-b", second, 1, "Support", "1", "10", "0", "10"),
+                ("run-a-old", first, 0, 1, "Superseded", "1", "999", "0", "999"),
+                ("run-a", first, 0, 1, "Advisory", "1", "50", "0", "50"),
+                ("run-a", first, 0, 2, "Research", "2", "15", "0", "30"),
+                ("run-b", second, 0, 1, "Support", "1", "10", "0", "10"),
             ],
         )
         connection.executemany(
@@ -202,3 +204,57 @@ def _seed_report_rows(database_path: Path, first: str, second: str) -> None:
                  "2026-08-28T09:03:00+00:00"),
             ],
         )
+
+
+def test_a_document_stating_several_invoices_reports_one_row_each(
+    reporting_client: tuple[TestClient, Path],
+) -> None:
+    """Each invoice reports its own lines, never the whole document's.
+
+    Joining lines on the extraction run alone would give every invoice in a document every
+    other invoice's lines, inflating each sum without ever raising an error.
+    """
+    client, database_path = reporting_client
+    first = _upload(client, "invoice-a.pdf", PDF_ONE, "CASE-A")
+    second = _upload(client, "three-invoices.pdf", PDF_TWO, "CASE-MULTI")
+    assert client.get("/api/results/invoices").json() == []
+    _seed_report_rows(database_path, first, second)
+
+    # run-b states three invoices of 10, 200 and 3000, with one, two and one lines.
+    with sqlite3.connect(database_path) as connection:
+        connection.executemany(
+            "INSERT INTO invoice_candidates "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("CASE-MULTI", second, "/Volumes/private/b.pdf", "invoice_v4", "INV-B2",
+                 "2026-08-27", "Seller B", "200", "0", "0", "200", "GBP", "run-b", 4, 1),
+                ("CASE-MULTI", second, "/Volumes/private/b.pdf", "invoice_v4", "INV-B3",
+                 "2026-08-27", "Seller C", "3000", "0", "0", "3000", "GBP", "run-b", 4, 2),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO invoice_line_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("run-b", second, 1, 1, "Second, line one", "1", "150", "0", "150"),
+                ("run-b", second, 1, 2, "Second, line two", "1", "50", "0", "50"),
+                ("run-b", second, 2, 1, "Third", "1", "3000", "0", "3000"),
+            ],
+        )
+
+    rows = client.get("/api/results/invoices", params={"case_id": "CASE-MULTI"}).json()
+    assert [(row["invoice_index"], row["invoice_number"]) for row in rows] == [
+        (0, "INV-B"), (1, "INV-B2"), (2, "INV-B3")
+    ]
+    # Each invoice counts and sums only its own lines.
+    assert [row["line_item_count"] for row in rows] == [1, 2, 1]
+    assert [row["line_items_sum"] for row in rows] == ["10", "200", "3000"]
+    assert [row["reconciliation_delta"] for row in rows] == ["-2", "0", "0"]
+
+    exported = client.get("/api/exports/invoices.xlsx", params={"case_id": "CASE-MULTI"})
+    summary = list(load_workbook(BytesIO(exported.content), data_only=True)["Summary"].values)
+    lines = list(load_workbook(BytesIO(exported.content), data_only=True)["Line items"].values)
+    assert [row[3] for row in summary[1:]] == [1, 2, 3]
+    # Every exported line names the invoice it belongs to, so the sheets join on it.
+    assert [(row[1], row[2], row[3]) for row in lines[1:]] == [
+        (1, "INV-B", 1), (2, "INV-B2", 1), (2, "INV-B2", 2), (3, "INV-B3", 1),
+    ]

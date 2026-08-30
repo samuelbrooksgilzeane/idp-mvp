@@ -22,6 +22,7 @@ class InvoiceSummaryRecord:
     document_id: str
     file_name: str
     case_id: str | None
+    invoice_index: int
     invoice_number: str | None
     invoice_date: date | None
     seller_name: str | None
@@ -36,6 +37,7 @@ class InvoiceSummaryRecord:
 @dataclass(frozen=True)
 class InvoiceLineExportRecord:
     document_id: str
+    invoice_index: int
     invoice_number: str | None
     line_number: int
     description: str | None
@@ -99,6 +101,7 @@ class SQLiteReportingRepository:
                   WHERE position = 1
                 )
                 SELECT documents.document_id, documents.file_name, documents.case_id,
+                       candidates.invoice_index,
                        candidates.invoice_number, candidates.invoice_date,
                        candidates.seller_name, candidates.currency,
                        candidates.discount_amount, candidates.total_amount,
@@ -113,7 +116,8 @@ class SQLiteReportingRepository:
                   ON latest_validations.extraction_run_id = latest_extractions.extraction_run_id
                 {where}
                 ORDER BY CASE WHEN candidates.invoice_date IS NULL THEN 1 ELSE 0 END,
-                         candidates.invoice_date DESC, documents.file_name, documents.document_id
+                         candidates.invoice_date DESC, documents.file_name,
+                         documents.document_id, candidates.invoice_index
                 """,
                 parameters,
             ).fetchall()
@@ -122,7 +126,10 @@ class SQLiteReportingRepository:
 
         summaries: list[InvoiceSummaryRecord] = []
         for row in rows:
-            terms = line_terms.get(str(row["extraction_run_id"]), [])
+            # Keyed by run and invoice, so one invoice never inherits another's lines.
+            terms = line_terms.get(
+                (str(row["extraction_run_id"]), int(row["invoice_index"])), []
+            )
             line_sum = _stated_sum([amount for amount, _ in terms])
             line_tax_sum = _stated_sum([tax for _, tax in terms])
             total = _decimal(row["total_amount"])
@@ -141,6 +148,7 @@ class SQLiteReportingRepository:
                     document_id=str(row["document_id"]),
                     file_name=str(row["file_name"]),
                     case_id=_optional_text(row["case_id"]),
+                    invoice_index=int(row["invoice_index"]),
                     invoice_number=_optional_text(row["invoice_number"]),
                     invoice_date=_date(row["invoice_date"]),
                     seller_name=_optional_text(row["seller_name"]),
@@ -175,7 +183,8 @@ class SQLiteReportingRepository:
                   )
                   WHERE position = 1
                 )
-                SELECT documents.document_id, candidates.invoice_number,
+                SELECT documents.document_id, candidates.invoice_index,
+                       candidates.invoice_number,
                        lines.line_number, lines.description, lines.quantity,
                        lines.unit_price, lines.tax, lines.amount
                 FROM latest_extractions
@@ -184,8 +193,9 @@ class SQLiteReportingRepository:
                   ON candidates.extraction_run_id = latest_extractions.extraction_run_id
                 JOIN invoice_line_candidates AS lines
                   ON lines.extraction_run_id = latest_extractions.extraction_run_id
+                 AND lines.invoice_index = candidates.invoice_index
                 WHERE 1 = 1 {where}
-                ORDER BY documents.document_id, lines.line_number
+                ORDER BY documents.document_id, lines.invoice_index, lines.line_number
                 """,
                 parameters,
             ).fetchall()
@@ -210,10 +220,11 @@ class DatabricksReportingRepository:
     ) -> list[InvoiceSummaryRecord]:
         where = " WHERE case_id = :case_id" if case_id is not None else ""
         rows = self._sql.execute_sql(
-            "SELECT document_id, file_name, case_id, invoice_number, invoice_date, "
-            "seller_name, currency, line_item_count, line_items_sum, total_amount, "
-            f"reconciliation_delta, document_status FROM {self._summary}{where} "
-            "ORDER BY invoice_date DESC NULLS LAST, file_name, document_id LIMIT 500",
+            "SELECT document_id, file_name, case_id, invoice_index, invoice_number, "
+            "invoice_date, seller_name, currency, line_item_count, line_items_sum, "
+            f"total_amount, reconciliation_delta, document_status FROM {self._summary}{where} "
+            "ORDER BY invoice_date DESC NULLS LAST, file_name, document_id, invoice_index "
+            "LIMIT 500",
             {"case_id": case_id} if case_id is not None else None,
         )
         return [_summary_from_values(row) for row in rows]
@@ -223,11 +234,14 @@ class DatabricksReportingRepository:
     ) -> list[InvoiceLineExportRecord]:
         where = " WHERE summary.case_id = :case_id" if case_id is not None else ""
         rows = self._sql.execute_sql(
-            "SELECT summary.document_id, summary.invoice_number, lines.line_number, "
-            "lines.description, lines.quantity, lines.unit_price, lines.tax, lines.amount "
+            "SELECT summary.document_id, summary.invoice_index, summary.invoice_number, "
+            "lines.line_number, lines.description, lines.quantity, lines.unit_price, "
+            "lines.tax, lines.amount "
             f"FROM {self._summary} AS summary JOIN {self._lines} AS lines "
-            "ON lines.extraction_run_id = summary.extraction_run_id"
-            f"{where} ORDER BY summary.document_id, lines.line_number LIMIT 50000",
+            "ON lines.extraction_run_id = summary.extraction_run_id "
+            "AND lines.invoice_index = summary.invoice_index"
+            f"{where} ORDER BY summary.document_id, summary.invoice_index, lines.line_number "
+            "LIMIT 50000",
             {"case_id": case_id} if case_id is not None else None,
         )
         return [_line_from_values(row) for row in rows]
@@ -281,7 +295,7 @@ def _build_workbook(
     summary_sheet = workbook.active
     summary_sheet.title = "Summary"
     summary_headers = [
-        "Document ID", "File name", "Case ID", "Invoice number", "Invoice date",
+        "Document ID", "File name", "Case ID", "Invoice", "Invoice number", "Invoice date",
         "Seller", "Currency", "Line item count", "Line items sum", "Stated total",
         "Reconciliation delta", "Validation outcome",
     ]
@@ -289,6 +303,7 @@ def _build_workbook(
     for summary_row in summaries:
         summary_sheet.append([
             summary_row.document_id, summary_row.file_name, summary_row.case_id,
+            summary_row.invoice_index + 1,
             summary_row.invoice_number, summary_row.invoice_date, summary_row.seller_name,
             summary_row.currency, summary_row.line_item_count,
             _excel_decimal(summary_row.line_items_sum),
@@ -298,21 +313,22 @@ def _build_workbook(
 
     lines_sheet = workbook.create_sheet("Line items")
     line_headers = [
-        "Document ID", "Invoice number", "Line number", "Description", "Quantity",
+        "Document ID", "Invoice", "Invoice number", "Line number", "Description", "Quantity",
         "Unit price", "Tax", "Amount",
     ]
     lines_sheet.append(line_headers)
     for line_row in lines:
         lines_sheet.append([
-            line_row.document_id, line_row.invoice_number, line_row.line_number,
+            line_row.document_id, line_row.invoice_index + 1, line_row.invoice_number,
+            line_row.line_number,
             line_row.description, _excel_decimal(line_row.quantity),
             _excel_decimal(line_row.unit_price), _excel_decimal(line_row.tax),
             _excel_decimal(line_row.amount),
         ])
 
-    _format_sheet(summary_sheet, len(summaries), (9, 10, 11), (5,))
-    _format_sheet(lines_sheet, len(lines), (6, 7, 8), ())
-    for cells in lines_sheet.iter_cols(min_col=5, max_col=5, min_row=2):
+    _format_sheet(summary_sheet, len(summaries), (10, 11, 12), (6,))
+    _format_sheet(lines_sheet, len(lines), (7, 8, 9), ())
+    for cells in lines_sheet.iter_cols(min_col=6, max_col=6, min_row=2):
         for cell in cells:
             cell.number_format = "#,##0.0000"
     output = BytesIO()
@@ -356,23 +372,21 @@ def _format_sheet(
 
 def _sqlite_line_terms(
     connection: sqlite3.Connection, run_ids: list[str]
-) -> dict[str, list[tuple[Decimal | None, Decimal | None]]]:
-    """Return the stated amount and stated tax of every billed line, per extraction run."""
+) -> dict[tuple[str, int], list[tuple[Decimal | None, Decimal | None]]]:
+    """The stated amount and tax of every billed line, keyed by run and by its own invoice."""
     if not run_ids:
         return {}
     placeholders = ", ".join("?" for _ in run_ids)
     rows = connection.execute(
-        f"SELECT extraction_run_id, amount, tax FROM invoice_line_candidates "
-        f"WHERE extraction_run_id IN ({placeholders}) ORDER BY extraction_run_id, line_number",
+        f"SELECT extraction_run_id, invoice_index, amount, tax FROM invoice_line_candidates "
+        f"WHERE extraction_run_id IN ({placeholders}) "
+        "ORDER BY extraction_run_id, invoice_index, line_number",
         run_ids,
     ).fetchall()
-    result: dict[str, list[tuple[Decimal | None, Decimal | None]]] = {
-        run_id: [] for run_id in run_ids
-    }
+    result: dict[tuple[str, int], list[tuple[Decimal | None, Decimal | None]]] = {}
     for row in rows:
-        result[str(row["extraction_run_id"])].append(
-            (_decimal(row["amount"]), _decimal(row["tax"]))
-        )
+        key = (str(row["extraction_run_id"]), int(row["invoice_index"]))
+        result.setdefault(key, []).append((_decimal(row["amount"]), _decimal(row["tax"])))
     return result
 
 
@@ -389,20 +403,22 @@ def _stated_sum(values: list[Decimal | None]) -> Decimal | None:
 def _summary_from_values(values: Any) -> InvoiceSummaryRecord:
     return InvoiceSummaryRecord(
         document_id=str(values[0]), file_name=str(values[1]),
-        case_id=_optional_text(values[2]), invoice_number=_optional_text(values[3]),
-        invoice_date=_date(values[4]), seller_name=_optional_text(values[5]),
-        currency=_optional_text(values[6]), line_item_count=int(values[7]),
-        line_items_sum=_decimal(values[8]), total_amount=_decimal(values[9]),
-        reconciliation_delta=_decimal(values[10]), document_status=_optional_text(values[11]),
+        case_id=_optional_text(values[2]), invoice_index=int(values[3]),
+        invoice_number=_optional_text(values[4]),
+        invoice_date=_date(values[5]), seller_name=_optional_text(values[6]),
+        currency=_optional_text(values[7]), line_item_count=int(values[8]),
+        line_items_sum=_decimal(values[9]), total_amount=_decimal(values[10]),
+        reconciliation_delta=_decimal(values[11]), document_status=_optional_text(values[12]),
     )
 
 
 def _line_from_values(values: Any) -> InvoiceLineExportRecord:
     return InvoiceLineExportRecord(
-        document_id=str(values[0]), invoice_number=_optional_text(values[1]),
-        line_number=int(values[2]), description=_optional_text(values[3]),
-        quantity=_decimal(values[4]), unit_price=_decimal(values[5]),
-        tax=_decimal(values[6]), amount=_decimal(values[7]),
+        document_id=str(values[0]), invoice_index=int(values[1]),
+        invoice_number=_optional_text(values[2]),
+        line_number=int(values[3]), description=_optional_text(values[4]),
+        quantity=_decimal(values[5]), unit_price=_decimal(values[6]),
+        tax=_decimal(values[7]), amount=_decimal(values[8]),
     )
 
 

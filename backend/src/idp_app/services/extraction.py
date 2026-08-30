@@ -246,7 +246,7 @@ class ExtractionService:
 
     async def latest(
         self, document_id: str
-    ) -> tuple[ExtractionRunRecord, list[ExtractedFieldRecord], InvoiceCandidateRecord | None]:
+    ) -> tuple[ExtractionRunRecord, list[ExtractedFieldRecord], list[InvoiceCandidateRecord]]:
         document = await run_in_threadpool(self._documents.get, document_id)
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
@@ -259,12 +259,14 @@ class ExtractionService:
                 document_id=document_id,
             )
         fields = await run_in_threadpool(self._runs.list_fields, run.extraction_run_id)
-        candidate = await run_in_threadpool(self._runs.get_candidate, run.extraction_run_id)
-        return run, fields, candidate
+        candidates = await run_in_threadpool(
+            self._runs.list_candidates, run.extraction_run_id
+        )
+        return run, fields, candidates
 
     async def result(
         self, document_id: str, extraction_run_id: str
-    ) -> tuple[ExtractionRunRecord, list[ExtractedFieldRecord], InvoiceCandidateRecord | None]:
+    ) -> tuple[ExtractionRunRecord, list[ExtractedFieldRecord], list[InvoiceCandidateRecord]]:
         document = await run_in_threadpool(self._documents.get, document_id)
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
@@ -277,8 +279,10 @@ class ExtractionService:
                 document_id=document_id,
             )
         fields = await run_in_threadpool(self._runs.list_fields, run.extraction_run_id)
-        candidate = await run_in_threadpool(self._runs.get_candidate, run.extraction_run_id)
-        return run, fields, candidate
+        candidates = await run_in_threadpool(
+            self._runs.list_candidates, run.extraction_run_id
+        )
+        return run, fields, candidates
 
     async def _refresh(self, run: ExtractionRunRecord) -> None:
         assert run.job_run_id is not None

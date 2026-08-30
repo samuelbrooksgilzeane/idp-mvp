@@ -49,7 +49,7 @@ export type InvoiceCandidate = {
 type ExtractionResult = {
   run: ExtractionRun;
   fields: ExtractedField[];
-  candidate: InvoiceCandidate | null;
+  candidates: InvoiceCandidate[];
 };
 
 type ProductionSchema = {

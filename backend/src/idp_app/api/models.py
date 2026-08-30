@@ -201,6 +201,7 @@ class InvoiceCandidateResponse(BaseModel):
     currency: str | None
     extraction_run_id: str
     schema_version: int
+    invoice_index: int
 
 
 class InvoiceSummaryResponse(BaseModel):
@@ -209,6 +210,7 @@ class InvoiceSummaryResponse(BaseModel):
     document_id: str
     file_name: str
     case_id: str | None
+    invoice_index: int
     invoice_number: str | None
     invoice_date: date | None
     seller_name: str | None
@@ -223,7 +225,7 @@ class InvoiceSummaryResponse(BaseModel):
 class ExtractionResultResponse(BaseModel):
     run: ExtractionRunResponse
     fields: list[ExtractedFieldResponse]
-    candidate: InvoiceCandidateResponse | None
+    candidates: list[InvoiceCandidateResponse]
 
 
 class ValidationRequest(BaseModel):

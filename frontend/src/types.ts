@@ -51,6 +51,8 @@ export type InvoiceSummary = {
   document_id: string;
   file_name: string;
   case_id: string | null;
+  /** Which invoice within its document; 0 when the document states one. */
+  invoice_index: number;
   invoice_number: string | null;
   invoice_date: string | null;
   seller_name: string | null;

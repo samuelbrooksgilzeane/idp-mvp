@@ -117,12 +117,15 @@ export function ResultsPage({ caseIds }: ResultsPageProps) {
             </tr></thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.document_id}>
+                <tr key={`${row.document_id}-${row.invoice_index}`}>
                   <td>
                     <Link className="document-link" to={`/documents/${row.document_id}`}>
                       {row.invoice_number ?? "Invoice number unavailable"}
                     </Link>
-                    <span className="result-file-name">{row.file_name}</span>
+                    <span className="result-file-name">
+                      {row.file_name}
+                      {row.invoice_index > 0 ? ` · invoice ${row.invoice_index + 1}` : ""}
+                    </span>
                   </td>
                   <td>{row.case_id ?? "-"}</td>
                   <td>{row.seller_name ?? "-"}</td>

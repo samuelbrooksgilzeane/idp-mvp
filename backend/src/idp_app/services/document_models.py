@@ -96,6 +96,9 @@ class InvoiceCandidateRecord:
     currency: str | None
     extraction_run_id: str
     schema_version: int
+    # Which invoice within the extraction run this row describes. A document that states one
+    # invoice has a single candidate at index 0; a document stating several has one per invoice.
+    invoice_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -110,6 +113,8 @@ class InvoiceLineCandidateRecord:
     unit_price: Decimal | None
     tax: Decimal | None
     amount: Decimal | None
+    # The invoice this line belongs to. Lines number from 1 within their own invoice.
+    invoice_index: int = 0
 
 
 @dataclass(frozen=True)

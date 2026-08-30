@@ -56,13 +56,13 @@ async def latest_extraction(
     document_id: str,
     service: Annotated[ExtractionService, Depends(get_extraction_service)],
 ) -> ExtractionResultResponse:
-    run, fields, candidate = await service.latest(document_id)
+    run, fields, candidates = await service.latest(document_id)
     return ExtractionResultResponse(
         run=_run_response(run),
         fields=[ExtractedFieldResponse.model_validate(field) for field in fields],
-        candidate=(
-            InvoiceCandidateResponse.model_validate(candidate) if candidate is not None else None
-        ),
+        candidates=[
+            InvoiceCandidateResponse.model_validate(candidate) for candidate in candidates
+        ],
     )
 
 
@@ -76,13 +76,13 @@ async def extraction_result(
     extraction_run_id: str,
     service: Annotated[ExtractionService, Depends(get_extraction_service)],
 ) -> ExtractionResultResponse:
-    run, fields, candidate = await service.result(document_id, extraction_run_id)
+    run, fields, candidates = await service.result(document_id, extraction_run_id)
     return ExtractionResultResponse(
         run=_run_response(run),
         fields=[ExtractedFieldResponse.model_validate(field) for field in fields],
-        candidate=(
-            InvoiceCandidateResponse.model_validate(candidate) if candidate is not None else None
-        ),
+        candidates=[
+            InvoiceCandidateResponse.model_validate(candidate) for candidate in candidates
+        ],
     )
 
 

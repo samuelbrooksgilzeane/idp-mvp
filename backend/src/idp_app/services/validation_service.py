@@ -89,8 +89,8 @@ class ValidationService:
         fields = await run_in_threadpool(
             self._extraction_runs.list_fields, extraction.extraction_run_id
         )
-        candidate = await run_in_threadpool(
-            self._extraction_runs.get_candidate, extraction.extraction_run_id
+        candidates = await run_in_threadpool(
+            self._extraction_runs.list_candidates, extraction.extraction_run_id
         )
         parse = await run_in_threadpool(self._parse_runs.get, extraction.parse_run_id)
         latest_parse = await run_in_threadpool(self._parse_runs.latest_successful, document_id)
@@ -99,12 +99,17 @@ class ValidationService:
         )
         versions = [item for item in registered if item.schema_id == extraction.schema_id]
         latest_version = max((item.schema_version for item in versions), default=None)
-        duplicates = await run_in_threadpool(
-            self._runs.find_business_duplicates,
-            document_id,
-            candidate.seller_name if candidate else None,
-            candidate.invoice_number if candidate else None,
-        )
+        # Every invoice the document states carries its own business identity, so a duplicate
+        # is looked for against each of them rather than only the first.
+        duplicates: list[str] = []
+        for candidate in candidates:
+            found = await run_in_threadpool(
+                self._runs.find_business_duplicates,
+                document_id,
+                candidate.seller_name,
+                candidate.invoice_number,
+            )
+            duplicates.extend(item for item in found if item not in duplicates)
 
         context = ValidationContext(
             document=document,

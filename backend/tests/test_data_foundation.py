@@ -8,6 +8,7 @@ from idp_app.core.data_objects import TABLE_NAMES, VIEW_NAMES, DataObjectNamespa
 
 ROOT = Path(__file__).resolve().parents[2]
 MIGRATION = ROOT / "databricks_etl" / "sql" / "create_objects.sql"
+VIEWS = ROOT / "databricks_etl" / "sql" / "create_views.sql"
 PARSING_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_parsing.sql"
 EXTRACTION_MIGRATION = ROOT / "databricks_etl" / "sql" / "migrate_extraction.sql"
 BUNDLE_RESOURCE = ROOT / "databricks_etl" / "resources" / "bootstrap.job.yml"
@@ -44,7 +45,9 @@ def test_unknown_object_name_is_rejected() -> None:
 
 
 def test_migration_is_idempotent_prefixed_and_non_destructive() -> None:
-    sql = MIGRATION.read_text(encoding="utf-8")
+    # Tables and views are defined separately because a view can only project columns the
+    # retained tables already carry, so views are created after the column migrations.
+    sql = MIGRATION.read_text(encoding="utf-8") + "\n" + VIEWS.read_text(encoding="utf-8")
     normalized = " ".join(sql.upper().split())
 
     assert normalized.count("CREATE TABLE IF NOT EXISTS") == len(TABLE_NAMES)
@@ -61,7 +64,7 @@ def test_migration_is_idempotent_prefixed_and_non_destructive() -> None:
 
 
 def test_views_declare_stable_empty_result_schemas() -> None:
-    sql = MIGRATION.read_text(encoding="utf-8").upper()
+    sql = VIEWS.read_text(encoding="utf-8").upper()
 
     assert "'_LATEST_SUCCESSFUL_PARSES'" in sql
     assert "WHERE STATUS = 'SUCCESS'" in sql
@@ -100,13 +103,16 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
     assert tasks[2]["task_key"] == "migrate_extraction_columns"
     assert tasks[2]["depends_on"] == [{"task_key": "migrate_parsing_columns"}]
     assert tasks[2]["sql_task"]["file"]["path"] == "../sql/migrate_extraction.sql"
-    assert tasks[3]["task_key"] == "register_production_schemas"
+    assert tasks[3]["task_key"] == "migrate_repeated_invoices"
     assert tasks[3]["depends_on"] == [{"task_key": "migrate_extraction_columns"}]
-    assert tasks[3]["spark_python_task"]["python_file"] == "../src/register_schemas.py"
-    assert tasks[3]["spark_python_task"]["parameters"][-1] == (
+    assert tasks[3]["sql_task"]["file"]["path"] == "../sql/migrate_repeated_invoices.sql"
+    assert tasks[4]["task_key"] == "register_production_schemas"
+    assert tasks[4]["depends_on"] == [{"task_key": "migrate_repeated_invoices"}]
+    assert tasks[4]["spark_python_task"]["python_file"] == "../src/register_schemas.py"
+    assert tasks[4]["spark_python_task"]["parameters"][-1] == (
         "${workspace.file_path}/schemas/invoice_v1.json"
     )
-    assert tasks[3]["environment_key"] == "default"
+    assert tasks[4]["environment_key"] == "default"
 
 
 def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:

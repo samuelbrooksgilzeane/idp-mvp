@@ -17,10 +17,14 @@ UUID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
 EXTRACTOR_VERSION = "2.1"
-# `line_items[0].amount` style paths produced by the recursive flattener.
-LINE_ITEM_PATH = re.compile(r"^line_items\[(\d+)\]\.(.+)$")
-# The top-level leaves this typed projection reads. A schema that states none of them
-# is a shape the invoice candidate tables cannot describe.
+# Invoice leaves are stated at the top level by a single-invoice contract, and under
+# `invoices[i].` by a contract that admits several invoices per document. Both project into
+# the same typed rows, distinguished by invoice_index.
+INVOICE_PREFIX = re.compile(r"^invoices\[(\d+)\]\.(.+)$")
+# `line_items[0].amount`, or `invoices[2].line_items[0].amount` when invoices repeat.
+LINE_ITEM_PATH = re.compile(r"^(?:invoices\[(\d+)\]\.)?line_items\[(\d+)\]\.(.+)$")
+# The leaves this typed projection reads. A schema that states none of them is a shape the
+# invoice candidate tables cannot describe.
 PROJECTED_LEAVES = frozenset(
     {"invoice_number", "invoice_date", "seller_name", "subtotal", "discount", "tax",
      "total", "currency"}
@@ -276,14 +280,15 @@ def main() -> None:
         # projection below understands one invoice per document, so a schema that nests its
         # invoices is captured and left unprojected rather than written as a row of nulls that
         # would surface in the summary as a blank invoice.
-        candidate = build_candidate(parameters, document, fields)
-        if candidate is None:
+        candidates = build_candidates(parameters, document, fields)
+        if not candidates:
             print(
-                "Typed invoice projection skipped: this schema does not declare "
-                "top-level invoice fields. The extracted fields are recorded in full."
+                "Typed invoice projection skipped: this schema states no invoice fields "
+                "this projection recognises. The extracted fields are recorded in full."
             )
         else:
-            write_candidate(invoice_candidates, candidate)
+            print(f"Projecting {len(candidates)} invoice(s) stated by this document.")
+            write_candidates(invoice_candidates, candidates)
             write_line_candidates(
                 invoice_line_candidates, build_line_candidates(parameters, fields)
             )
@@ -490,28 +495,41 @@ def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
     )
 
 
-def build_candidate(
+def invoice_leaves(fields: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
+    """Group the invoice-level leaves by the invoice they belong to.
+
+    A schema that states its invoice fields somewhere this projection does not recognise
+    contributes no group, so it is captured in the extracted fields and left unprojected
+    rather than written as a row of nulls.
+    """
+    grouped: dict[int, dict[str, Any]] = {}
+    for field in fields:
+        match = INVOICE_PREFIX.match(field["field_path"])
+        index = int(match.group(1)) if match else 0
+        leaf = match.group(2) if match else field["field_path"]
+        if leaf in PROJECTED_LEAVES:
+            grouped.setdefault(index, {})[leaf] = field["value"]
+    return grouped
+
+
+def build_candidates(
     parameters: Parameters,
     document: Any,
     fields: list[dict[str, Any]],
-) -> tuple[object, ...] | None:
-    """Project the flattened leaves into one typed invoice row.
-
-    Returns None when the schema states its invoice fields somewhere other than the top
-    level, because this projection can only describe one invoice per document.
-    """
-    values = {field["field_path"]: field["value"] for field in fields}
-    if not PROJECTED_LEAVES & values.keys():
-        return None
-    return (
-        document["case_id"], parameters.document_id, document["source_path"],
-        document["template_id"], string_or_none(values.get("invoice_number")),
-        parse_date(values.get("invoice_date")), string_or_none(values.get("seller_name")),
-        parse_decimal(values.get("subtotal")), parse_decimal(values.get("discount")),
-        parse_decimal(values.get("tax")), parse_decimal(values.get("total")),
-        string_or_none(values.get("currency")), parameters.extraction_run_id,
-        parameters.schema_version,
-    )
+) -> list[tuple[object, ...]]:
+    """Project each invoice the document states into its own typed candidate row."""
+    return [
+        (
+            document["case_id"], parameters.document_id, document["source_path"],
+            document["template_id"], string_or_none(values.get("invoice_number")),
+            parse_date(values.get("invoice_date")), string_or_none(values.get("seller_name")),
+            parse_decimal(values.get("subtotal")), parse_decimal(values.get("discount")),
+            parse_decimal(values.get("tax")), parse_decimal(values.get("total")),
+            string_or_none(values.get("currency")), parameters.extraction_run_id,
+            parameters.schema_version, index,
+        )
+        for index, values in sorted(invoice_leaves(fields).items())
+    ]
 
 
 def string_or_none(value: object) -> str | None:
@@ -568,25 +586,30 @@ def build_line_candidates(
     Only lines the model actually returned produce rows, so an invoice with no line table
     yields none rather than a zero-valued row that could be mistaken for a real line.
     """
-    grouped: dict[int, dict[str, Any]] = {}
+    grouped: dict[tuple[int, int], dict[str, Any]] = {}
     for field in fields:
         match = LINE_ITEM_PATH.match(field["field_path"])
         if match is None:
             continue
-        grouped.setdefault(int(match.group(1)), {})[match.group(2)] = field["value"]
+        invoice_index = int(match.group(1)) if match.group(1) is not None else 0
+        grouped.setdefault((invoice_index, int(match.group(2))), {})[match.group(3)] = (
+            field["value"]
+        )
     return [
         (
             parameters.extraction_run_id,
             parameters.document_id,
-            # One-based for reading; the matching evidence path is line_items[line_number - 1].
-            index + 1,
+            # One-based within its own invoice; the matching evidence leaf is at
+            # line_items[line_number - 1] under that invoice.
+            line + 1,
             string_or_none(leaves.get("description")),
             parse_decimal(leaves.get("quantity"), "0.0001"),
             parse_decimal(leaves.get("unit_price")),
             parse_decimal(leaves.get("tax")),
             parse_decimal(leaves.get("amount")),
+            invoice_index,
         )
-        for index, leaves in sorted(grouped.items())
+        for (invoice_index, line), leaves in sorted(grouped.items())
     ]
 
 
@@ -603,7 +626,7 @@ def write_line_candidates(table: str, lines: list[tuple[object, ...]]) -> None:
 
     names = (
         "extraction_run_id", "document_id", "line_number", "description",
-        "quantity", "unit_price", "tax", "amount",
+        "quantity", "unit_price", "tax", "amount", "invoice_index",
     )
     line_schema = StructType(
         [
@@ -615,6 +638,7 @@ def write_line_candidates(table: str, lines: list[tuple[object, ...]]) -> None:
             StructField("unit_price", DecimalType(18, 2), True),
             StructField("tax", DecimalType(18, 2), True),
             StructField("amount", DecimalType(18, 2), True),
+            StructField("invoice_index", IntegerType(), False),
         ]
     )
     spark.createDataFrame(lines, line_schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
@@ -625,7 +649,7 @@ def write_line_candidates(table: str, lines: list[tuple[object, ...]]) -> None:
     )
 
 
-def write_candidate(table: str, candidate: tuple[object, ...]) -> None:
+def write_candidates(table: str, candidates: list[tuple[object, ...]]) -> None:
     from pyspark.sql.types import (  # type: ignore[import-not-found]
         DateType,
         DecimalType,
@@ -638,17 +662,23 @@ def write_candidate(table: str, candidate: tuple[object, ...]) -> None:
     names = (
         "case_id", "document_id", "source_path", "template_id", "invoice_number",
         "invoice_date", "seller_name", "subtotal", "discount_amount", "tax_amount",
-        "total_amount", "currency", "extraction_run_id", "schema_version",
+        "total_amount", "currency", "extraction_run_id", "schema_version", "invoice_index",
     )
     types = (
         StringType(), StringType(), StringType(), StringType(), StringType(), DateType(),
         StringType(), DecimalType(18, 2), DecimalType(18, 2), DecimalType(18, 2),
-        DecimalType(18, 2), StringType(), StringType(), IntegerType(),
+        DecimalType(18, 2), StringType(), StringType(), IntegerType(), IntegerType(),
     )
+    # A column is nullable when no invoice states a value for it.
     candidate_schema = StructType(
-        [StructField(name, field_type, value is None) for name, field_type, value in zip(names, types, candidate, strict=True)]
+        [
+            StructField(
+                name, field_type, any(candidate[position] is None for candidate in candidates)
+            )
+            for position, (name, field_type) in enumerate(zip(names, types, strict=True))
+        ]
     )
-    spark.createDataFrame([candidate], candidate_schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
+    spark.createDataFrame(candidates, candidate_schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
         "idp_invoice_candidate_to_insert"
     )
     spark.sql(  # type: ignore[name-defined]  # noqa: F821

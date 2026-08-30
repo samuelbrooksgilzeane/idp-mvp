@@ -93,10 +93,12 @@ def validate_data_bootstrap() -> None:
         "create_governed_objects",
         "migrate_parsing_columns",
         "migrate_extraction_columns",
+        "migrate_repeated_invoices",
         "register_production_schemas",
         "register_production_schemas_v2",
         "register_production_schemas_v3",
         "register_production_schemas_v4",
+        "create_governed_views",
     ]
     if not isinstance(tasks, list) or [t.get("task_key") for t in tasks] != expected_tasks:
         raise ValueError(
@@ -131,10 +133,25 @@ def validate_data_bootstrap() -> None:
     if extraction_migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
         raise ValueError("Extraction migration parameters must match the trusted contract")
 
-    registration_task = tasks[3]
+    repeated_invoice_task = tasks[3]
+    repeated_invoice_sql = repeated_invoice_task.get("sql_task", {})
+    if repeated_invoice_task.get("depends_on") != [
+        {"task_key": "migrate_extraction_columns"}
+    ]:
+        raise ValueError("Repeated-invoice migration must run after extraction migration")
+    if repeated_invoice_sql.get("file", {}).get("path") != (
+        "../sql/migrate_repeated_invoices.sql"
+    ):
+        raise ValueError("Bootstrap must use the reviewed repeated-invoice migration")
+    if repeated_invoice_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
+        raise ValueError(
+            "Repeated-invoice migration parameters must match the trusted contract"
+        )
+
+    registration_task = tasks[4]
     registration_python = registration_task.get("spark_python_task", {})
     if registration_task.get("depends_on") != [
-        {"task_key": "migrate_extraction_columns"}
+        {"task_key": "migrate_repeated_invoices"}
     ]:
         raise ValueError("Schema registration must run after governed migrations")
     if registration_python.get("python_file") != "../src/register_schemas.py":
@@ -152,8 +169,18 @@ def validate_data_bootstrap() -> None:
     if registration_python.get("parameters") != expected_registration_parameters:
         raise ValueError("Schema registration parameters must match the trusted contract")
 
-    sql = (ROOT / "databricks_etl" / "sql" / "create_objects.sql").read_text(
-        encoding="utf-8"
+    view_task = tasks[-1]
+    view_sql = view_task.get("sql_task", {})
+    if view_task.get("depends_on") != [{"task_key": "register_production_schemas_v4"}]:
+        raise ValueError("Governed views must be created after the schema registrations")
+    if view_sql.get("file", {}).get("path") != "../sql/create_views.sql":
+        raise ValueError("Bootstrap must use the reviewed view definitions")
+    if view_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
+        raise ValueError("View creation parameters must match the trusted contract")
+
+    sql = "\n".join(
+        (ROOT / "databricks_etl" / "sql" / name).read_text(encoding="utf-8")
+        for name in ("create_objects.sql", "create_views.sql")
     )
     normalized = " ".join(sql.upper().split())
     for forbidden in ("CREATE CATALOG", " DROP ", " TRUNCATE "):
@@ -171,6 +198,18 @@ def validate_data_bootstrap() -> None:
     for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
         if forbidden in f" {migration_normalized} ":
             raise ValueError(f"Parsing migration contains forbidden SQL: {forbidden}")
+
+    repeated_invoice_migration = (
+        ROOT / "databricks_etl" / "sql" / "migrate_repeated_invoices.sql"
+    ).read_text(encoding="utf-8")
+    repeated_normalized = " ".join(repeated_invoice_migration.upper().split())
+    if "IF NOT EXISTS" not in repeated_normalized:
+        raise ValueError("Repeated-invoice migration must guard existing columns")
+    for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
+        if forbidden in f" {repeated_normalized} ":
+            raise ValueError(
+                f"Repeated-invoice migration contains forbidden SQL: {forbidden}"
+            )
 
     extraction_migration = (
         ROOT / "databricks_etl" / "sql" / "migrate_extraction.sql"

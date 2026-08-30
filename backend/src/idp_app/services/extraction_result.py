@@ -65,32 +65,63 @@ def _walk(
     records.append(_flatten_scalar(run, path, definition, payload, citation_index))
 
 
-def build_invoice_candidate(
+# Invoice leaves are stated at the top level by a single-invoice contract, and under
+# `invoices[i].` by a contract that admits several invoices per document. Both project into
+# the same typed rows, distinguished by invoice_index.
+INVOICE_PREFIX = re.compile(r"^invoices\[(\d+)\]\.(.+)$")
+PROJECTED_LEAVES = frozenset(
+    {"invoice_number", "invoice_date", "seller_name", "subtotal", "discount", "tax",
+     "total", "currency"}
+)
+# `line_items[0].amount`, or `invoices[2].line_items[0].amount` when invoices repeat.
+LINE_ITEM_PATH = re.compile(r"^(?:invoices\[(\d+)\]\.)?line_items\[(\d+)\]\.(.+)$")
+
+
+def _invoice_leaves(
+    fields: list[ExtractedFieldRecord],
+) -> dict[int, dict[str, ExtractedFieldRecord]]:
+    """Group the invoice-level leaves by the invoice they belong to.
+
+    A schema that states its invoice fields somewhere this projection does not recognise
+    contributes no group, so it is captured in the extracted fields and left unprojected
+    rather than written as a row of nulls.
+    """
+    grouped: dict[int, dict[str, ExtractedFieldRecord]] = {}
+    for field in fields:
+        match = INVOICE_PREFIX.match(field.field_path)
+        index = int(match.group(1)) if match else 0
+        leaf = match.group(2) if match else field.field_path
+        if leaf in PROJECTED_LEAVES:
+            grouped.setdefault(index, {})[leaf] = field
+    return grouped
+
+
+def build_invoice_candidates(
     run: ExtractionRunRecord,
     document: DocumentRecord,
     fields: list[ExtractedFieldRecord],
-) -> InvoiceCandidateRecord:
-    by_path = {field.field_path: field for field in fields}
-    return InvoiceCandidateRecord(
-        case_id=document.case_id,
-        document_id=document.document_id,
-        source_path=document.source_path,
-        template_id=document.template_id,
-        invoice_number=_string_value(by_path.get("invoice_number")),
-        invoice_date=_date_value(by_path.get("invoice_date")),
-        seller_name=_string_value(by_path.get("seller_name")),
-        subtotal=_decimal_value(by_path.get("subtotal")),
-        discount_amount=_decimal_value(by_path.get("discount")),
-        tax_amount=_decimal_value(by_path.get("tax")),
-        total_amount=_decimal_value(by_path.get("total")),
-        currency=_string_value(by_path.get("currency")),
-        extraction_run_id=run.extraction_run_id,
-        schema_version=run.schema_version,
-    )
-
-
-# `line_items[0].amount` style paths produced by the recursive flattener.
-LINE_ITEM_PATH = re.compile(r"^line_items\[(\d+)\]\.(.+)$")
+) -> list[InvoiceCandidateRecord]:
+    """Project each invoice the document states into its own typed candidate row."""
+    return [
+        InvoiceCandidateRecord(
+            case_id=document.case_id,
+            document_id=document.document_id,
+            source_path=document.source_path,
+            template_id=document.template_id,
+            invoice_number=_string_value(leaves.get("invoice_number")),
+            invoice_date=_date_value(leaves.get("invoice_date")),
+            seller_name=_string_value(leaves.get("seller_name")),
+            subtotal=_decimal_value(leaves.get("subtotal")),
+            discount_amount=_decimal_value(leaves.get("discount")),
+            tax_amount=_decimal_value(leaves.get("tax")),
+            total_amount=_decimal_value(leaves.get("total")),
+            currency=_string_value(leaves.get("currency")),
+            extraction_run_id=run.extraction_run_id,
+            schema_version=run.schema_version,
+            invoice_index=index,
+        )
+        for index, leaves in sorted(_invoice_leaves(fields).items())
+    ]
 
 
 def build_invoice_line_candidates(
@@ -101,25 +132,28 @@ def build_invoice_line_candidates(
     Only lines the model actually returned produce rows, so an invoice with no line table
     yields none rather than a zero-valued row that could be mistaken for a real line.
     """
-    grouped: dict[int, dict[str, ExtractedFieldRecord]] = {}
+    grouped: dict[tuple[int, int], dict[str, ExtractedFieldRecord]] = {}
     for field in fields:
         match = LINE_ITEM_PATH.match(field.field_path)
         if match is None:
             continue
-        grouped.setdefault(int(match.group(1)), {})[match.group(2)] = field
+        invoice_index = int(match.group(1)) if match.group(1) is not None else 0
+        grouped.setdefault((invoice_index, int(match.group(2))), {})[match.group(3)] = field
     return [
         InvoiceLineCandidateRecord(
             extraction_run_id=run.extraction_run_id,
             document_id=run.document_id,
-            # One-based for reading; the matching evidence path is line_items[line_number - 1].
-            line_number=index + 1,
+            # One-based within its own invoice; the matching evidence leaf is at
+            # line_items[line_number - 1] under that invoice.
+            line_number=line + 1,
             description=_string_value(leaves.get("description")),
             quantity=_decimal_value(leaves.get("quantity"), "0.0001"),
             unit_price=_decimal_value(leaves.get("unit_price")),
             tax=_decimal_value(leaves.get("tax")),
             amount=_decimal_value(leaves.get("amount")),
+            invoice_index=invoice_index,
         )
-        for index, leaves in sorted(grouped.items())
+        for (invoice_index, line), leaves in sorted(grouped.items())
     ]
 
 

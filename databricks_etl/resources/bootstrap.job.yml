@@ -37,9 +37,20 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
-        - task_key: register_production_schemas
+        - task_key: migrate_repeated_invoices
           depends_on:
             - task_key: migrate_extraction_columns
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_repeated_invoices.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
+        - task_key: register_production_schemas
+          depends_on:
+            - task_key: migrate_repeated_invoices
           spark_python_task:
             python_file: ../src/register_schemas.py
             parameters:
@@ -97,6 +108,17 @@ resources:
               - --manifest-path
               - ${workspace.file_path}/schemas/invoice_v4.json
           environment_key: default
+        - task_key: create_governed_views
+          depends_on:
+            - task_key: register_production_schemas_v4
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/create_views.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
       environments:
         - environment_key: default
           spec:
