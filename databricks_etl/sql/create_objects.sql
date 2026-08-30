@@ -111,10 +111,31 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
   confidence_score DOUBLE COMMENT 'Model-provided confidence score when available',
   citation_ids ARRAY<INT> COMMENT 'Identifiers of supporting citations',
   citations VARIANT COMMENT 'Retained source-grounding citation metadata',
-  extraction_error STRING COMMENT 'Field-level extraction error when no value was produced'
+  extraction_error STRING COMMENT 'Field-level extraction error when no value was produced',
+  record_id STRING COMMENT 'The extracted_records row this field belongs to',
+  schema_path STRING COMMENT 'Wildcard schema path (generic replacement for field_path)',
+  instance_path STRING COMMENT 'Concrete instance path (generic replacement for field_path)',
+  declared_type STRING COMMENT 'Declared schema type (generic replacement for field_type)',
+  validation_status STRING COMMENT 'Optional deterministic validation outcome for this field',
+  validation_message STRING COMMENT 'Optional human-readable validation explanation'
 )
 USING DELTA
 COMMENT 'Flattened extracted values with confidence and source evidence';
+
+CREATE TABLE IF NOT EXISTS IDENTIFIER(
+  :catalog || '.' || :project_schema || '.' || :table_prefix || '_extracted_records'
+) (
+  run_id STRING COMMENT 'Extraction attempt that produced this record',
+  document_id STRING COMMENT 'Registered source document identifier',
+  record_id STRING COMMENT 'Deterministic identifier derived from run_id + instance_path',
+  parent_record_id STRING COMMENT 'The containing record, or NULL for the document root',
+  schema_path STRING COMMENT 'Wildcard schema path, e.g. invoices[].line_items[]',
+  instance_path STRING COMMENT 'Concrete instance path, e.g. invoices[0].line_items[2]',
+  ordinal INT COMMENT 'Position within a repeated array, or NULL for a singleton record'
+)
+USING DELTA
+COMMENT 'Generic recursive extraction record tree: the document root, every singleton nested
+object, and every repeated array item, for any extraction schema shape';
 
 CREATE TABLE IF NOT EXISTS IDENTIFIER(
   :catalog || '.' || :project_schema || '.' || :table_prefix || '_invoice_candidates'

@@ -6,6 +6,7 @@ TABLE_NAMES = (
     "schema_registry",
     "extraction_runs",
     "extracted_fields",
+    "extracted_records",
     "invoice_candidates",
     "invoice_line_candidates",
     "validation_results",

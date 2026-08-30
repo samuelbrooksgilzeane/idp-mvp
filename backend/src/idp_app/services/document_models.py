@@ -118,6 +118,47 @@ class InvoiceLineCandidateRecord:
 
 
 @dataclass(frozen=True)
+class ExtractedRecordRow:
+    """One node of the recursive extraction result: the document root, a singleton nested
+    object, or one item of a repeated array. Generalizes the invoice-specific candidate
+    projection so an arbitrary schema (flat or nested to any depth) produces a uniform,
+    schema-agnostic record tree.
+
+    `record_id` is deterministic from `run_id + instance_path`, so re-processing the same
+    run (a retry) produces identical identifiers rather than duplicates.
+    """
+
+    run_id: str
+    document_id: str
+    record_id: str
+    parent_record_id: str | None
+    schema_path: str
+    instance_path: str
+    ordinal: int | None
+
+
+@dataclass(frozen=True)
+class GenericFieldRow:
+    """One scalar leaf produced by the generic recursive walker, attached to the
+    `extracted_record` that contains it."""
+
+    run_id: str
+    document_id: str
+    record_id: str
+    schema_path: str
+    instance_path: str
+    field_name: str
+    declared_type: str
+    value: Any
+    value_string: str | None
+    confidence_score: float | None
+    citation_ids: list[int]
+    citations: list[dict[str, Any]]
+    validation_status: str | None
+    validation_message: str | None
+
+
+@dataclass(frozen=True)
 class ValidationResultRecord:
     """One immutable observation produced by a validator. It never edits extracted data."""
 

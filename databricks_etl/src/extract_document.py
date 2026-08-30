@@ -486,6 +486,8 @@ def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
     spark.sql(  # type: ignore[name-defined]  # noqa: F821
         f"""
         INSERT INTO {table}
+        (extraction_run_id, document_id, field_path, field_type,
+         value, value_string, confidence_score, citation_ids, citations, extraction_error)
         SELECT extraction_run_id, document_id, field_path, field_type,
                PARSE_JSON(value_json), value_string, confidence_score,
                citation_ids, PARSE_JSON(citations_json), extraction_error
