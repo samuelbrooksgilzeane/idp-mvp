@@ -6,11 +6,13 @@ schema-agnostic results and export -- with no invoice-specific field names anywh
 from __future__ import annotations
 
 import io
+import sqlite3
 import time
 import zipfile
 from pathlib import Path
 
 import pymupdf
+import pytest
 from fastapi.testclient import TestClient
 
 from idp_app.core.config import Settings
@@ -235,3 +237,61 @@ def test_export_of_two_schema_versions_produces_separate_workbooks(tmp_path: Pat
     assert single.headers["content-type"] == (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+def test_records_are_persisted_on_first_read_and_reused_on_later_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The recursive record tree is a write-through cache: the first GET .../records
+    computes it via walk_extraction and persists it; every later read (this GET, or the
+    Results list) must come from the persisted tables instead of recomputing.
+    """
+    import idp_app.services.generic_results as generic_results_module
+
+    client = _client(tmp_path)
+    document_id = _upload_and_parse(client)
+    schema = _create_and_publish_flat_schema(client)
+    client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": schema["schema_id"], "schema_version": schema["schema_version"]},
+    )
+    run_id = _wait_extraction(client, document_id)["extraction_run_id"]
+
+    calls = []
+    original_walk = generic_results_module.walk_extraction
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        calls.append(1)
+        return original_walk(*args, **kwargs)
+
+    monkeypatch.setattr(generic_results_module, "walk_extraction", _spy)
+
+    first = client.get(f"/api/extractions/{run_id}/records")
+    assert first.status_code == 200
+    assert len(calls) == 1
+
+    database = tmp_path / "idp" / "registry.sqlite3"
+    with sqlite3.connect(database) as connection:
+        record_rows = connection.execute(
+            "SELECT COUNT(*) FROM extracted_records WHERE run_id = ?", (run_id,)
+        ).fetchone()[0]
+        field_rows = connection.execute(
+            "SELECT COUNT(*) FROM extracted_fields WHERE extraction_run_id = ? "
+            "AND record_id IS NOT NULL",
+            (run_id,),
+        ).fetchone()[0]
+    assert record_rows > 0
+    assert field_rows > 0
+
+    second = client.get(f"/api/extractions/{run_id}/records")
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    # The second read must come from the persisted tables, not a second walk_extraction call.
+    assert len(calls) == 1
+
+    # The Results list computes the same run's records_count from the persisted cache too,
+    # without triggering another walk_extraction call.
+    summaries = client.get("/api/extractions").json()
+    row = next(s for s in summaries if s["extraction_run_id"] == run_id)
+    assert row["records_count"] == 1
+    assert len(calls) == 1

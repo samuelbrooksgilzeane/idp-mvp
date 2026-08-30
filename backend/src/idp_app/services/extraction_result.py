@@ -305,7 +305,10 @@ def _record_id(run_id: str, instance_path: str) -> str:
     return hashlib.sha256(f"{run_id}:{instance_path}".encode()).hexdigest()[:32]
 
 
-def _leaf_field_name(schema_path: str) -> str:
+def leaf_field_name(schema_path: str) -> str:
+    """The bare field name at the end of a wildcard schema path, e.g. `amount` from
+    `line_items[].amount`. Reused when reconstructing a `GenericFieldRow` from a persisted
+    `extracted_fields` row, which does not itself store `field_name` as a column."""
     trimmed = schema_path[:-2] if schema_path.endswith("[]") else schema_path
     return trimmed.rsplit(".", 1)[-1] if "." in trimmed else trimmed
 
@@ -328,7 +331,7 @@ def _generic_scalar(
         record_id=record_id,
         schema_path=schema_path,
         instance_path=instance,
-        field_name=_leaf_field_name(schema_path),
+        field_name=leaf_field_name(schema_path),
         declared_type=definition.type,
         value=parsed.value,
         value_string=_value_string(parsed.value),

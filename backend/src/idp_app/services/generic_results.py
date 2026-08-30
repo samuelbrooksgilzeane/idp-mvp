@@ -1,14 +1,19 @@
 """Generic (schema-agnostic) extraction results: section 6 of the generalized IDP plan.
 
-Rather than persisting a second copy of the recursive result, this recomputes it on demand
-from the already-retained raw `ai_extract` response and the schema used to produce it -- both
-of which are already stored on the immutable extraction run for auditing. This keeps the
-generalization additive: no new write path is introduced into the extraction pipeline, and the
-result is always in lockstep with what was actually returned by `ai_extract`.
+The recursive record tree (`extracted_records` and the generic columns on
+`extracted_fields`) is a write-through cache: the first time a run's records are read (via
+`get_records` or `list_summaries`), `walk_extraction` computes them from the already-retained
+raw `ai_extract` response, exactly as before, and the result is persisted so every later read
+of that run hits the tables directly instead of recomputing. Nothing in the extraction
+pipeline itself (the Databricks job, the mock job runner) writes these tables -- only a read
+through this service ever does, so `walk_extraction` (already tested) remains the only thing
+that ever produces this data. A persistence failure never fails the read: it degrades back to
+recomputing on every call, not to an error.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -26,6 +31,8 @@ from idp_app.services.extraction_result import walk_extraction
 from idp_app.services.extraction_runs import ExtractionRunRepository
 from idp_app.services.schema_models import SchemaRecord
 from idp_app.services.schema_registry import SchemaRepository
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -77,8 +84,8 @@ class ExtractionResultsService:
         status: str | None = None,
     ) -> list[ExtractionRunSummary]:
         """Every extraction run across every document, joined with just enough document and
-        schema context for the Results list -- no persisted read model, computed on demand
-        from the same retained data `get_records` already uses.
+        schema context for the Results list -- records_count/issues_count come from the same
+        read-through cache `get_records` uses (`_records_and_fields`).
         """
         runs = await run_in_threadpool(self._runs.list_all)
         documents_by_id = {
@@ -116,10 +123,8 @@ class ExtractionResultsService:
                 continue
             schema = await _schema_for(run.schema_id, run.schema_version)
             records_count, issues_count = 0, 0
-            if run.ai_result is not None and schema is not None:
-                records, fields = await run_in_threadpool(
-                    walk_extraction, run, schema, run.ai_result
-                )
+            if schema is not None:
+                records, fields = await self._records_and_fields(run, schema)
                 records_count = sum(1 for record in records if record.parent_record_id is None)
                 issues_count = _count_issues(fields, schema)
             summaries.append(
@@ -155,8 +160,39 @@ class ExtractionResultsService:
                 "This extraction run has no retained ai_extract result.",
                 409,
             )
-        records, fields = walk_extraction(run, schema, run.ai_result)
+        records, fields = await self._records_and_fields(run, schema)
         return GenericExtractionRecords(run=run, schema=schema, records=records, fields=fields)
+
+    async def _records_and_fields(
+        self, run: ExtractionRunRecord, schema: SchemaRecord
+    ) -> tuple[list[ExtractedRecordRow], list[GenericFieldRow]]:
+        """Read-through cache over the recursive record tree: try the persisted tables
+        first, and only fall back to recomputing from the raw `ai_extract` response (via
+        `walk_extraction`) on a cache miss -- the run's first read, or one extracted before
+        this cache existed. A computed result is persisted so every later read is cheap; a
+        persistence failure degrades back to always recomputing, never to an error.
+        """
+        persisted_records = await run_in_threadpool(
+            self._runs.list_generic_records, run.extraction_run_id
+        )
+        if persisted_records:
+            persisted_fields = await run_in_threadpool(
+                self._runs.list_generic_fields, run.extraction_run_id
+            )
+            return persisted_records, persisted_fields
+        if run.ai_result is None:
+            return [], []
+        records, fields = await run_in_threadpool(walk_extraction, run, schema, run.ai_result)
+        try:
+            await run_in_threadpool(self._runs.persist_generic, records, fields)
+        except Exception:
+            _logger.warning(
+                "Could not persist the generic record tree for run %s; it will be "
+                "recomputed on the next read.",
+                run.extraction_run_id,
+                exc_info=True,
+            )
+        return records, fields
 
     async def _load(self, extraction_run_id: str) -> tuple[ExtractionRunRecord, SchemaRecord]:
         run = await run_in_threadpool(self._runs.get, extraction_run_id)

@@ -9,11 +9,14 @@ from typing import Any, Protocol, cast
 
 from idp_app.services.document_models import (
     ExtractedFieldRecord,
+    ExtractedRecordRow,
     ExtractionRunRecord,
+    GenericFieldRow,
     InvoiceCandidateRecord,
     InvoiceLineCandidateRecord,
 )
 from idp_app.services.document_registry import DatabricksDocumentRegistry
+from idp_app.services.extraction_result import leaf_field_name
 
 RUN_COLUMNS = (
     "extraction_run_id",
@@ -79,6 +82,20 @@ class ExtractionRunRepository(Protocol):
 
     def list_lines(self, extraction_run_id: str) -> list[InvoiceLineCandidateRecord]: ...
 
+    def persist_generic(
+        self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
+    ) -> None:
+        """Write-through cache: persist a run's recursive record tree the first time it is
+        computed, so later reads (get_records, list_summaries) hit these tables instead of
+        re-walking the retained ai_extract JSON. Idempotent -- retrying the same run recomputes
+        identical record_ids, so calling this twice with the same input is a no-op the second
+        time."""
+        ...
+
+    def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]: ...
+
+    def list_generic_fields(self, extraction_run_id: str) -> list[GenericFieldRow]: ...
+
 
 class SQLiteExtractionRunRepository:
     def __init__(self, database_path: Path) -> None:
@@ -127,6 +144,16 @@ class SQLiteExtractionRunRepository:
                     extraction_error TEXT,
                     PRIMARY KEY (extraction_run_id, field_path)
                 );
+                CREATE TABLE IF NOT EXISTS extracted_records (
+                    run_id TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    parent_record_id TEXT,
+                    schema_path TEXT NOT NULL,
+                    instance_path TEXT NOT NULL,
+                    ordinal INTEGER,
+                    PRIMARY KEY (record_id)
+                );
                 CREATE TABLE IF NOT EXISTS invoice_line_candidates (
                     extraction_run_id TEXT NOT NULL,
                     document_id TEXT NOT NULL,
@@ -159,6 +186,19 @@ class SQLiteExtractionRunRepository:
                 );
                 """
             )
+            # Additive migration for a local registry.sqlite3 created before the generic
+            # record tree existed. New columns are nullable, so already-written invoice
+            # projection rows are unaffected.
+            existing_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(extracted_fields)").fetchall()
+            }
+            for column in (
+                "record_id", "schema_path", "instance_path", "declared_type",
+                "validation_status", "validation_message",
+            ):
+                if column not in existing_columns:
+                    connection.execute(f"ALTER TABLE extracted_fields ADD COLUMN {column} TEXT")
 
     def create(self, run: ExtractionRunRecord) -> None:
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
@@ -304,6 +344,54 @@ class SQLiteExtractionRunRepository:
             ).fetchall()
         return [_line_from_values([row[column] for column in LINE_COLUMNS]) for row in rows]
 
+    def persist_generic(
+        self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
+    ) -> None:
+        with self._connect() as connection:
+            for record in records:
+                connection.execute(
+                    "INSERT OR IGNORE INTO extracted_records "
+                    "(run_id, document_id, record_id, parent_record_id, schema_path, "
+                    "instance_path, ordinal) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    _record_values(record),
+                )
+            for field in fields:
+                cursor = connection.execute(
+                    "UPDATE extracted_fields SET record_id = ?, schema_path = ?, "
+                    "instance_path = ?, declared_type = ?, validation_status = ?, "
+                    "validation_message = ? WHERE extraction_run_id = ? AND field_path = ?",
+                    _generic_field_update_values(field),
+                )
+                if cursor.rowcount == 0:
+                    # Defensive fallback: flatten_result and walk_extraction should always
+                    # agree on the same leaf set, but if a row was never written at
+                    # extraction time, insert one rather than silently dropping this field.
+                    connection.execute(
+                        "INSERT OR IGNORE INTO extracted_fields "
+                        "(extraction_run_id, document_id, field_path, field_type, value, "
+                        "value_string, confidence_score, citation_ids, citations, "
+                        "extraction_error, record_id, schema_path, instance_path, "
+                        "declared_type, validation_status, validation_message) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        _generic_field_insert_values(field),
+                    )
+
+    def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM extracted_records WHERE run_id = ?", (extraction_run_id,)
+            ).fetchall()
+        return [_sqlite_row_to_record(row) for row in rows]
+
+    def list_generic_fields(self, extraction_run_id: str) -> list[GenericFieldRow]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM extracted_fields WHERE extraction_run_id = ? "
+                "AND record_id IS NOT NULL ORDER BY instance_path",
+                (extraction_run_id,),
+            ).fetchall()
+        return [_sqlite_row_to_generic_field(row) for row in rows]
+
 
 class DatabricksExtractionRunRepository:
     def __init__(
@@ -317,6 +405,7 @@ class DatabricksExtractionRunRepository:
         prefix = f"{catalog}.{project_schema}.{table_prefix}"
         self._runs = f"{prefix}_extraction_runs"
         self._fields = f"{prefix}_extracted_fields"
+        self._records = f"{prefix}_extracted_records"
         self._candidates = f"{prefix}_invoice_candidates"
         self._lines = f"{prefix}_invoice_line_candidates"
 
@@ -499,6 +588,78 @@ class DatabricksExtractionRunRepository:
         )
         return [_line_from_values(row) for row in rows]
 
+    def persist_generic(
+        self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
+    ) -> None:
+        for record in records:
+            self._sql.execute_sql(
+                f"MERGE INTO {self._records} AS target USING (SELECT "
+                ":run_id AS run_id, :document_id AS document_id, :record_id AS record_id, "
+                ":parent_record_id AS parent_record_id, :schema_path AS schema_path, "
+                ":instance_path AS instance_path, CAST(:ordinal AS INT) AS ordinal"
+                ") AS source ON target.record_id = source.record_id "
+                "WHEN NOT MATCHED THEN INSERT "
+                "(run_id, document_id, record_id, parent_record_id, schema_path, "
+                "instance_path, ordinal) VALUES (source.run_id, source.document_id, "
+                "source.record_id, source.parent_record_id, source.schema_path, "
+                "source.instance_path, source.ordinal)",
+                _record_parameters(record),
+            )
+        for field in fields:
+            self._sql.execute_sql(
+                f"MERGE INTO {self._fields} AS target USING (SELECT "
+                ":extraction_run_id AS extraction_run_id, :field_path AS field_path, "
+                ":field_type AS field_type, PARSE_JSON(:value) AS value, "
+                ":value_string AS value_string, "
+                "CAST(:confidence_score AS DOUBLE) AS confidence_score, "
+                "from_json(:citation_ids, 'array<int>') AS citation_ids, "
+                "PARSE_JSON(:citations) AS citations, :document_id AS document_id, "
+                ":record_id AS record_id, :schema_path AS schema_path, "
+                ":instance_path AS instance_path, :declared_type AS declared_type, "
+                ":validation_status AS validation_status, "
+                ":validation_message AS validation_message"
+                ") AS source "
+                "ON target.extraction_run_id = source.extraction_run_id "
+                "AND target.field_path = source.field_path "
+                "WHEN MATCHED THEN UPDATE SET "
+                "target.record_id = source.record_id, target.schema_path = source.schema_path, "
+                "target.instance_path = source.instance_path, "
+                "target.declared_type = source.declared_type, "
+                "target.validation_status = source.validation_status, "
+                "target.validation_message = source.validation_message "
+                "WHEN NOT MATCHED THEN INSERT "
+                "(extraction_run_id, document_id, field_path, field_type, value, value_string, "
+                "confidence_score, citation_ids, citations, extraction_error, record_id, "
+                "schema_path, instance_path, declared_type, validation_status, "
+                "validation_message) "
+                "VALUES (source.extraction_run_id, source.document_id, source.field_path, "
+                "source.field_type, source.value, source.value_string, "
+                "source.confidence_score, source.citation_ids, source.citations, NULL, "
+                "source.record_id, source.schema_path, source.instance_path, "
+                "source.declared_type, source.validation_status, source.validation_message)",
+                _generic_field_parameters(field),
+            )
+
+    def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]:
+        rows = self._sql.execute_sql(
+            "SELECT run_id, document_id, record_id, parent_record_id, schema_path, "
+            f"instance_path, CAST(ordinal AS STRING) FROM {self._records} "
+            "WHERE run_id = :extraction_run_id",
+            {"extraction_run_id": extraction_run_id},
+        )
+        return [_databricks_row_to_record(row) for row in rows]
+
+    def list_generic_fields(self, extraction_run_id: str) -> list[GenericFieldRow]:
+        rows = self._sql.execute_sql(
+            "SELECT extraction_run_id, document_id, record_id, schema_path, instance_path, "
+            "declared_type, TO_JSON(value), value_string, confidence_score, "
+            "TO_JSON(citation_ids), TO_JSON(citations), validation_status, validation_message "
+            f"FROM {self._fields} WHERE extraction_run_id = :extraction_run_id "
+            "AND record_id IS NOT NULL ORDER BY instance_path",
+            {"extraction_run_id": extraction_run_id},
+        )
+        return [_databricks_row_to_generic_field(row) for row in rows]
+
     def _select_runs(self) -> str:
         return (
             "SELECT extraction_run_id, document_id, parse_run_id, schema_id, schema_version, "
@@ -678,4 +839,142 @@ def _line_from_values(values: Any) -> InvoiceLineCandidateRecord:
         unit_price=amount(values[6]),
         tax=amount(values[7]),
         amount=amount(values[8]),
+    )
+
+
+def _record_values(record: ExtractedRecordRow) -> tuple[object, ...]:
+    return (
+        record.run_id,
+        record.document_id,
+        record.record_id,
+        record.parent_record_id,
+        record.schema_path,
+        record.instance_path,
+        record.ordinal,
+    )
+
+
+def _record_parameters(record: ExtractedRecordRow) -> dict[str, object]:
+    names = (
+        "run_id", "document_id", "record_id", "parent_record_id", "schema_path",
+        "instance_path", "ordinal",
+    )
+    return dict(zip(names, _record_values(record), strict=True))
+
+
+def _generic_field_update_values(field: GenericFieldRow) -> tuple[object, ...]:
+    return (
+        field.record_id,
+        field.schema_path,
+        field.instance_path,
+        field.declared_type,
+        field.validation_status,
+        field.validation_message,
+        field.run_id,
+        field.instance_path,
+    )
+
+
+def _generic_field_insert_values(field: GenericFieldRow) -> tuple[object, ...]:
+    return (
+        field.run_id,
+        field.document_id,
+        field.instance_path,
+        field.declared_type,
+        _json(field.value),
+        field.value_string,
+        field.confidence_score,
+        _json(field.citation_ids),
+        _json(field.citations),
+        None,
+        field.record_id,
+        field.schema_path,
+        field.instance_path,
+        field.declared_type,
+        field.validation_status,
+        field.validation_message,
+    )
+
+
+def _generic_field_parameters(field: GenericFieldRow) -> dict[str, object]:
+    return {
+        "extraction_run_id": field.run_id,
+        "document_id": field.document_id,
+        "field_path": field.instance_path,
+        "field_type": field.declared_type,
+        "value": _json(field.value),
+        "value_string": field.value_string,
+        "confidence_score": field.confidence_score,
+        "citation_ids": _json(field.citation_ids),
+        "citations": _json(field.citations),
+        "record_id": field.record_id,
+        "schema_path": field.schema_path,
+        "instance_path": field.instance_path,
+        "declared_type": field.declared_type,
+        "validation_status": field.validation_status,
+        "validation_message": field.validation_message,
+    }
+
+
+def _sqlite_row_to_record(row: sqlite3.Row) -> ExtractedRecordRow:
+    return ExtractedRecordRow(
+        run_id=row["run_id"],
+        document_id=row["document_id"],
+        record_id=row["record_id"],
+        parent_record_id=row["parent_record_id"],
+        schema_path=row["schema_path"],
+        instance_path=row["instance_path"],
+        ordinal=row["ordinal"],
+    )
+
+
+def _databricks_row_to_record(row: list[str]) -> ExtractedRecordRow:
+    return ExtractedRecordRow(
+        run_id=row[0],
+        document_id=row[1],
+        record_id=row[2],
+        parent_record_id=row[3] or None,
+        schema_path=row[4],
+        instance_path=row[5],
+        ordinal=int(row[6]) if row[6] else None,
+    )
+
+
+def _sqlite_row_to_generic_field(row: sqlite3.Row) -> GenericFieldRow:
+    schema_path = row["schema_path"]
+    return GenericFieldRow(
+        run_id=row["extraction_run_id"],
+        document_id=row["document_id"],
+        record_id=row["record_id"],
+        schema_path=schema_path,
+        instance_path=row["instance_path"],
+        field_name=leaf_field_name(schema_path),
+        declared_type=row["declared_type"],
+        value=json.loads(row["value"]) if row["value"] else None,
+        value_string=row["value_string"],
+        confidence_score=row["confidence_score"],
+        citation_ids=json.loads(row["citation_ids"]) if row["citation_ids"] else [],
+        citations=json.loads(row["citations"]) if row["citations"] else [],
+        validation_status=row["validation_status"],
+        validation_message=row["validation_message"],
+    )
+
+
+def _databricks_row_to_generic_field(row: list[str]) -> GenericFieldRow:
+    schema_path = row[3]
+    return GenericFieldRow(
+        run_id=row[0],
+        document_id=row[1],
+        record_id=row[2],
+        schema_path=schema_path,
+        instance_path=row[4],
+        field_name=leaf_field_name(schema_path),
+        declared_type=row[5],
+        value=json.loads(row[6]) if row[6] else None,
+        value_string=row[7] or None,
+        confidence_score=float(row[8]) if row[8] else None,
+        citation_ids=json.loads(row[9]) if row[9] else [],
+        citations=json.loads(row[10]) if row[10] else [],
+        validation_status=row[11] or None,
+        validation_message=row[12] or None,
     )
