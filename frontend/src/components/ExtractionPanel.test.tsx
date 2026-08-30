@@ -105,7 +105,7 @@ const latestResult = {
       extraction_error: null,
     },
   ],
-  candidate: {
+  candidates: [{
     invoice_number: "INV/06-92/543",
     invoice_date: "2011-07-28",
     seller_name: "Mclean-Cochran",
@@ -114,13 +114,13 @@ const latestResult = {
     tax_amount: null,
     total_amount: "888.55",
     currency: "EUR",
-  },
+  }],
 };
 
 const olderResult = {
   ...latestResult,
   run: run(olderRunId),
-  candidate: { ...latestResult.candidate, invoice_date: null },
+  candidates: [{ ...latestResult.candidates[0], invoice_date: null }],
   fields: latestResult.fields.map((field) =>
     field.field_path === "total" ? { ...field, value_string: "800.00", value: 800 } : field,
   ),
@@ -136,6 +136,52 @@ function panelFetch() {
     }
     if (url.includes(`/extractions/${latestRunId}`)) {
       return { ok: true, json: async () => latestResult };
+    }
+    return { ok: true, json: async () => ({}) };
+  });
+}
+
+/** A v4 document stating two invoices, each with its own billed lines. */
+function nestedField(path: string, value: string, cited = false) {
+  return {
+    field_path: path,
+    field_type: "string",
+    value,
+    value_string: value,
+    confidence_score: 0.98,
+    citation_ids: cited ? [9] : [],
+    citations: cited ? [{ id: 9, bbox: [{ coord: [1, 2, 3, 4], page_id: 1 }] }] : [],
+    extraction_error: null,
+  };
+}
+
+const nestedRunId = "6f1a2f70-6d4e-4f34-9a0f-2b6f9f5c4d21";
+const nestedResult = {
+  run: { ...run(nestedRunId), schema_version: 4 },
+  candidates: [],
+  fields: [
+    nestedField("invoices[0].invoice_number", "INV-A-9001", true),
+    nestedField("invoices[0].seller_name", "Northwind Trading Limited"),
+    nestedField("invoices[0].line_items[0].description", "Widget assembly A"),
+    nestedField("invoices[0].line_items[0].amount", "300.00"),
+    nestedField("invoices[0].line_items[1].description", "Widget assembly B"),
+    nestedField("invoices[0].line_items[1].amount", "150.00"),
+    nestedField("invoices[1].invoice_number", "INV-B-4402"),
+    nestedField("invoices[1].seller_name", "Sterling Components Limited"),
+    nestedField("invoices[1].line_items[0].description", "Hydraulic coupling"),
+    nestedField("invoices[1].line_items[0].amount", "100.00"),
+  ],
+};
+
+function nestedFetch() {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const url = input.toString();
+    if (url.includes("/extraction-runs")) {
+      return { ok: true, json: async () => [{ ...run(nestedRunId), schema_version: 4 }] };
+    }
+    if (url.includes("/api/schemas")) return { ok: true, json: async () => [schema] };
+    if (url.includes(`/extractions/${nestedRunId}`)) {
+      return { ok: true, json: async () => nestedResult };
     }
     return { ok: true, json: async () => ({}) };
   });
@@ -261,5 +307,63 @@ describe("ExtractionPanel line items", () => {
     );
     expect(onViewEvidence).toHaveBeenCalledTimes(1);
     expect(onViewEvidence.mock.calls[0][0].fieldLabel).toBe("line_items[0].amount");
+  });
+  it("shows one invoice at a time, with its lines listed downwards", async () => {
+    vi.stubGlobal("fetch", nestedFetch());
+    render(
+      <ExtractionPanel document={document} onViewEvidence={vi.fn()} onDocumentsChanged={vi.fn()} />,
+    );
+
+    // The first invoice is shown on its own, identified by its own values.
+    expect(await screen.findByText("Invoice 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("INV-A-9001 · Northwind Trading Limited")).toBeInTheDocument();
+    // Its fields are labelled relative to the invoice, not by their full nested path.
+    expect(screen.getByText("invoice_number")).toBeInTheDocument();
+    expect(screen.queryByText("invoices[0].invoice_number")).not.toBeInTheDocument();
+
+    // The lines are rows, so each line's leaves are the columns rather than one wide row.
+    expect(screen.getByRole("columnheader", { name: "description" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "amount" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("columnheader", { name: "line items[0].amount" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Widget assembly A")).toBeInTheDocument();
+    expect(screen.getByText("Widget assembly B")).toBeInTheDocument();
+    // The second invoice's values are not on this page.
+    expect(screen.queryByText("Hydraulic coupling")).not.toBeInTheDocument();
+  });
+
+  it("navigates between the invoices a document states", async () => {
+    vi.stubGlobal("fetch", nestedFetch());
+    render(
+      <ExtractionPanel document={document} onViewEvidence={vi.fn()} onDocumentsChanged={vi.fn()} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Invoice 2" }));
+    expect(screen.getByText("Invoice 2 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Hydraulic coupling")).toBeInTheDocument();
+    expect(screen.queryByText("Widget assembly A")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Previous invoice" }));
+    expect(screen.getByText("Invoice 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Widget assembly A")).toBeInTheDocument();
+  });
+
+  it("raises evidence for the nested path behind the relative label", async () => {
+    const onViewEvidence = vi.fn<(target: CitationTarget) => void>();
+    vi.stubGlobal("fetch", nestedFetch());
+    render(
+      <ExtractionPanel
+        document={document}
+        onViewEvidence={onViewEvidence}
+        onDocumentsChanged={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: /View evidence/ }));
+    // The label is stripped for reading; the citation must still carry the real path.
+    expect(onViewEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ fieldLabel: "invoices[0].invoice_number" }),
+    );
   });
 });

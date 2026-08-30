@@ -355,6 +355,72 @@ function RunProvenance({ run }: { run: ExtractionRun }) {
   );
 }
 
+type LeafRow = Record<string, ExtractedField>;
+type LeafRows = Map<number, LeafRow>;
+
+/** One instance of a repeated group: its own scalar leaves and its own nested repeats. */
+type EntityInstance = {
+  index: number;
+  scalars: LeafRow;
+  nested: Map<string, LeafRows>;
+};
+
+const REPEATED_SEGMENT = /^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]\.(.+)$/;
+
+/** Split extracted paths into document-level scalars and their repeated groups.
+ *
+ * Paths nest arbitrarily, so `invoices[1].line_items[0].amount` is read as the first line
+ * of the second invoice rather than as a column named `line_items[0].amount`.
+ */
+function groupExtractedFields(fields: ExtractedField[]): {
+  scalars: LeafRow;
+  groups: Map<string, Map<number, EntityInstance>>;
+} {
+  const scalars: LeafRow = {};
+  const groups = new Map<string, Map<number, EntityInstance>>();
+  for (const field of fields) {
+    const match = REPEATED_SEGMENT.exec(field.field_path);
+    if (!match) {
+      scalars[field.field_path] = field;
+      continue;
+    }
+    const [, name, rawIndex, rest] = match;
+    const index = Number(rawIndex);
+    const instances = groups.get(name) ?? new Map<number, EntityInstance>();
+    const instance: EntityInstance =
+      instances.get(index) ?? { index, scalars: {}, nested: new Map() };
+    const nested = REPEATED_SEGMENT.exec(rest);
+    if (nested) {
+      const [, nestedName, nestedIndex, leaf] = nested;
+      const rows = instance.nested.get(nestedName) ?? new Map<number, LeafRow>();
+      const row: LeafRow = rows.get(Number(nestedIndex)) ?? {};
+      row[leaf] = field;
+      rows.set(Number(nestedIndex), row);
+      instance.nested.set(nestedName, rows);
+    } else {
+      instance.scalars[rest] = field;
+    }
+    instances.set(index, instance);
+    groups.set(name, instances);
+  }
+  return { scalars, groups };
+}
+
+/** A group is shown an instance at a time when its instances carry their own repeats.
+ *
+ * That keeps a document stating several invoices readable as one invoice per page with its
+ * lines listed downwards, while a flat repeated field stays a single table of rows.
+ */
+function isPaged(instances: Map<number, EntityInstance>): boolean {
+  return [...instances.values()].some((instance) => instance.nested.size > 0);
+}
+
+function singularLabel(name: string): string {
+  const words = name.replace(/_/g, " ");
+  const base = words.endsWith("s") ? words.slice(0, -1) : words;
+  return base.charAt(0).toUpperCase() + base.slice(1);
+}
+
 function FieldTable({
   fields,
   onViewEvidence,
@@ -362,85 +428,215 @@ function FieldTable({
   fields: ExtractedField[];
   onViewEvidence: (field: ExtractedField) => void;
 }) {
-  const header = fields.filter((field) => !field.field_path.includes("["));
-  const groups = groupRepeatedFields(fields);
+  const { scalars, groups } = useMemo(() => groupExtractedFields(fields), [fields]);
+  const documentScalars = Object.entries(scalars);
   return (
     <>
       <p className="extraction-disclaimer">
         <FileText size={14} aria-hidden="true" /> Model confidence is metadata about the extraction,
         not a guarantee that a value is correct. Candidate data is not approved data.
       </p>
-      <div className="extraction-table-scroll">
-        <table className="extraction-table">
-          <thead>
-            <tr>
-              <th>Field</th>
-              <th>Extracted value</th>
-              <th>Model confidence</th>
-              <th>Evidence</th>
-            </tr>
-          </thead>
-          <tbody>
-            {header.map((field) => {
-              const hasCitation = field.citations.some((citation) => citation.bbox.length > 0);
-              return (
-                <tr key={field.field_path}>
-                  <td>
-                    <strong>{field.field_path}</strong>
-                    <code>{field.field_type}</code>
-                    {field.extraction_error ? (
-                      <small className="field-error">{field.extraction_error}</small>
-                    ) : null}
-                  </td>
-                  <td>{field.value_string ?? <span className="value-null">Not returned</span>}</td>
-                  <td>{formatConfidence(field.confidence_score)}</td>
-                  <td>
-                    {hasCitation ? (
-                      <button
-                        type="button"
-                        className="evidence-button"
-                        onClick={() => onViewEvidence(field)}
-                      >
-                        <MapPin size={13} aria-hidden="true" /> View evidence
-                      </button>
-                    ) : (
-                      <span className="no-citation">No citation returned</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      {[...groups.entries()].map(([name, rows]) => (
-        <RepeatedFieldTable
-          key={name}
-          name={name}
-          rows={rows}
-          onViewEvidence={onViewEvidence}
-        />
-      ))}
+      {documentScalars.length ? (
+        <ScalarTable entries={documentScalars} onViewEvidence={onViewEvidence} />
+      ) : null}
+      {[...groups.entries()].map(([name, instances]) =>
+        isPaged(instances) ? (
+          <EntityPages
+            key={name}
+            name={name}
+            instances={instances}
+            onViewEvidence={onViewEvidence}
+          />
+        ) : (
+          <RepeatedFieldTable
+            key={name}
+            name={name}
+            rows={
+              new Map(
+                [...instances.values()].map((instance) => [instance.index, instance.scalars]),
+              )
+            }
+            onViewEvidence={onViewEvidence}
+          />
+        ),
+      )}
     </>
   );
 }
 
-/** Group `line_items[0].amount` style paths into ordered rows keyed by their array name. */
-function groupRepeatedFields(
-  fields: ExtractedField[],
-): Map<string, Map<number, Record<string, ExtractedField>>> {
-  const groups = new Map<string, Map<number, Record<string, ExtractedField>>>();
-  for (const field of fields) {
-    const match = /^([A-Za-z_][A-Za-z0-9_]*)\[(\d+)\]\.(.+)$/.exec(field.field_path);
-    if (!match) continue;
-    const [, name, index, leaf] = match;
-    const rows = groups.get(name) ?? new Map<number, Record<string, ExtractedField>>();
-    const row = rows.get(Number(index)) ?? {};
-    row[leaf] = field;
-    rows.set(Number(index), row);
-    groups.set(name, rows);
+function ScalarTable({
+  entries,
+  onViewEvidence,
+}: {
+  entries: [string, ExtractedField][];
+  onViewEvidence: (field: ExtractedField) => void;
+}) {
+  return (
+    <div className="extraction-table-scroll">
+      <table className="extraction-table">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Extracted value</th>
+            <th>Model confidence</th>
+            <th>Evidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([label, field]) => {
+            const hasCitation = field.citations.some((citation) => citation.bbox.length > 0);
+            return (
+              <tr key={field.field_path}>
+                <td>
+                  <strong>{label}</strong>
+                  <code>{field.field_type}</code>
+                  {field.extraction_error ? (
+                    <small className="field-error">{field.extraction_error}</small>
+                  ) : null}
+                </td>
+                <td>{field.value_string ?? <span className="value-null">Not returned</span>}</td>
+                <td>{formatConfidence(field.confidence_score)}</td>
+                <td>
+                  {hasCitation ? (
+                    <button
+                      type="button"
+                      className="evidence-button"
+                      onClick={() => onViewEvidence(field)}
+                    >
+                      <MapPin size={13} aria-hidden="true" /> View evidence
+                    </button>
+                  ) : (
+                    <span className="no-citation">No citation returned</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function EntityPages({
+  name,
+  instances,
+  onViewEvidence,
+}: {
+  name: string;
+  instances: Map<number, EntityInstance>;
+  onViewEvidence: (field: ExtractedField) => void;
+}) {
+  const ordered = useMemo(
+    () => [...instances.values()].sort((a, b) => a.index - b.index),
+    [instances],
+  );
+  const [position, setPosition] = useState(0);
+  // Selecting a later instance and then loading a run with fewer of them must not blank
+  // the panel, so the position is clamped rather than trusted.
+  const active = ordered[Math.min(position, ordered.length - 1)];
+  if (!active) return null;
+  const label = singularLabel(name);
+  const entries = Object.entries(active.scalars);
+  const identity = entries
+    .map(([, field]) => field.value_string)
+    .filter((value): value is string => Boolean(value))
+    .slice(0, 3)
+    .join(" · ");
+  return (
+    <section className="entity-pages" aria-label={`${label} values`}>
+      <div className="entity-heading">
+        <strong>
+          {label} {active.index + 1} of {ordered.length}
+        </strong>
+        {identity ? <span>{identity}</span> : null}
+      </div>
+      <ScalarTable entries={entries} onViewEvidence={onViewEvidence} />
+      {[...active.nested.entries()].map(([nestedName, rows]) => (
+        <RepeatedFieldTable
+          key={nestedName}
+          name={nestedName}
+          rows={rows}
+          onViewEvidence={onViewEvidence}
+        />
+      ))}
+      {ordered.length > 1 ? (
+        <EntityPager
+          label={label}
+          indexes={ordered.map((instance) => instance.index)}
+          position={Math.min(position, ordered.length - 1)}
+          onSelect={setPosition}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+function EntityPager({
+  label,
+  indexes,
+  position,
+  onSelect,
+}: {
+  label: string;
+  indexes: number[];
+  position: number;
+  onSelect: (position: number) => void;
+}) {
+  const selectId = `entity-pager-${label.toLowerCase().replace(/\s+/g, "-")}`;
+  // A long pile of documents would overflow a row of buttons, so it becomes a list instead.
+  if (indexes.length > 8) {
+    return (
+      <div className="entity-pager">
+        <label htmlFor={selectId}>{label}</label>
+        <select
+          id={selectId}
+          value={position}
+          onChange={(event) => onSelect(Number(event.target.value))}
+        >
+          {indexes.map((index, item) => (
+            <option key={index} value={item}>
+              {label} {index + 1}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
   }
-  return groups;
+  return (
+    <div className="entity-pager" role="group" aria-label={`Select ${label.toLowerCase()}`}>
+      <button
+        type="button"
+        className="entity-step"
+        disabled={position === 0}
+        onClick={() => onSelect(position - 1)}
+        aria-label={`Previous ${label.toLowerCase()}`}
+      >
+        &lsaquo;
+      </button>
+      {indexes.map((index, item) => (
+        <button
+          key={index}
+          type="button"
+          className={item === position ? "entity-page active" : "entity-page"}
+          aria-label={`${label} ${index + 1}`}
+          aria-current={item === position ? "true" : undefined}
+          onClick={() => onSelect(item)}
+        >
+          {index + 1}
+        </button>
+      ))}
+      <button
+        type="button"
+        className="entity-step"
+        disabled={position === indexes.length - 1}
+        onClick={() => onSelect(position + 1)}
+        aria-label={`Next ${label.toLowerCase()}`}
+      >
+        &rsaquo;
+      </button>
+    </div>
+  );
 }
 
 function RepeatedFieldTable({
