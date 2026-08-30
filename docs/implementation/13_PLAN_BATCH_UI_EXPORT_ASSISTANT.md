@@ -14,7 +14,7 @@ Sections are lettered to avoid colliding with the pack's numbering.
 | C | Batch parse and extract | **COMPLETE** | `feat/13-batch-processing` — `45f001a` |
 | D | Summary view, XLSX export, case filter | **COMPLETE** | `feat/13-batch-processing` — verified live in dev |
 | E | LLM validation and Knowledge Assistant | **NOT STARTED** (blocked, see below) | — |
-| G | Repeated entities: nested schema v4 | **EXTRACTION VERIFIED** | `feat/13-batch-processing` — projection not yet built |
+| G | Repeated entities: nested schema v4 | **COMPLETE** | `feat/13-batch-processing` — verified live end to end |
 | F | Set-based batch engine | **DEFERRED** by decision | — |
 
 Branches are a **linear stack**: each is built on the one above it, and
@@ -155,11 +155,33 @@ Three changes were needed beyond the manifest:
   summary would show as a blank invoice, so it now returns nothing and records the extracted
   fields alone.
 
-**Not yet built**: the typed projection for repeated invoices. A v4 document is captured, validated
-and inspectable, but does not reach `invoice_candidates`, the summary view or the XLSX export. The
-open decision is whether to add an invoice index to the candidate tables per use case, or to drive
-the projection generically from the registered manifest, which already declares every leaf, its
-type and its order.
+**The typed projection now describes repeated invoices.** Both candidate tables carry an
+`invoice_index`, added by a guarded migration that places every retained row at index 0, which is
+what it has always described. The Databricks and mock projections were rewritten together, and the
+summary view, both reporting paths and the export join lines to their own invoice.
+
+Verified live on 2026-08-30: the three-invoice document reports three rows — `INV-A-9001` GBP with
+2 lines, `INV-B-4402` EUR with 1, `INV-C-7783` USD with 3 — each reconciling to zero, all
+`VALIDATED_PASS`, with six line rows in the workbook naming the invoice each belongs to. The ten
+existing documents project unchanged, `d0ed9896` still reporting `-37.31`.
+
+Three traps were closed on the way, each of which would have been silently wrong rather than
+broken:
+
+- **Fan-out.** Joining lines on the extraction run alone gives every invoice in a document every
+  other invoice's lines, inflating each sum without raising anything. The view, both reporting
+  paths and the export now key on `(extraction_run_id, invoice_index)`, and a test asserts the
+  per-invoice counts and sums directly.
+- **Silent truncation.** `get_candidate` selected `LIMIT 1`, so validation's duplicate check would
+  only ever have considered the first invoice's identity. It is now `list_candidates`, and every
+  invoice's identity is checked.
+- **Ordering.** Views were created in the same script as the tables, before the migration that adds
+  the column they project, so the first bootstrap failed. The four views now live in
+  `create_views.sql` and run as the last bootstrap task, because a view can only project columns
+  the retained tables already carry.
+
+**Still not solved by this**: a second document type needs its own projection or a manifest-driven
+one, and workflow state remains per document, so individual invoices cannot be approved separately.
 
 ## Section F — Set-based batch engine (deferred, recorded)
 

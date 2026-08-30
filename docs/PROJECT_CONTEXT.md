@@ -585,12 +585,17 @@ Extraction run `60df80ab-21a2-4d09-846b-097fa4809920`.
 
 Three things to know before building on this:
 
-- A v4 document is **captured but not projected**. `build_candidate` now returns nothing for a
-  shape it cannot describe, rather than writing a row of nulls that the summary would render as a
-  blank invoice. So a v4 document never reaches `invoice_candidates`, the summary or the export.
+- A v4 document is **projected as one row per invoice** (2026-08-30). Both candidate tables carry
+  an `invoice_index`; the three-invoice document reports three rows in the results page and the
+  workbook, each with its own lines, and the ten existing documents are unchanged. A schema stating
+  no invoice fields this projection recognises is still captured and left unprojected rather than
+  written as nulls.
 - Registering v4 as PRODUCTION means validating a v3 extraction now reports
   `schema_version_currency` as `UNCERTAIN` at `WARNING`. It is not blocking and stored runs are
   untouched.
+- Governed **views are created after the column migrations**, in `create_views.sql` as the last
+  bootstrap task. Defining them alongside the tables failed the first bootstrap, because a view
+  cannot project a column the retained tables do not yet carry.
 - Adding one schema version required **three** coordinated edits: the bootstrap job task, the
   `ALLOWED_MANIFESTS` allowlist in `register_schemas.py`, and the expected task list in
   `scripts/validate_configuration.py`. The allowlist is a deliberate control worth keeping; the
