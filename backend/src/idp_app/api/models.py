@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from idp_app.core.config import IdpMode
+from idp_app.services.schema_models import ExtractField
 
 
 class ConfigurationPresence(BaseModel):
@@ -116,9 +117,15 @@ class SchemaSummaryResponse(BaseModel):
     schema_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
     schema_version: int = Field(ge=1)
     display_name: str
+    description: str | None = None
     use_case: str
     schema_hash: str
-    status: Literal["PRODUCTION"]
+    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED"]
+    root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
+    is_editable: bool
+    created_by: str
+    created_at: datetime
+    published_at: datetime | None = None
 
 
 class SchemaFieldResponse(BaseModel):
@@ -144,6 +151,53 @@ class SchemaDetailResponse(SchemaSummaryResponse):
     instructions: str
     fields: list[SchemaFieldResponse]
     document_rules: list[SchemaRuleResponse]
+    # The full recursive tree exactly as declared, for the schema editor (`fields` above stays
+    # a flattened, wildcard-keyed leaf list for read-only display and citation lookup).
+    schema_tree: dict[str, ExtractField]
+
+
+class CreateSchemaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
+    use_case: str = Field(default="generic", pattern=r"^[a-z][a-z0-9_]{0,99}$")
+
+
+class UpdateSchemaDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
+    instructions: str | None = Field(default=None, min_length=1, max_length=20000)
+    use_case: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    ai_extract_schema: dict[str, ExtractField] = Field(min_length=1, max_length=256)
+
+
+class ValidateSchemaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Deliberately uncapped (unlike the draft-save request below): an over-limit schema must
+    # still be POST-able here so the editor can report *why* it is invalid, rather than being
+    # rejected by the request shape before the service gets a chance to explain the violation.
+    ai_extract_schema: dict[str, ExtractField] = Field(min_length=1)
+
+
+class SchemaValidationResponse(BaseModel):
+    valid: bool
+    depth: int
+    max_depth: int
+    leaf_count: int
+    max_leaves: int
+    errors: list[str]
+
+
+class CloneSchemaRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    new_display_name: str = Field(min_length=1, max_length=200)
+    new_schema_id: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_]{0,99}$")
 
 
 class ExtractionRequest(BaseModel):

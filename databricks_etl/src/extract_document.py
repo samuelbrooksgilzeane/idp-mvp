@@ -169,7 +169,7 @@ def main() -> None:
         schema_row = spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""
             SELECT display_name, use_case, ai_extract_schema_json, instructions,
-                   field_policy_json, document_rule_json, schema_hash, status
+                   field_policy_json, document_rule_json, schema_hash, status, description
             FROM {schemas}
             WHERE schema_id = :schema_id AND schema_version = :schema_version
             LIMIT 1
@@ -185,6 +185,7 @@ def main() -> None:
             "display_name": schema_row["display_name"],
             "use_case": schema_row["use_case"],
             "status": schema_row["status"],
+            "description": schema_row["description"],
             "instructions": schema_row["instructions"],
             "ai_extract_schema": json.loads(schema_json),
             "field_policies": json.loads(schema_row["field_policy_json"]),

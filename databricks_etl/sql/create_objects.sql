@@ -68,9 +68,11 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
   field_policy_json STRING COMMENT 'Versioned field-level policy JSON',
   document_rule_json STRING COMMENT 'Versioned document-level rule JSON',
   schema_hash STRING COMMENT 'Content hash covering the complete extraction contract',
-  status STRING COMMENT 'Schema lifecycle state',
+  status STRING COMMENT 'Schema lifecycle state: PRODUCTION (governed), or DRAFT/PUBLISHED/RETIRED',
   created_by STRING COMMENT 'Authenticated identity that registered the schema version',
-  created_at TIMESTAMP COMMENT 'Timestamp when the immutable schema version was registered'
+  created_at TIMESTAMP COMMENT 'Timestamp when the immutable schema version was registered',
+  description STRING COMMENT 'Optional human-readable summary shown in the schema editor list',
+  published_at TIMESTAMP COMMENT 'Timestamp when a DRAFT version became an immutable PUBLISHED version'
 )
 USING DELTA
 COMMENT 'Versioned and auditable extraction schemas';

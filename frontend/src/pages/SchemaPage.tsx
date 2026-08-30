@@ -1,6 +1,6 @@
-import { SchemaViewer } from "../components/SchemaViewer";
+import { SchemaEditor } from "../components/SchemaEditor";
 
-/** The extraction contract is per use case, not per document, so it has its own page. */
+/** Schemas are user-created and editable, independent of any one document's use case. */
 export function SchemaPage() {
-  return <SchemaViewer useCase="invoice" />;
+  return <SchemaEditor />;
 }

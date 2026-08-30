@@ -137,6 +137,9 @@ def test_missing_unknown_and_untrusted_schema_requests_are_safe(
 ) -> None:
     missing = client.get("/api/schemas/invoice/versions/99")
     non_production = client.get("/api/schemas?status=DRAFT&use_case=invoice")
+    # POST /api/schemas is the (new, generic) schema-creation endpoint; a client still cannot
+    # choose its own schema_id or write raw ai_extract_schema JSON directly through it -- those
+    # fields are not part of its request contract, so supplying them is a validation error.
     injected = client.post(
         "/api/schemas",
         json={"schema_id": "attacker", "ai_extract_schema": {"secret": {}}},
@@ -145,8 +148,129 @@ def test_missing_unknown_and_untrusted_schema_requests_are_safe(
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "SCHEMA_NOT_FOUND"
     assert non_production.status_code == 422
-    assert injected.status_code == 405
+    assert injected.status_code == 422
     assert client.get("/api/schemas?status=PRODUCTION&use_case=attacker").json() == []
+
+
+def test_create_schema_server_generates_its_own_schema_id(client: TestClient) -> None:
+    """The schema_id is always derived server-side from the display name; the client never
+    supplies it, matching the SQL-identifier-injection guardrail elsewhere in the app."""
+    created = client.post(
+        "/api/schemas",
+        json={"display_name": "Custom Tax Form", "root_mode": "SINGLE_RECORD"},
+    )
+    assert created.status_code == 201
+    payload = created.json()
+    assert payload["schema_id"] not in ("attacker",)
+    assert payload["status"] == "DRAFT"
+    assert payload["root_mode"] == "SINGLE_RECORD"
+    assert payload["is_editable"] is True
+
+    # A second schema with a colliding display name gets its own distinct schema_id rather than
+    # overwriting the first.
+    again = client.post(
+        "/api/schemas",
+        json={"display_name": "Custom Tax Form", "root_mode": "SINGLE_RECORD"},
+    )
+    assert again.status_code == 201
+    assert again.json()["schema_id"] != payload["schema_id"]
+
+
+def test_schema_draft_edit_validate_and_publish_lifecycle(client: TestClient) -> None:
+    created = client.post(
+        "/api/schemas",
+        json={
+            "display_name": "Nested Custom Schema",
+            "root_mode": "REPEATED_RECORDS",
+            "description": "A repeated-record schema for the editor tests.",
+        },
+    ).json()
+    schema_id = created["schema_id"]
+
+    nested_schema = {
+        "records": {
+            "type": "array",
+            "description": "Each record.",
+            "items": {
+                "type": "object",
+                "description": "One record.",
+                "properties": {
+                    "name": {"type": "string", "description": "Name."},
+                    "amounts": {
+                        "type": "array",
+                        "description": "Line amounts.",
+                        "items": {"type": "number", "description": "One amount."},
+                    },
+                },
+            },
+        }
+    }
+
+    validated = client.post(
+        f"/api/schemas/{schema_id}/validate",
+        json={"ai_extract_schema": nested_schema},
+    )
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is True
+    assert validated.json()["leaf_count"] == 2
+
+    updated = client.put(
+        f"/api/schemas/{schema_id}/draft?schema_version=1",
+        json={"ai_extract_schema": nested_schema},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["schema_tree"]["records"]["type"] == "array"
+
+    published = client.post(f"/api/schemas/{schema_id}/publish?schema_version=1")
+    assert published.status_code == 200
+    assert published.json()["status"] == "PUBLISHED"
+    assert published.json()["is_editable"] is False
+
+    # A published version can no longer be edited directly...
+    rejected = client.put(
+        f"/api/schemas/{schema_id}/draft?schema_version=1",
+        json={"ai_extract_schema": nested_schema},
+    )
+    assert rejected.status_code == 409
+
+    # ...but cloning it (without a new schema_id) opens a new draft version to edit instead.
+    cloned = client.post(
+        f"/api/schemas/{schema_id}/clone?schema_version=1",
+        json={"new_display_name": "Nested Custom Schema v2"},
+    )
+    assert cloned.status_code == 201
+    assert cloned.json()["schema_id"] == schema_id
+    assert cloned.json()["schema_version"] == 2
+    assert cloned.json()["status"] == "DRAFT"
+
+    listed = client.get("/api/schemas?status=ALL&use_case=generic").json()
+    versions = {item["schema_version"] for item in listed if item["schema_id"] == schema_id}
+    assert versions == {1, 2}
+
+
+def test_schema_exceeding_limits_is_rejected_before_saving(client: TestClient) -> None:
+    created = client.post(
+        "/api/schemas",
+        json={"display_name": "Oversized Schema", "root_mode": "SINGLE_RECORD"},
+    ).json()
+    schema_id = created["schema_id"]
+
+    too_many_fields = {
+        f"field_{index}": {"type": "string", "description": "Leaf."} for index in range(300)
+    }
+    validated = client.post(
+        f"/api/schemas/{schema_id}/validate",
+        json={"ai_extract_schema": too_many_fields},
+    )
+    assert validated.status_code == 200
+    assert validated.json()["valid"] is False
+    assert any("256" in error for error in validated.json()["errors"])
+
+    saved = client.put(
+        f"/api/schemas/{schema_id}/draft?schema_version=1",
+        json={"ai_extract_schema": too_many_fields},
+    )
+    assert saved.status_code == 422
 
 
 def test_every_hash_implementation_agrees_on_every_manifest() -> None:

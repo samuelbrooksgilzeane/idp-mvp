@@ -213,7 +213,9 @@ def main() -> None:
             :schema_hash AS schema_hash,
             :status AS status,
             current_user() AS created_by,
-            current_timestamp() AS created_at
+            current_timestamp() AS created_at,
+            CAST(NULL AS STRING) AS description,
+            CAST(NULL AS TIMESTAMP) AS published_at
         ) AS source
         ON target.schema_id = source.schema_id
            AND target.schema_version = source.schema_version

@@ -124,10 +124,14 @@ def policy_path(instance_path: str) -> str:
 class FieldPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    required: bool
-    confidence_threshold: float = Field(ge=0, le=1)
-    citation_required: bool
-    risk_tier: Literal["low", "medium", "high"]
+    # Defaults let a user-created custom schema (section 2 of the generalized IDP plan) skip
+    # authoring a policy per leaf; the schema service fills these in automatically. A governed
+    # manifest continues to state every value explicitly, so its canonical JSON and hash are
+    # unaffected by these defaults existing.
+    required: bool = False
+    confidence_threshold: float = Field(default=0.0, ge=0, le=1)
+    citation_required: bool = False
+    risk_tier: Literal["low", "medium", "high"] = "low"
     # Optional declared meaning behind a raw string field, so semantic casting is validated from
     # the registered contract rather than hardcoded per use case. Optional keeps existing
     # manifests byte-identical under `canonical_json`.
@@ -185,12 +189,21 @@ class SchemaManifest(BaseModel):
     schema_id: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
     schema_version: int = Field(ge=1)
     display_name: str = Field(min_length=1, max_length=200)
-    use_case: str = Field(pattern=r"^[a-z][a-z0-9_]{0,99}$")
-    status: Literal["PRODUCTION"]
+    # `invoice` (and any other domain) is now an optional tag, not a required use-case value:
+    # a user-created custom schema may leave it as the generic default below.
+    use_case: str = Field(default="generic", pattern=r"^[a-z][a-z0-9_]{0,99}$")
+    # PRODUCTION is the historical status for a manifest registered by the governed bootstrap.
+    # DRAFT / PUBLISHED / RETIRED are the user-editable lifecycle states from the schema editor;
+    # PUBLISHED is otherwise equivalent to PRODUCTION (immutable, extractable).
+    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED"]
+    # Optional human-readable summary shown in the schema list. Excluded from the hash when
+    # absent so every already-registered governed manifest keeps an identical schema_hash.
+    description: str | None = Field(default=None, max_length=2000)
+    published_at: datetime | None = None
     instructions: str = Field(min_length=1, max_length=20000)
     ai_extract_schema: dict[str, ExtractField] = Field(min_length=1, max_length=256)
     field_policies: dict[str, FieldPolicy]
-    document_rules: list[DocumentRule]
+    document_rules: list[DocumentRule] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_field_contract(self) -> SchemaManifest:
@@ -280,6 +293,23 @@ class SchemaManifest(BaseModel):
         )
 
 
+def infer_root_mode(
+    schema: dict[str, ExtractField],
+) -> Literal["SINGLE_RECORD", "REPEATED_RECORDS"]:
+    """Whether one document can state several records of this schema's shape.
+
+    A schema whose only declared top-level field is a repeated array (the shape produced by
+    answering "Yes" to "Can one document contain multiple records of this type?" when creating
+    a schema) is REPEATED_RECORDS; anything else -- including a single top-level object, or
+    several top-level scalar fields such as a flat tax form -- is SINGLE_RECORD.
+    """
+    if len(schema) == 1:
+        [only_field] = schema.values()
+        if only_field.type == "array":
+            return "REPEATED_RECORDS"
+    return "SINGLE_RECORD"
+
+
 @dataclass(frozen=True)
 class SchemaRecord:
     schema_id: str
@@ -294,3 +324,14 @@ class SchemaRecord:
     status: str
     created_by: str
     created_at: datetime
+    description: str | None = None
+    published_at: datetime | None = None
+
+    @property
+    def root_mode(self) -> Literal["SINGLE_RECORD", "REPEATED_RECORDS"]:
+        return infer_root_mode(self.ai_extract_schema)
+
+    @property
+    def is_editable(self) -> bool:
+        """Drafts can be edited; a published, production or retired version is immutable."""
+        return self.status == "DRAFT"

@@ -99,6 +99,7 @@ def validate_data_bootstrap() -> None:
         "register_production_schemas_v3",
         "register_production_schemas_v4",
         "create_governed_views",
+        "migrate_generic_schema_registry",
     ]
     if not isinstance(tasks, list) or [t.get("task_key") for t in tasks] != expected_tasks:
         raise ValueError(
@@ -169,7 +170,7 @@ def validate_data_bootstrap() -> None:
     if registration_python.get("parameters") != expected_registration_parameters:
         raise ValueError("Schema registration parameters must match the trusted contract")
 
-    view_task = tasks[-1]
+    view_task = tasks[8]
     view_sql = view_task.get("sql_task", {})
     if view_task.get("depends_on") != [{"task_key": "register_production_schemas_v4"}]:
         raise ValueError("Governed views must be created after the schema registrations")

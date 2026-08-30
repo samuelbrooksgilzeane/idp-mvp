@@ -68,6 +68,12 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry
             permission: SELECT
+        - name: schema-registry-table-modify
+          description: Write access for the user-editable schema editor's draft/publish/clone lifecycle.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_schema_registry
+            permission: MODIFY
         - name: extraction-runs-table-select
           description: Read access to immutable extraction-run history.
           uc_securable:
