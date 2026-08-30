@@ -6,6 +6,8 @@ need to re-parse the raw ai_extract JSON.
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from idp_app.services.document_models import (
 )
 from idp_app.services.extraction_result import flatten_result, walk_extraction
 from idp_app.services.extraction_runs import SQLiteExtractionRunRepository
+from idp_app.services.generic_results import ExtractionResultsService
 from idp_app.services.schema_models import ExtractField, SchemaRecord
 
 RUN_ID = "b3f0e6b0-6a8b-4e7e-9c8e-1f6c9a5f6a1a"
@@ -251,3 +254,64 @@ def test_persist_generic_inserts_a_field_row_when_no_flatten_result_row_exists(
     persisted_fields = repository.list_generic_fields(run.extraction_run_id)
     assert len(persisted_fields) == 1
     assert persisted_fields[0].value == 114.0
+
+
+class _RecordsOnlyRepository:
+    """A repository stand-in for an environment where extracted_records is writable but
+    extracted_fields is not (the deployed app currently has no MODIFY grant on
+    extracted_fields, only on extracted_records) -- records persist, but a field-enriching
+    write always fails silently and list_generic_fields stays permanently empty.
+    """
+
+    def __init__(self, run: ExtractionRunRecord) -> None:
+        self._run = run
+        self._records: list[ExtractedRecordRow] = []
+        self.persist_calls = 0
+
+    def get(self, extraction_run_id: str) -> ExtractionRunRecord | None:
+        return self._run if extraction_run_id == self._run.extraction_run_id else None
+
+    def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]:
+        return list(self._records)
+
+    def list_generic_fields(self, extraction_run_id: str) -> list[GenericFieldRow]:
+        return []  # extracted_fields is never actually enriched under this grant.
+
+    def persist_generic(
+        self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
+    ) -> None:
+        self.persist_calls += 1
+        self._records = list(records)  # the records write succeeds...
+        # ...the fields write does not.
+        raise PermissionError("no MODIFY grant on extracted_fields")
+
+
+def test_records_only_cache_still_recomputes_fields_rather_than_dropping_them() -> None:
+    """Guards the exact partial-grant deployment this app currently runs under: if only
+    extracted_records is writable, a later read must not return the cached records paired
+    with an empty fields list (which would silently drop every field's confidence/citation/
+    validation data) -- it must recompute the full result instead.
+    """
+    schema = _nested_schema()
+    ai_result = _nested_ai_result()
+    run = replace(_run(), ai_result=ai_result)
+    expected_records, expected_fields = walk_extraction(run, schema, ai_result)
+    assert expected_records and expected_fields  # the fixture must actually produce both.
+
+    repository = _RecordsOnlyRepository(run)
+    service = ExtractionResultsService(repository, schemas=None, documents=None)  # type: ignore[arg-type]
+
+    async def _twice() -> tuple[object, object]:
+        first = await service._records_and_fields(run, schema)  # noqa: SLF001
+        second = await service._records_and_fields(run, schema)  # noqa: SLF001
+        return first, second
+
+    (first_records, first_fields), (second_records, second_fields) = asyncio.run(_twice())
+
+    # Every read still attempts (and fails) the write -- correctness matters more here than
+    # avoiding a redundant, harmlessly-failing call.
+    assert repository.persist_calls == 2
+    assert len(first_records) == len(expected_records)
+    assert len(first_fields) == len(expected_fields)
+    assert len(second_records) == len(expected_records)
+    assert len(second_fields) == len(expected_fields)

@@ -168,18 +168,36 @@ class ExtractionResultsService:
     ) -> tuple[list[ExtractedRecordRow], list[GenericFieldRow]]:
         """Read-through cache over the recursive record tree: try the persisted tables
         first, and only fall back to recomputing from the raw `ai_extract` response (via
-        `walk_extraction`) on a cache miss -- the run's first read, or one extracted before
-        this cache existed. A computed result is persisted so every later read is cheap; a
-        persistence failure degrades back to always recomputing, never to an error.
+        `walk_extraction`) on a cache miss -- the run's first read, one extracted before this
+        cache existed, or an environment where writing extracted_fields is unavailable (in
+        which case records get cached but fields never do, and every read still recomputes
+        fields -- see the guard below). A computed result is persisted so every later read is
+        cheap wherever both tables are writable; a persistence failure degrades back to always
+        recomputing, never to an error.
         """
-        persisted_records = await run_in_threadpool(
-            self._runs.list_generic_records, run.extraction_run_id
-        )
-        if persisted_records:
-            persisted_fields = await run_in_threadpool(
-                self._runs.list_generic_fields, run.extraction_run_id
+        try:
+            persisted_records = await run_in_threadpool(
+                self._runs.list_generic_records, run.extraction_run_id
             )
-            return persisted_records, persisted_fields
+            persisted_fields = (
+                await run_in_threadpool(self._runs.list_generic_fields, run.extraction_run_id)
+                if persisted_records
+                else []
+            )
+            # A cache hit requires *both*: an environment where extracted_fields can be
+            # written might never actually persist fields (e.g. the write is unavailable),
+            # in which case records alone are not enough -- returning them with an empty
+            # fields list would silently drop every field's confidence/citation/validation
+            # data. Treat that as a miss and recompute the whole result instead.
+            if persisted_records and persisted_fields:
+                return persisted_records, persisted_fields
+        except Exception:
+            _logger.warning(
+                "Could not read the persisted generic record tree for run %s; falling "
+                "back to recomputing it from the retained ai_extract result.",
+                run.extraction_run_id,
+                exc_info=True,
+            )
         if run.ai_result is None:
             return [], []
         records, fields = await run_in_threadpool(walk_extraction, run, schema, run.ai_result)

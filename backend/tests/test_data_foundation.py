@@ -181,13 +181,16 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
         ),
         "permission": "SELECT",
     }
-    assert bindings["invoice-summary-select"]["uc_securable"] == {
+    assert bindings["extracted-records-table-select"]["uc_securable"] == {
         "securable_type": "TABLE",
         "securable_full_name": (
-            "${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_summary"
+            "${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_records"
         ),
         "permission": "SELECT",
     }
+    assert bindings["extracted-records-table-modify"]["uc_securable"]["permission"] == (
+        "MODIFY"
+    )
 
 
 def test_schema_registration_task_is_immutable_and_source_controlled() -> None:

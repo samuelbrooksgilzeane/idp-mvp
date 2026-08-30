@@ -92,24 +92,23 @@ resources:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_fields
             permission: SELECT
+        - name: extracted-records-table-select
+          description: Read access to the persisted generic recursive record tree.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_records
+            permission: SELECT
+        - name: extracted-records-table-modify
+          description: Write access for the write-through cache that persists a run's record tree on first read. Extracted_fields itself is read-only here (no MODIFY slot available under the 20-resource app cap), so fields are never cached -- only the record tree is; get_records/list_summaries still recompute fields from the raw ai_extract result on every read.
+          uc_securable:
+            securable_type: TABLE
+            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_extracted_records
+            permission: MODIFY
         - name: invoice-candidates-select
           description: Read access to typed invoice candidate projections.
           uc_securable:
             securable_type: TABLE
             securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_candidates
-            permission: SELECT
-        - name: invoice-lines-modify
-          description: Record and read typed billed lines for an extraction.
-          uc_securable:
-            securable_type: TABLE
-            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_line_candidates
-            permission: MODIFY
-        - name: invoice-summary-select
-          description: Read the governed cross-document invoice summary.
-          uc_securable:
-            # Databricks App resources model Unity Catalog views as TABLE securables.
-            securable_type: TABLE
-            securable_full_name: ${var.catalog}.${var.project_schema}.${var.table_prefix}_invoice_summary
             permission: SELECT
         - name: validation-runs-modify
           description: Record immutable deterministic validation attempts.
