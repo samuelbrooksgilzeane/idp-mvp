@@ -9,6 +9,7 @@ from typing import Protocol, cast
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import sql
 
+from idp_app.core.performance import record_sql_statement
 from idp_app.services.document_models import DocumentRecord
 
 DOCUMENT_COLUMNS = (
@@ -375,39 +376,45 @@ class DatabricksDocumentRegistry:
     def execute_sql(
         self, statement: str, values: dict[str, object] | None = None
     ) -> list[list[str]]:
-        parameters = [
-            sql.StatementParameterListItem(name=name, value=_parameter_value(value))
-            for name, value in (values or {}).items()
-        ]
-        response = self._client.statement_execution.execute_statement(
-            statement=statement,
-            warehouse_id=self._warehouse_id,
-            catalog=self._catalog,
-            schema=self._project_schema,
-            parameters=parameters,
-            wait_timeout="30s",
-            on_wait_timeout=sql.ExecuteStatementRequestOnWaitTimeout.CONTINUE,
-        )
-
-        while response.status and response.status.state in {
-            sql.StatementState.PENDING,
-            sql.StatementState.RUNNING,
-        }:
-            if not response.statement_id:
-                raise RuntimeError("Databricks SQL response did not include a statement identifier")
-            time.sleep(0.25)
-            response = self._client.statement_execution.get_statement(response.statement_id)
-
-        if not response.status or response.status.state is not sql.StatementState.SUCCEEDED:
-            message = (
-                response.status.error.message
-                if response.status and response.status.error
-                else "Databricks SQL statement failed"
+        started_at = time.perf_counter()
+        try:
+            parameters = [
+                sql.StatementParameterListItem(name=name, value=_parameter_value(value))
+                for name, value in (values or {}).items()
+            ]
+            response = self._client.statement_execution.execute_statement(
+                statement=statement,
+                warehouse_id=self._warehouse_id,
+                catalog=self._catalog,
+                schema=self._project_schema,
+                parameters=parameters,
+                wait_timeout="30s",
+                on_wait_timeout=sql.ExecuteStatementRequestOnWaitTimeout.CONTINUE,
             )
-            raise RuntimeError(message)
-        if not response.result or not response.result.data_array:
-            return []
-        return cast(list[list[str]], response.result.data_array)
+
+            while response.status and response.status.state in {
+                sql.StatementState.PENDING,
+                sql.StatementState.RUNNING,
+            }:
+                if not response.statement_id:
+                    raise RuntimeError(
+                        "Databricks SQL response did not include a statement identifier"
+                    )
+                time.sleep(0.25)
+                response = self._client.statement_execution.get_statement(response.statement_id)
+
+            if not response.status or response.status.state is not sql.StatementState.SUCCEEDED:
+                message = (
+                    response.status.error.message
+                    if response.status and response.status.error
+                    else "Databricks SQL statement failed"
+                )
+                raise RuntimeError(message)
+            if not response.result or not response.result.data_array:
+                return []
+            return cast(list[list[str]], response.result.data_array)
+        finally:
+            record_sql_statement((time.perf_counter() - started_at) * 1000)
 
 
 def _document_values(document: DocumentRecord) -> tuple[object, ...]:

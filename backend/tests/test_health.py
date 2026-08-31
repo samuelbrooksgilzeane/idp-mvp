@@ -13,6 +13,7 @@ def test_health_returns_safe_mock_configuration_state() -> None:
     response = client.get("/api/health")
 
     assert response.status_code == 200
+    assert response.headers["server-timing"].startswith("app;dur=")
     assert response.json() == {
         "status": "ok",
         "mode": "mock",
