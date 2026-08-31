@@ -14,6 +14,10 @@ from idp_app.services.document_storage import (
 )
 from idp_app.services.documents import DocumentService, DocumentServiceError
 from idp_app.services.export_service import ExportService
+from idp_app.services.export_sources import (
+    DatabricksExportSourceRepository,
+    SQLiteExportSourceRepository,
+)
 from idp_app.services.extraction import ExtractionService
 from idp_app.services.extraction_jobs import (
     DatabricksExtractionJobRunner,
@@ -378,10 +382,44 @@ def get_export_service(request: Request) -> ExportService:
     existing = getattr(request.app.state, "export_service", None)
     if isinstance(existing, ExportService):
         return existing
-    results_service = get_extraction_results_service(request)
-    service = ExportService(results_service)
+    settings = cast(Settings, request.app.state.settings)
+    service = build_export_service(settings)
     request.app.state.export_service = service
     return service
+
+
+def build_export_service(settings: Settings) -> ExportService:
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    if settings.mode is IdpMode.MOCK:
+        # The bulk query joins all three registries; initialise their local tables even when
+        # export is the first endpoint opened in a fresh mock environment.
+        SQLiteDocumentRegistry(database_path)
+        SQLiteExtractionRunRepository(database_path)
+        schemas = SQLiteSchemaRepository(database_path)
+        for manifest in load_source_manifests():
+            schemas.register(manifest, "source-controlled-bootstrap")
+        return ExportService(SQLiteExportSourceRepository(database_path))
+
+    catalog = _required(settings.catalog, "IDP_CATALOG")
+    project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+    table_prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+    warehouse_id = _required(settings.warehouse_id, "IDP_WAREHOUSE_ID")
+    try:
+        client = WorkspaceClient()
+    except Exception as error:
+        raise DocumentServiceError(
+            "DATABRICKS_AUTH_UNAVAILABLE",
+            "Databricks application authentication is not available.",
+            503,
+        ) from error
+    sql_client = DatabricksDocumentRegistry(
+        client, warehouse_id, catalog, project_schema, table_prefix
+    )
+    return ExportService(
+        DatabricksExportSourceRepository(
+            sql_client, catalog, project_schema, table_prefix
+        )
+    )
 
 
 def get_authenticated_user(request: Request) -> str:

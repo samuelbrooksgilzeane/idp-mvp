@@ -446,14 +446,15 @@ def _verify_immutable(existing: SchemaRecord, manifest: SchemaManifest) -> None:
 
 def _sqlite_row_to_record(row: sqlite3.Row) -> SchemaRecord:
     values = {column: row[column] for column in SCHEMA_COLUMNS}
-    return _values_to_record(values)
+    return schema_record_from_values(values)
 
 
 def _databricks_row_to_record(row: list[str]) -> SchemaRecord:
-    return _values_to_record(dict(zip(SCHEMA_COLUMNS, row, strict=True)))
+    return schema_record_from_values(dict(zip(SCHEMA_COLUMNS, row, strict=True)))
 
 
-def _values_to_record(values: dict[str, object]) -> SchemaRecord:
+def schema_record_from_values(values: dict[str, object]) -> SchemaRecord:
+    """Build a schema from repository values shared by schema and bulk-export reads."""
     extract_schema_raw = cast(
         dict[str, object],
         json.loads(cast(str, values["ai_extract_schema_json"])),

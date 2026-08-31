@@ -8,13 +8,14 @@ from starlette.concurrency import run_in_threadpool
 
 from idp_app.services.document_models import ExtractionRunRecord
 from idp_app.services.documents import DocumentServiceError
+from idp_app.services.export_sources import ExportSource, ExportSourceRepository
 from idp_app.services.exports import (
     ExportTable,
     build_csv_bundle,
     build_export_tables,
     build_workbook,
 )
-from idp_app.services.generic_results import ExtractionResultsService
+from idp_app.services.extraction_result import walk_extraction
 from idp_app.services.schema_models import SchemaRecord
 
 _RunTables = tuple[ExtractionRunRecord, SchemaRecord, list[ExportTable]]
@@ -31,8 +32,11 @@ class ExportResult:
 
 
 class ExportService:
-    """Loads each requested run's generic result and hands it to the schema-driven export
-    builders in `exports.py` (section 7 of the generalized IDP plan).
+    """Bulk-load selected runs and hand their in-memory projections to the export builders.
+
+    The repository returns every run, schema and document name in one read-only query. The
+    retained response is walked locally because export is a read operation: it must never issue
+    one detail query per run or attempt to populate cache tables as a side effect.
 
     Different schema versions can declare the same table name (e.g. two invoice schema
     versions both producing a "Line_Items" table) with different columns, so runs are grouped
@@ -41,19 +45,27 @@ class ExportService:
     schema version, so distinct schemas' tables are never combined.
     """
 
-    def __init__(self, results: ExtractionResultsService) -> None:
-        self._results = results
+    def __init__(self, sources: ExportSourceRepository) -> None:
+        self._sources = sources
 
     async def _load_tables(self, run_ids: list[str]) -> list[_RunTables]:
-        tables_by_run: list[_RunTables] = []
-        for run_id in dict.fromkeys(run_ids):
-            result = await self._results.get_records(run_id)
-            document_name = await self._results.document_name(result.run.document_id)
-            tables = await run_in_threadpool(
-                build_export_tables, result.run, result.records, result.fields, document_name
-            )
-            tables_by_run.append((result.run, result.schema, tables))
-        return tables_by_run
+        requested_ids = list(dict.fromkeys(run_ids))
+        sources = await run_in_threadpool(self._sources.get_many, requested_ids)
+        by_run_id = {source.run.extraction_run_id: source for source in sources}
+        for run_id in requested_ids:
+            source = by_run_id.get(run_id)
+            if source is None:
+                raise DocumentServiceError(
+                    "EXTRACTION_RUN_NOT_FOUND", "Extraction run not found.", 404
+                )
+            if source.run.ai_result is None:
+                raise DocumentServiceError(
+                    "EXTRACTION_RESULT_UNAVAILABLE",
+                    "This extraction run has no retained ai_extract result.",
+                    409,
+                )
+        ordered_sources = [by_run_id[run_id] for run_id in requested_ids]
+        return await run_in_threadpool(_build_source_tables, ordered_sources)
 
     @staticmethod
     def _group_by_schema_version(
@@ -107,3 +119,15 @@ class ExportService:
             raise DocumentServiceError(
                 "EXPORT_FAILED", "The extraction export could not be generated.", 502
             ) from error
+
+
+def _build_source_tables(sources: list[ExportSource]) -> list[_RunTables]:
+    tables_by_run: list[_RunTables] = []
+    for source in sources:
+        ai_result = source.run.ai_result
+        if ai_result is None:  # Narrowed by `_load_tables`; protects direct helper calls too.
+            continue
+        records, fields = walk_extraction(source.run, source.schema, ai_result)
+        tables = build_export_tables(source.run, records, fields, source.document_name)
+        tables_by_run.append((source.run, source.schema, tables))
+    return tables_by_run

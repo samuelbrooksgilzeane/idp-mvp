@@ -880,7 +880,7 @@ def _candidate_parameters(candidate: InvoiceCandidateRecord) -> dict[str, object
 
 
 def _sqlite_row_to_run(row: sqlite3.Row) -> ExtractionRunRecord:
-    return _values_to_run({column: row[column] for column in RUN_COLUMNS})
+    return extraction_run_from_values({column: row[column] for column in RUN_COLUMNS})
 
 
 def _sqlite_row_to_result_list(row: sqlite3.Row) -> ExtractionRunListRecord:
@@ -900,7 +900,7 @@ def _sqlite_row_to_result_list(row: sqlite3.Row) -> ExtractionRunListRecord:
 
 
 def _databricks_row_to_run(row: list[str]) -> ExtractionRunRecord:
-    return _values_to_run(dict(zip(RUN_COLUMNS, row, strict=True)))
+    return extraction_run_from_values(dict(zip(RUN_COLUMNS, row, strict=True)))
 
 
 def _databricks_row_to_result_list(row: list[str]) -> ExtractionRunListRecord:
@@ -919,7 +919,8 @@ def _databricks_row_to_result_list(row: list[str]) -> ExtractionRunListRecord:
     )
 
 
-def _values_to_run(values: dict[str, object]) -> ExtractionRunRecord:
+def extraction_run_from_values(values: dict[str, object]) -> ExtractionRunRecord:
+    """Build a run from repository values shared by detail and bulk-export reads."""
     return ExtractionRunRecord(
         extraction_run_id=cast(str, values["extraction_run_id"]),
         document_id=cast(str, values["document_id"]),
