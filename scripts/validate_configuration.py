@@ -40,29 +40,51 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-def app_yaml_mode(config: dict[str, Any]) -> str | None:
-    for item in config.get("env", []):
-        if isinstance(item, dict) and item.get("name") == "IDP_MODE":
-            return str(item.get("value"))
-    return None
+
+
+def app_yaml_env(config: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(item["name"]): str(item.get("value"))
+        for item in config.get("env", [])
+        if isinstance(item, dict) and item.get("name")
+    }
 
 
 def validate_app_config() -> None:
     """`app.yaml` is not redundant with the bundle's `config:` block: a deploy that is not
     driven by `databricks bundle run ... idp_app` (the Apps UI button, for one) reads this file
-    instead of that block. Deleting it takes the App down with "No command to run", and letting
-    its IDP_MODE drift to `mock` silently brings the governed App up on local SQLite -- both
-    have happened, so both are asserted here.
+    *instead of* that block, so it must be able to start the App by itself.
+
+    Every way of getting that wrong has now happened in dev: deleting the file took the App
+    down with "No command to run"; leaving IDP_MODE=mock brought the governed App up silently
+    on local SQLite; and declaring IDP_MODE=databricks without the settings that mode requires
+    crash-looped it on startup. So rather than assert a list of key names, this builds the real
+    Settings object out of the file -- if the App could not boot on this env alone, the same
+    pydantic error that would crash it fails `make check` here instead.
     """
     config = load_yaml(ROOT / "app.yaml")
     command = config.get("command")
     if not isinstance(command, list) or "idp_app.main:create_app" not in command:
         raise ValueError("app.yaml must start the IDP FastAPI application factory")
 
+    env = app_yaml_env(config)
+    # Values arrive as YAML strings and pydantic coerces them exactly as it would from the
+    # real process environment, which is the point: this is the App's own startup path.
+    settings_kwargs: dict[str, Any] = {
+        name.removeprefix("IDP_").lower(): value for name, value in env.items()
+    }
+    try:
+        Settings(_env_file=None, **settings_kwargs)  # type: ignore[call-arg]
+    except Exception as error:
+        raise ValueError(
+            f"app.yaml cannot start the app on its own: {error}. A deploy that is not driven "
+            "by `databricks bundle run ... idp_app` supplies nothing else."
+        ) from error
+
     resource = load_yaml(ROOT / "databricks_etl" / "resources" / "application.app.yml")
     deployed = resource.get("resources", {}).get("apps", {}).get("idp_app", {})
-    deployed_mode = app_yaml_mode(deployed.get("config", {}))
-    if app_yaml_mode(config) != deployed_mode:
+    deployed_mode = app_yaml_env(deployed.get("config", {})).get("IDP_MODE")
+    if env.get("IDP_MODE") != deployed_mode:
         raise ValueError(
             "app.yaml IDP_MODE must equal the deployed App's mode "
             f"({deployed_mode!r}); whichever deploy path runs must give the same mode"

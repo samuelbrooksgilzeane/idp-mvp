@@ -669,23 +669,38 @@ That is why `app.yaml` contains `IDP_MODE: mock` in the deployed snapshots of 20
 same window: the effective mode depended on which path deployed last, and nothing surfaced the
 difference.
 
-Deleting `app.yaml` is **not** the fix and was briefly tried: with no `app.yaml` in the source,
-the next UI deploy (21:02:40, by the account owner) failed outright with `No command to run and
-no Python file found`, taking the App down until `app.yaml` was restored. The file must exist.
+**Two self-inflicted outages happened while fixing this, both caused by editing `app.yaml`:**
 
-`app.yaml` now declares the `command` **and** `IDP_MODE: databricks`, deliberately duplicating
-the mode that `application.app.yml` already sets. Because both sources now agree, the mode is
-correct whichever path a deployment takes. The supporting settings (catalog, schemas, volumes,
-warehouse and Job bindings) still come only from the bundle, because this file is synced
-verbatim and never sees variable substitution — so a non-bundle deploy now **fails loudly** on
-the missing Databricks configuration instead of silently serving an empty mock registry.
+- Renaming it to `app.yaml.example` (so it could not shadow the bundle config) left the source
+  with no `app.yaml` at all. The next deployment failed with `No command to run and no Python
+  file found` and the App returned 502 on every route, `/api/health` included.
+- Restoring it with `IDP_MODE: databricks` but *no other settings* was worse: deployment
+  reported success, then the process crash-looped on
+  `IDP_MODE=databricks requires configuration: IDP_CATALOG, …` because
+  `require_databricks_configuration` had nothing to work with.
+
+Both failures were latent the whole time and only surfaced when something re-read the file.
+The lesson is not about who deployed: **`app.yaml` must be able to start the App on its own**,
+because a deploy that is not `databricks bundle run … idp_app` has nothing else to go on.
+
+It now carries the complete dev configuration — mode, catalog, schema, prefix, both volume
+names, the warehouse and Job ids, and the validation endpoint. The bundle still overrides all
+of it per target when it deploys, so the bundle path is unchanged and remains authoritative;
+the literals only matter when something else deploys. Verified by deploying through
+`databricks apps deploy` (the non-bundle path) and confirming the App stayed `RUNNING` with
+`/api/health` reporting `mode: databricks` and every configuration key present.
+
+`scripts/validate_configuration.py` now **builds a real `Settings` object out of `app.yaml`'s
+env block**, so any edit that would leave the App unable to boot fails `make check` with the
+same pydantic error that would otherwise crash it in dev. It also still asserts the file's
+`IDP_MODE` equals the `config:` block's.
 
 Two rules follow:
 
-- **Deploy through `databricks bundle run … idp_app`.** A UI deploy will start, but only with
-  what `app.yaml` alone can express.
-- **Never let `app.yaml` disagree with the `config:` block about `IDP_MODE`**, and never delete
-  it.
+- **Deploy through `databricks bundle run … idp_app`.** Anything else starts the App with only
+  what `app.yaml` expresses — correct for dev, but it carries the dev `table_prefix`, so never
+  deploy prod that way.
+- **Never delete `app.yaml`, and never let it drift from what the App needs to boot.**
 
 ### Trusted dev variables
 

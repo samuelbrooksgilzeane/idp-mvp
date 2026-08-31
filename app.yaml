@@ -1,18 +1,27 @@
-# The Databricks App process definition. This file must exist and must declare `command`:
-# a deployment that is not driven by `databricks bundle run ... idp_app` reads it directly,
-# and without it the App fails to start with "No command to run and no Python file found".
+# The Databricks App process definition, and it must be able to start the App on its own.
 #
-# `databricks bundle deploy` additionally applies the `config:` block of
-# databricks_etl/resources/application.app.yml as deployment-level overrides, which is what
-# supplies IDP_CATALOG, the volume/table names and the warehouse and Job bindings. Those
-# cannot be expressed here, because this file is synced verbatim and never sees bundle
-# variable substitution.
+# There are two deployment paths and they read different configuration:
 #
-# IDP_MODE is therefore declared in BOTH places, with the same value on purpose: whichever
-# source a given deployment path honours, the deployed App is never silently a mock. A
-# deployment that reaches this file without the bundle's overrides fails loudly on the
-# missing Databricks settings instead, which is the intended behaviour -- serving an empty
-# local SQLite registry while appearing to be the governed App is the worse outcome.
+#   * `databricks bundle run ... idp_app` sends command and env from the `config:` block of
+#     databricks_etl/resources/application.app.yml as deployment-level overrides. That block
+#     resolves ${var.*} per target and takes the warehouse and Job ids from the App's own
+#     resource bindings, so it is authoritative whenever it runs.
+#   * Any other deploy -- the Apps UI "Deploy" button included -- ignores that block entirely
+#     and reads only this file.
+#
+# So this file has to be self-sufficient. It previously declared IDP_MODE=mock, which meant a
+# UI deploy silently brought the governed App up on a local SQLite registry. Declaring the
+# mode *without* the settings that mode requires was worse: it crash-looped the App on
+# startup. Both have happened, hence the complete configuration below.
+#
+# These values are deployment-specific but not secret -- the same ones are recorded in
+# docs/PROJECT_CONTEXT.md under "Trusted dev variables" -- and no token or credential belongs
+# in this file. `scripts/validate_configuration.py` builds a real Settings object out of this
+# env block, so an edit that would leave the App unable to boot fails `make check`.
+#
+# IDP_TABLE_PREFIX is the one target-specific value: dev is `idp_dev`, prod is `idp`. The
+# bundle overrides it correctly for whichever target it deploys, but a non-bundle deploy gets
+# the dev prefix written here. Deploy prod through the bundle, never from the UI.
 command:
   - uv
   - run
@@ -28,3 +37,21 @@ command:
 env:
   - name: IDP_MODE
     value: databricks
+  - name: IDP_CATALOG
+    value: workspace
+  - name: IDP_PROJECT_SCHEMA
+    value: idp_mvp
+  - name: IDP_TABLE_PREFIX
+    value: idp_dev
+  - name: IDP_SOURCE_VOLUME_NAME
+    value: idp_source
+  - name: IDP_ARTIFACTS_VOLUME_NAME
+    value: idp_artifacts
+  - name: IDP_WAREHOUSE_ID
+    value: 647704f77f24020a
+  - name: IDP_PARSE_JOB_ID
+    value: "1021425465418844"
+  - name: IDP_EXTRACTION_JOB_ID
+    value: "948342095836775"
+  - name: IDP_VALIDATION_ENDPOINT
+    value: unused
