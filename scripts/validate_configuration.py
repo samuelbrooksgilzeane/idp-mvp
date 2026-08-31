@@ -40,16 +40,38 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
+def app_yaml_mode(config: dict[str, Any]) -> str | None:
+    for item in config.get("env", []):
+        if isinstance(item, dict) and item.get("name") == "IDP_MODE":
+            return str(item.get("value"))
+    return None
+
+
 def validate_app_config() -> None:
-    config = load_yaml(ROOT / "app.yaml.example")
+    """`app.yaml` is not redundant with the bundle's `config:` block: a deploy that is not
+    driven by `databricks bundle run ... idp_app` (the Apps UI button, for one) reads this file
+    instead of that block. Deleting it takes the App down with "No command to run", and letting
+    its IDP_MODE drift to `mock` silently brings the governed App up on local SQLite -- both
+    have happened, so both are asserted here.
+    """
+    config = load_yaml(ROOT / "app.yaml")
     command = config.get("command")
     if not isinstance(command, list) or "idp_app.main:create_app" not in command:
-        raise ValueError("app.yaml.example must start the IDP FastAPI application factory")
+        raise ValueError("app.yaml must start the IDP FastAPI application factory")
+
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "application.app.yml")
+    deployed = resource.get("resources", {}).get("apps", {}).get("idp_app", {})
+    deployed_mode = app_yaml_mode(deployed.get("config", {}))
+    if app_yaml_mode(config) != deployed_mode:
+        raise ValueError(
+            "app.yaml IDP_MODE must equal the deployed App's mode "
+            f"({deployed_mode!r}); whichever deploy path runs must give the same mode"
+        )
 
     serialized = yaml.safe_dump(config).lower()
     for forbidden in ("token", "password", "client_secret"):
         if forbidden in serialized:
-            raise ValueError(f"app.yaml.example must not contain {forbidden}")
+            raise ValueError(f"app.yaml must not contain {forbidden}")
 
 
 def validate_bundle_config() -> None:

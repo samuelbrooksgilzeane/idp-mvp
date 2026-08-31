@@ -651,22 +651,41 @@ Still open: the detail view (`get_records`) keeps recomputing per run for the sa
 grant reason. Warming it properly means having the extraction Job populate `record_id` /
 `instance_path` when it writes `extracted_fields`, which needs no new app grant.
 
-## `app.yaml` no longer ships at the repo root (2026-08-31)
+## The App's runtime mode depends on which path deployed it (2026-08-31)
 
-The App was found running in **mock** mode. It is now `databricks` again, verified by
-`/api/health`. The repo's root `app.yaml` (hardcoded `IDP_MODE=mock`) was renamed to
-`app.yaml.example` so it is no longer synced into the App source, leaving the `config:` block of
-`application.app.yml` as the only thing configuring the deployed App;
-`scripts/validate_configuration.py` and the two guides were updated to match.
+The App was found running in **mock** mode against the real workspace. The cause is now
+established, and it is not a CLI or platform regression — **the two deployment paths read
+different configuration**:
 
-**The cause is not fully established.** `app.yaml` with `IDP_MODE: mock` is present in the
-deployed snapshots of 2026-08-29 23:25, 2026-08-30 21:19 and 2026-08-30 23:24 — the same window
-in which this document records `/api/health` returning `mode: databricks`. So the static file
-was not simply always shadowing the bundle config. The rename and a full
-`bundle deploy` + `bundle run … idp_app` were done together and were never isolated, so it is
-possible the redeploy alone would have restored Databricks mode. Treat the rename as a
-hardening measure, not a proven root cause, and suspect a CLI or Apps behaviour change around
-2026-08-31 if this recurs.
+- `databricks bundle run … idp_app` sends `command` and `env` from the `config:` block of
+  `application.app.yml` as deployment-level overrides. This is the path every verification in
+  this document used, which is why they all report `mode: databricks`.
+- **A deploy started anywhere else — the Apps UI "Deploy" button included — ignores that block
+  and reads the literal `app.yaml` in the synced source.** That file declared
+  `IDP_MODE: mock`, so any such deploy silently brought the governed App up on local SQLite.
+
+That is why `app.yaml` contains `IDP_MODE: mock` in the deployed snapshots of 2026-08-29 23:25,
+2026-08-30 21:19 and 2026-08-30 23:24 while this document records `mode: databricks` for the
+same window: the effective mode depended on which path deployed last, and nothing surfaced the
+difference.
+
+Deleting `app.yaml` is **not** the fix and was briefly tried: with no `app.yaml` in the source,
+the next UI deploy (21:02:40, by the account owner) failed outright with `No command to run and
+no Python file found`, taking the App down until `app.yaml` was restored. The file must exist.
+
+`app.yaml` now declares the `command` **and** `IDP_MODE: databricks`, deliberately duplicating
+the mode that `application.app.yml` already sets. Because both sources now agree, the mode is
+correct whichever path a deployment takes. The supporting settings (catalog, schemas, volumes,
+warehouse and Job bindings) still come only from the bundle, because this file is synced
+verbatim and never sees variable substitution — so a non-bundle deploy now **fails loudly** on
+the missing Databricks configuration instead of silently serving an empty mock registry.
+
+Two rules follow:
+
+- **Deploy through `databricks bundle run … idp_app`.** A UI deploy will start, but only with
+  what `app.yaml` alone can express.
+- **Never let `app.yaml` disagree with the `config:` block about `IDP_MODE`**, and never delete
+  it.
 
 ### Trusted dev variables
 

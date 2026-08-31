@@ -1,0 +1,30 @@
+# The Databricks App process definition. This file must exist and must declare `command`:
+# a deployment that is not driven by `databricks bundle run ... idp_app` reads it directly,
+# and without it the App fails to start with "No command to run and no Python file found".
+#
+# `databricks bundle deploy` additionally applies the `config:` block of
+# databricks_etl/resources/application.app.yml as deployment-level overrides, which is what
+# supplies IDP_CATALOG, the volume/table names and the warehouse and Job bindings. Those
+# cannot be expressed here, because this file is synced verbatim and never sees bundle
+# variable substitution.
+#
+# IDP_MODE is therefore declared in BOTH places, with the same value on purpose: whichever
+# source a given deployment path honours, the deployed App is never silently a mock. A
+# deployment that reaches this file without the bundle's overrides fails loudly on the
+# missing Databricks settings instead, which is the intended behaviour -- serving an empty
+# local SQLite registry while appearing to be the governed App is the worse outcome.
+command:
+  - uv
+  - run
+  - --project
+  - backend
+  - uvicorn
+  - idp_app.main:create_app
+  - --factory
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8000"
+env:
+  - name: IDP_MODE
+    value: databricks

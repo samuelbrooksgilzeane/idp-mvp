@@ -38,7 +38,7 @@ make test
 make check
 ```
 
-`make check` runs backend and frontend tests, Python and TypeScript linting/type checks, the frontend production build, and offline validation of `app.yaml.example` and `databricks_etl/databricks.yml`.
+`make check` runs backend and frontend tests, Python and TypeScript linting/type checks, the frontend production build, and offline validation of `app.yaml` and `databricks_etl/databricks.yml`.
 
 ## Configuration
 

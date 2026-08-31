@@ -12,7 +12,7 @@ The root contains project-wide configuration and developer entry points.
 | `.gitignore` | Excludes credentials, local data, dependencies, caches, build outputs, uploads, and client documents. |
 | `Makefile` | Stable commands for setup, local mock development, tests, and the complete quality gate. |
 | `README.md` | Setup, configuration, API, local-development, Databricks deployment, and permission guidance. |
-| `app.yaml.example` | Reference copy of the Databricks App process definition, kept for offline validation only. It contains no secrets. The deployed App is configured from the `config:` block of `databricks_etl/resources/application.app.yml`; a literal `app.yaml` here would be synced into the App source and shadow it. |
+| `app.yaml` | Databricks App process definition. It contains no secrets. It must exist and must declare `command`: a deploy that is not driven by `databricks bundle run … idp_app` reads this file instead of the `config:` block in `databricks_etl/resources/application.app.yml`, and without it the App fails to start. Its `IDP_MODE` must stay equal to the mode that block sets. |
 
 ## `backend/`
 
