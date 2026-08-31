@@ -17,6 +17,20 @@ For maintainability, converge on the schema-generic Results/review/export path, 
 older invoice-specific reporting path. Next, replace repeated service construction and ad hoc
 frontend fetching with one application container and a small typed API layer.
 
+## Implementation status
+
+The first three recommendations are implemented on `perf/results-read-model`:
+
+- every API response now includes a safe `Server-Timing` header for total application time and
+  cumulative SQL time/count;
+- the application shell fetches the document registry and case list only for document routes; and
+- `GET /api/extractions` is now one joined, cursor-paginated read model. It returns at most 100
+  compact rows per request, accepts its filters at the database boundary, and no longer returns
+  the misleading `records_count` or expensive `issues_count` fields.
+
+The next step is to measure the new request timing against a warm and a cold Databricks warehouse,
+then use those measurements to prioritise storage layout and detail-view work.
+
 ## Evidence from the current implementation
 
 The previous Results implementation performed detail work for every list row and selected every
@@ -33,8 +47,8 @@ The live evidence recorded in `PROJECT_CONTEXT.md` is:
 | Results API before bulk fix | Gateway timeout / HTTP 502 |
 | Results API after bulk fix | 7.9 seconds |
 
-The remaining 7.9 seconds is consistent with statement latency, not React rendering. The Results
-service currently executes, in sequence:
+The remaining 7.9 seconds was consistent with statement latency, not React rendering. Before this
+implementation, the Results service executed, in sequence:
 
 1. one statement for extraction-run metadata;
 2. one statement for all documents;
@@ -42,10 +56,10 @@ service currently executes, in sequence:
 4. one statement for every field's issue inputs; and
 5. one statement for each distinct schema version present in the runs.
 
-If `D` schema versions are present, `/api/extractions` therefore costs `4 + D` warehouse
-statements. On a direct browser load, `App.tsx` also requests the full document list and distinct
-cases, adding two more statements. The initial Results route costs `6 + D` statements even though
-the visible table is small.
+If `D` schema versions were present, `/api/extractions` therefore cost `4 + D` warehouse
+statements. On a direct browser load, `App.tsx` also requested the full document list and distinct
+cases, adding two more statements. The initial Results route cost `6 + D` statements even though
+the visible table was small.
 
 The endpoint exposes `case_id`, `document_id`, `schema_id` and `status` parameters, but filtering
 happens after all runs, documents, root counts and field signals have been loaded. The frontend
@@ -71,7 +85,7 @@ performance difference.
 
 ```mermaid
 flowchart LR
-    subgraph Current["Current list path"]
+    subgraph Previous["Previous list path"]
         C1["Load all run metadata"] --> C2["Load all documents"]
         C2 --> C3["Count root records"]
         C3 --> C4["Load every field signal"]
@@ -91,7 +105,7 @@ not select `ai_result`, `citations`, source paths or full field values.
 
 ## Prioritized performance changes
 
-### P0 — Add timing before changing behavior
+### P0 — Add timing before changing behavior — implemented (first pass)
 
 Add structured timings for each repository statement and a `Server-Timing` header for the list and
 detail endpoints. Record at least:
@@ -106,7 +120,7 @@ Suggested acceptance targets for the current data volume are under 2 seconds war
 seconds cold for the first 50 Results rows. These are targets to validate, not claims about the
 current warehouse.
 
-### P1 — Make the list one server-side, paged query
+### P1 — Make the list one server-side, paged query — implemented
 
 Add a Results-specific repository method instead of composing generic repositories in
 `ExtractionResultsService.list_summaries`.
@@ -129,7 +143,7 @@ Return `items` and `next_cursor`; do not silently cap a list at 2,000 rows.
 Expected effect: `4 + D` SQL statements become one statement, payload size is bounded, and filters
 reduce work at the database rather than after transfer.
 
-### P1 — Remove or materialize the expensive counters
+### P1 — Remove or materialize the expensive counters — implemented (removed)
 
 The current list shows `records_count` and `issues_count`:
 
@@ -146,7 +160,7 @@ If the counters are required, compute accurate `top_level_item_count` and `revie
 inside the extraction job and retain them on the extraction run (or a run-summary projection).
 List reads then remain O(number of visible runs), not O(number of extracted fields).
 
-### P1 — Stop route-independent document loading
+### P1 — Stop route-independent document loading — implemented
 
 `App.tsx` loads all documents and cases on every initial route. On `/results` the document array is
 not used by the page, and the Results service separately loads the same registry to obtain names

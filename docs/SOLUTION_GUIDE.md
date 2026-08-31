@@ -219,7 +219,7 @@ sequenceDiagram
         Browser->>App: GET /api/documents/cases
         App->>SQL: Read distinct cases
     and Results page
-        Browser->>App: GET /api/extractions
+        Browser->>App: GET /api/extractions?limit=50&latest_only=true
         App->>SQL: Read run metadata
         App->>SQL: Read documents again
         App->>SQL: Count cached root records
