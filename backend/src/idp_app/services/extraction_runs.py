@@ -10,8 +10,8 @@ from typing import Any, Protocol, cast
 from idp_app.services.document_models import (
     ExtractedFieldRecord,
     ExtractedRecordRow,
+    ExtractionRunListRecord,
     ExtractionRunRecord,
-    FieldIssueSignal,
     GenericFieldRow,
     InvoiceCandidateRecord,
     InvoiceLineCandidateRecord,
@@ -71,25 +71,19 @@ class ExtractionRunRepository(Protocol):
 
     def list_for_document(self, document_id: str) -> list[ExtractionRunRecord]: ...
 
-    def list_all_metadata(self) -> list[ExtractionRunRecord]:
-        """Every run, without its retained `ai_result`.
-
-        The Results list needs run identity, status and timing, never the raw `ai_extract`
-        payload -- which is the largest column in the table and is returned per run, so
-        selecting it here costs megabytes to render a few columns. `ai_result` is always
-        `None` on these records; read a single run through `get` when the payload is needed.
-        """
-        ...
-
-    def count_root_records(self) -> dict[str, int]:
-        """Root records per run id, for runs whose tree has been persisted.
-
-        One aggregate read for the whole list, in place of materialising each run's record
-        tree just to count it. A run absent from the mapping has no persisted tree yet.
-        """
-        ...
-
-    def list_field_issue_signals(self) -> list[FieldIssueSignal]: ...
+    def list_result_page(
+        self,
+        *,
+        limit: int,
+        cursor_started_at: datetime | None = None,
+        cursor_run_id: str | None = None,
+        case_id: str | None = None,
+        document_id: str | None = None,
+        schema_id: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        latest_only: bool = True,
+    ) -> list[ExtractionRunListRecord]: ...
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]: ...
 
@@ -105,7 +99,7 @@ class ExtractionRunRepository(Protocol):
         self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
     ) -> None:
         """Write-through cache: persist a run's recursive record tree the first time it is
-        computed, so later reads (get_records, list_summaries) hit these tables instead of
+        computed, so later reads (get_records) hit these tables instead of
         re-walking the retained ai_extract JSON. Idempotent -- retrying the same run recomputes
         identical record_ids, so calling this twice with the same input is a no-op the second
         time."""
@@ -312,40 +306,73 @@ class SQLiteExtractionRunRepository:
             ).fetchall()
         return [_sqlite_row_to_run(row) for row in rows]
 
-    def list_all_metadata(self) -> list[ExtractionRunRecord]:
-        columns = ", ".join(
-            "NULL AS ai_result" if column == "ai_result" else column for column in RUN_COLUMNS
-        )
-        with self._connect() as connection:
-            rows = connection.execute(
-                f"SELECT {columns} FROM extraction_runs "
-                "ORDER BY started_at DESC, extraction_run_id DESC"
-            ).fetchall()
-        return [_sqlite_row_to_run(row) for row in rows]
-
-    def count_root_records(self) -> dict[str, int]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT run_id, count(*) AS records FROM extracted_records "
-                "WHERE parent_record_id IS NULL GROUP BY run_id"
-            ).fetchall()
-        return {str(row["run_id"]): int(row["records"]) for row in rows}
-
-    def list_field_issue_signals(self) -> list[FieldIssueSignal]:
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT extraction_run_id, field_path, confidence_score, citations "
-                "FROM extracted_fields"
-            ).fetchall()
-        return [
-            FieldIssueSignal(
-                run_id=str(row["extraction_run_id"]),
-                field_path=str(row["field_path"]),
-                confidence_score=row["confidence_score"],
-                has_citation=bool(json.loads(row["citations"])) if row["citations"] else False,
+    def list_result_page(
+        self,
+        *,
+        limit: int,
+        cursor_started_at: datetime | None = None,
+        cursor_run_id: str | None = None,
+        case_id: str | None = None,
+        document_id: str | None = None,
+        schema_id: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        latest_only: bool = True,
+    ) -> list[ExtractionRunListRecord]:
+        conditions: list[str] = []
+        parameters: list[object] = []
+        for value, column in (
+            (case_id, "case_id"),
+            (document_id, "document_id"),
+            (schema_id, "schema_id"),
+            (status, "status"),
+        ):
+            if value is not None:
+                conditions.append(f"{column} = ?")
+                parameters.append(value)
+        if search is not None:
+            conditions.append("LOWER(document_name) LIKE ?")
+            parameters.append(f"%{search.lower()}%")
+        if latest_only:
+            conditions.append("latest_position = 1")
+        if cursor_started_at is not None and cursor_run_id is not None:
+            conditions.append(
+                "(started_at < ? OR (started_at = ? AND extraction_run_id < ?))"
             )
-            for row in rows
-        ]
+            cursor = cursor_started_at.isoformat()
+            parameters.extend((cursor, cursor, cursor_run_id))
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        parameters.append(limit)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                WITH ranked_runs AS (
+                  SELECT runs.extraction_run_id, runs.document_id,
+                         documents.file_name AS document_name, documents.case_id,
+                         runs.schema_id, runs.schema_version,
+                         COALESCE(schemas.display_name, runs.schema_id) AS schema_display_name,
+                         runs.status, runs.started_at, runs.completed_at,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY runs.document_id, runs.schema_id
+                           ORDER BY runs.started_at DESC, runs.extraction_run_id DESC
+                         ) AS latest_position
+                  FROM extraction_runs AS runs
+                  JOIN documents ON documents.document_id = runs.document_id
+                  LEFT JOIN schema_registry AS schemas
+                    ON schemas.schema_id = runs.schema_id
+                   AND schemas.schema_version = runs.schema_version
+                )
+                SELECT extraction_run_id, document_id, document_name, case_id, schema_id,
+                       schema_version, schema_display_name, status, started_at, completed_at,
+                       latest_position = 1 AS is_latest
+                FROM ranked_runs
+                {where}
+                ORDER BY started_at DESC, extraction_run_id DESC
+                LIMIT ?
+                """,
+                parameters,
+            ).fetchall()
+        return [_sqlite_row_to_result_list(row) for row in rows]
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
         with self._connect() as connection:
@@ -451,6 +478,8 @@ class DatabricksExtractionRunRepository:
         self._sql = sql_client
         prefix = f"{catalog}.{project_schema}.{table_prefix}"
         self._runs = f"{prefix}_extraction_runs"
+        self._documents = f"{prefix}_documents"
+        self._schemas = f"{prefix}_schema_registry"
         self._fields = f"{prefix}_extracted_fields"
         self._records = f"{prefix}_extracted_records"
         self._candidates = f"{prefix}_invoice_candidates"
@@ -580,34 +609,74 @@ class DatabricksExtractionRunRepository:
         )
         return [_databricks_row_to_run(row) for row in rows]
 
-    def list_all_metadata(self) -> list[ExtractionRunRecord]:
-        rows = self._sql.execute_sql(
-            self._select_runs(include_ai_result=False)
-            + " ORDER BY started_at DESC, extraction_run_id DESC LIMIT 2000"
-        )
-        return [_databricks_row_to_run(row) for row in rows]
-
-    def count_root_records(self) -> dict[str, int]:
-        rows = self._sql.execute_sql(
-            f"SELECT run_id, count(*) FROM {self._records} "
-            "WHERE parent_record_id IS NULL GROUP BY run_id"
-        )
-        return {str(row[0]): int(row[1]) for row in rows}
-
-    def list_field_issue_signals(self) -> list[FieldIssueSignal]:
-        rows = self._sql.execute_sql(
-            "SELECT extraction_run_id, field_path, confidence_score, TO_JSON(citations) "
-            f"FROM {self._fields}"
-        )
-        return [
-            FieldIssueSignal(
-                run_id=str(row[0]),
-                field_path=str(row[1]),
-                confidence_score=float(row[2]) if row[2] is not None else None,
-                has_citation=bool(json.loads(row[3])) if row[3] else False,
+    def list_result_page(
+        self,
+        *,
+        limit: int,
+        cursor_started_at: datetime | None = None,
+        cursor_run_id: str | None = None,
+        case_id: str | None = None,
+        document_id: str | None = None,
+        schema_id: str | None = None,
+        status: str | None = None,
+        search: str | None = None,
+        latest_only: bool = True,
+    ) -> list[ExtractionRunListRecord]:
+        conditions: list[str] = []
+        parameters: dict[str, object] = {}
+        for value, column in (
+            (case_id, "case_id"),
+            (document_id, "document_id"),
+            (schema_id, "schema_id"),
+            (status, "status"),
+        ):
+            if value is not None:
+                conditions.append(f"{column} = :{column}")
+                parameters[column] = value
+        if search is not None:
+            conditions.append("LOWER(document_name) LIKE :search")
+            parameters["search"] = f"%{search.lower()}%"
+        if latest_only:
+            conditions.append("latest_position = 1")
+        if cursor_started_at is not None and cursor_run_id is not None:
+            conditions.append(
+                "(started_at < CAST(:cursor_started_at AS TIMESTAMP) "
+                "OR (started_at = CAST(:cursor_started_at AS TIMESTAMP) "
+                "AND extraction_run_id < :cursor_run_id))"
             )
-            for row in rows
-        ]
+            parameters["cursor_started_at"] = cursor_started_at
+            parameters["cursor_run_id"] = cursor_run_id
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        rows = self._sql.execute_sql(
+            f"""
+            WITH ranked_runs AS (
+              SELECT runs.extraction_run_id, runs.document_id,
+                     documents.file_name AS document_name, documents.case_id,
+                     runs.schema_id, runs.schema_version,
+                     COALESCE(schemas.display_name, runs.schema_id) AS schema_display_name,
+                     runs.status, runs.started_at, runs.completed_at,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY runs.document_id, runs.schema_id
+                       ORDER BY runs.started_at DESC, runs.extraction_run_id DESC
+                     ) AS latest_position
+              FROM {self._runs} AS runs
+              JOIN {self._documents} AS documents
+                ON documents.document_id = runs.document_id
+              LEFT JOIN {self._schemas} AS schemas
+                ON schemas.schema_id = runs.schema_id
+               AND schemas.schema_version = runs.schema_version
+            )
+            SELECT extraction_run_id, document_id, document_name, case_id, schema_id,
+                   schema_version, schema_display_name, status, started_at, completed_at,
+                   CASE WHEN latest_position = 1 THEN true ELSE false END AS is_latest
+            FROM ranked_runs
+            {where}
+            ORDER BY started_at DESC, extraction_run_id DESC
+            LIMIT {limit}
+            """,
+            parameters or None,
+        )
+        return [_databricks_row_to_result_list(row) for row in rows]
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
         rows = self._sql.execute_sql(
@@ -814,8 +883,40 @@ def _sqlite_row_to_run(row: sqlite3.Row) -> ExtractionRunRecord:
     return _values_to_run({column: row[column] for column in RUN_COLUMNS})
 
 
+def _sqlite_row_to_result_list(row: sqlite3.Row) -> ExtractionRunListRecord:
+    return ExtractionRunListRecord(
+        extraction_run_id=str(row["extraction_run_id"]),
+        document_id=str(row["document_id"]),
+        document_name=str(row["document_name"]),
+        case_id=str(row["case_id"]) if row["case_id"] is not None else None,
+        schema_id=str(row["schema_id"]),
+        schema_version=int(row["schema_version"]),
+        schema_display_name=str(row["schema_display_name"]),
+        status=str(row["status"]),
+        started_at=_timestamp(str(row["started_at"])),
+        completed_at=_timestamp(str(row["completed_at"])) if row["completed_at"] else None,
+        is_latest=bool(row["is_latest"]),
+    )
+
+
 def _databricks_row_to_run(row: list[str]) -> ExtractionRunRecord:
     return _values_to_run(dict(zip(RUN_COLUMNS, row, strict=True)))
+
+
+def _databricks_row_to_result_list(row: list[str]) -> ExtractionRunListRecord:
+    return ExtractionRunListRecord(
+        extraction_run_id=row[0],
+        document_id=row[1],
+        document_name=row[2],
+        case_id=row[3] or None,
+        schema_id=row[4],
+        schema_version=int(row[5]),
+        schema_display_name=row[6],
+        status=row[7],
+        started_at=_timestamp(row[8]),
+        completed_at=_timestamp(row[9]) if row[9] else None,
+        is_latest=row[10].lower() == "true",
+    )
 
 
 def _values_to_run(values: dict[str, object]) -> ExtractionRunRecord:

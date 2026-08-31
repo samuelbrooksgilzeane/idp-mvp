@@ -160,17 +160,22 @@ describe("App", () => {
   });
 
   it("does not load the registry when Results is opened directly", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
-      ok: true,
-      json: async () => (input.toString().endsWith("/health") ? health : []),
-    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      return {
+        ok: true,
+        json: async () => (
+          url.endsWith("/health") ? health : url.startsWith("/api/extractions") ? { items: [], next_cursor: null } : []
+        ),
+      };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     renderApp("/results");
 
     expect(await screen.findByText("No extraction runs")).toBeInTheDocument();
     const requested = fetchMock.mock.calls.map(([input]) => input.toString());
-    expect(requested).toContain("/api/extractions");
+    expect(requested.some((url) => url.startsWith("/api/extractions?"))).toBe(true);
     expect(requested).not.toContain("/api/documents");
     expect(requested).not.toContain("/api/documents/cases");
   });

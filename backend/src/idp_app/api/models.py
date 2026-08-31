@@ -299,7 +299,11 @@ class GenericExtractionResponse(BaseModel):
 
 class ExtractionRunSummaryResponse(BaseModel):
     """One row of the run-centric Results list (`GET /api/extractions`): a run plus the
-    document/schema context needed to display and filter it without a per-row round trip."""
+    document/schema context needed to display and filter it without a per-row round trip.
+
+    Deliberately no raw model result, field values or review counters: list rows stay bounded and
+    detail endpoints own field-level evidence and review state.
+    """
 
     extraction_run_id: str
     document_id: str
@@ -312,8 +316,11 @@ class ExtractionRunSummaryResponse(BaseModel):
     started_at: datetime
     completed_at: datetime | None
     is_latest: bool
-    records_count: int
-    issues_count: int
+
+
+class ExtractionRunPageResponse(BaseModel):
+    items: list[ExtractionRunSummaryResponse]
+    next_cursor: str | None
 
 
 class GenericRecordResponse(BaseModel):

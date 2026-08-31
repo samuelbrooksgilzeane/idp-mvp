@@ -12,20 +12,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from idp_app.services.document_models import (
-    DocumentRecord,
     ExtractedFieldRecord,
     ExtractedRecordRow,
     ExtractionRunRecord,
-    FieldIssueSignal,
     GenericFieldRow,
 )
 from idp_app.services.extraction_result import flatten_result, walk_extraction
 from idp_app.services.extraction_runs import SQLiteExtractionRunRepository
-from idp_app.services.generic_results import (
-    ExtractionResultsService,
-    _count_issues,
-    _count_signal_issues,
-)
+from idp_app.services.generic_results import ExtractionResultsService
 from idp_app.services.schema_models import ExtractField, SchemaRecord
 
 RUN_ID = "b3f0e6b0-6a8b-4e7e-9c8e-1f6c9a5f6a1a"
@@ -321,138 +315,3 @@ def test_records_only_cache_still_recomputes_fields_rather_than_dropping_them() 
     assert len(first_fields) == len(expected_fields)
     assert len(second_records) == len(expected_records)
     assert len(second_fields) == len(expected_fields)
-
-
-class _ListOnlyRepository:
-    """A repository stand-in that fails loudly if the Results list touches any single run's
-    record tree. Under the partial-grant deployment above the tree can never be cached, so a
-    per-run read there is a per-run recompute: with a few dozen runs on a SQL warehouse that
-    took the endpoint past the gateway timeout and the Results page rendered nothing.
-    """
-
-    def __init__(
-        self, runs: list[ExtractionRunRecord], signals: list[FieldIssueSignal]
-    ) -> None:
-        self._runs = runs
-        self._signals = signals
-        self.bulk_reads = 0
-
-    def list_all_metadata(self) -> list[ExtractionRunRecord]:
-        self.bulk_reads += 1
-        return list(self._runs)
-
-    def count_root_records(self) -> dict[str, int]:
-        self.bulk_reads += 1
-        return {}
-
-    def list_field_issue_signals(self) -> list[FieldIssueSignal]:
-        self.bulk_reads += 1
-        return list(self._signals)
-
-    def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]:
-        raise AssertionError("the Results list must not read a single run's record tree")
-
-    def list_generic_fields(self, extraction_run_id: str) -> list[GenericFieldRow]:
-        raise AssertionError("the Results list must not read a single run's fields")
-
-    def persist_generic(
-        self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
-    ) -> None:
-        raise AssertionError("the Results list must not write the record tree")
-
-
-class _StubDocuments:
-    def __init__(self, document_ids: list[str]) -> None:
-        self._document_ids = document_ids
-
-    def list_documents(self) -> list[DocumentRecord]:
-        now = datetime.now(UTC)
-        return [
-            DocumentRecord(
-                document_id=document_id,
-                case_id=None,
-                template_id="t",
-                use_case="invoice",
-                source_path="/Volumes/x",
-                file_name=f"{document_id}.pdf",
-                file_size=1,
-                content_sha256="sha",
-                selected_schema_id=None,
-                selected_schema_version=None,
-                status="EXTRACTED",
-                uploaded_by="test@example.com",
-                uploaded_at=now,
-                updated_at=now,
-            )
-            for document_id in self._document_ids
-        ]
-
-
-class _StubSchemas:
-    def __init__(self, schema: SchemaRecord) -> None:
-        self._schema = schema
-
-    def get(self, schema_id: str, schema_version: int) -> SchemaRecord:
-        return self._schema
-
-
-def test_results_list_reads_in_bulk_rather_than_per_run() -> None:
-    """The Results list must stay a fixed number of reads however many runs exist, and must
-    never fall through to walk_extraction -- the N+1 that timed the endpoint out.
-    """
-    schema = _nested_schema()
-    ai_result = _nested_ai_result()
-    template = replace(_run(), ai_result=ai_result, status="EXTRACTED")
-    runs = [
-        replace(template, extraction_run_id=f"run-{index}", document_id=f"doc-{index}")
-        for index in range(25)
-    ]
-    signals = [
-        FieldIssueSignal(
-            run_id=run.extraction_run_id,
-            field_path=field.field_path,
-            confidence_score=field.confidence_score,
-            has_citation=bool(field.citations),
-        )
-        for run in runs
-        for field in flatten_result(run, schema, ai_result)
-    ]
-
-    repository = _ListOnlyRepository(runs, signals)
-    service = ExtractionResultsService(
-        repository,  # type: ignore[arg-type]
-        schemas=_StubSchemas(schema),  # type: ignore[arg-type]
-        documents=_StubDocuments([run.document_id for run in runs]),  # type: ignore[arg-type]
-    )
-
-    summaries = asyncio.run(service.list_summaries())
-
-    assert len(summaries) == 25
-    # Three bulk reads for twenty-five runs, and the same three for any other number.
-    assert repository.bulk_reads == 3
-    # No cached tree, but a run that produced leaves still reports its one root record.
-    assert all(summary.records_count == 1 for summary in summaries)
-
-
-def test_list_and_detail_counters_agree_on_what_an_issue_is() -> None:
-    """The list counts issues from the flattened extracted_fields rows and the detail view
-    counts them from the walked record tree. Both describe the same leaves, so they must
-    return the same number -- pinned here so the two cannot drift apart.
-    """
-    schema = _nested_schema()
-    ai_result = _nested_ai_result()
-    run = replace(_run(), ai_result=ai_result, status="EXTRACTED")
-
-    _, walked_fields = walk_extraction(run, schema, ai_result)
-    signals = [
-        FieldIssueSignal(
-            run_id=run.extraction_run_id,
-            field_path=field.field_path,
-            confidence_score=field.confidence_score,
-            has_citation=bool(field.citations),
-        )
-        for field in flatten_result(run, schema, ai_result)
-    ]
-
-    assert len(signals) == len(walked_fields)  # the same leaves, flattened two ways.
-    assert _count_signal_issues(signals, schema) == _count_issues(walked_fields, schema)

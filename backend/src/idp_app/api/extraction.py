@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from idp_app.api.dependencies import (
     get_authenticated_user,
@@ -12,6 +12,7 @@ from idp_app.api.models import (
     ExtractedFieldResponse,
     ExtractionRequest,
     ExtractionResultResponse,
+    ExtractionRunPageResponse,
     ExtractionRunResponse,
     ExtractionRunSummaryResponse,
     GenericExtractionRecordsResponse,
@@ -99,39 +100,49 @@ async def extraction_result(
 
 @extraction_router.get(
     "/extractions",
-    response_model=list[ExtractionRunSummaryResponse],
+    response_model=ExtractionRunPageResponse,
 )
 async def list_all_extraction_runs(
     service: Annotated[ExtractionResultsService, Depends(get_extraction_results_service)],
-    case_id: str | None = None,
-    document_id: str | None = None,
-    schema_id: str | None = None,
-    status: str | None = None,
-) -> list[ExtractionRunSummaryResponse]:
-    """The run-centric Results list: every extraction run across every document, joined with
-    its document and schema context. Replaces the invoice-only `/api/results/invoices` for the
-    Results page (any schema shape, not just invoices)."""
-    summaries = await service.list_summaries(
-        case_id=case_id, document_id=document_id, schema_id=schema_id, status=status
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query(max_length=500)] = None,
+    case_id: Annotated[str | None, Query(max_length=200)] = None,
+    document_id: Annotated[str | None, Query(max_length=200)] = None,
+    schema_id: Annotated[str | None, Query(max_length=100)] = None,
+    status: Annotated[str | None, Query(max_length=20)] = None,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+    latest_only: bool = True,
+) -> ExtractionRunPageResponse:
+    """A compact, cursor-paginated Results list, served by one joined repository query."""
+    page = await service.list_page(
+        limit=limit,
+        cursor=cursor,
+        case_id=_normalized(case_id),
+        document_id=_normalized(document_id),
+        schema_id=_normalized(schema_id),
+        status=_normalized(status),
+        search=_normalized(search),
+        latest_only=latest_only,
     )
-    return [
+    return ExtractionRunPageResponse(
+        items=[
         ExtractionRunSummaryResponse(
-            extraction_run_id=summary.run.extraction_run_id,
-            document_id=summary.run.document_id,
-            document_name=summary.document_name,
-            case_id=summary.case_id,
-            schema_id=summary.run.schema_id,
-            schema_version=summary.run.schema_version,
-            schema_display_name=summary.schema_display_name,
-            status=summary.run.status,  # type: ignore[arg-type]
-            started_at=summary.run.started_at,
-            completed_at=summary.run.completed_at,
-            is_latest=summary.is_latest,
-            records_count=summary.records_count,
-            issues_count=summary.issues_count,
+            extraction_run_id=item.extraction_run_id,
+            document_id=item.document_id,
+            document_name=item.document_name,
+            case_id=item.case_id,
+            schema_id=item.schema_id,
+            schema_version=item.schema_version,
+            schema_display_name=item.schema_display_name,
+            status=item.status,  # type: ignore[arg-type]
+            started_at=item.started_at,
+            completed_at=item.completed_at,
+            is_latest=item.is_latest,
         )
-        for summary in summaries
-    ]
+        for item in page.items
+        ],
+        next_cursor=page.next_cursor,
+    )
 
 
 @extraction_router.get(
@@ -180,3 +191,7 @@ async def generic_extraction_records(
 
 def _run_response(run: ExtractionRunRecord) -> ExtractionRunResponse:
     return ExtractionRunResponse.model_validate(run)
+
+
+def _normalized(value: str | None) -> str | None:
+    return value.strip() if value and value.strip() else None

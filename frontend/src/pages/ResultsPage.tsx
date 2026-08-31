@@ -2,7 +2,7 @@ import { Download, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
-import type { ExtractionRunSummary } from "../types";
+import type { ExtractionRunPage, ExtractionRunSummary } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
@@ -19,6 +19,7 @@ export function ResultsPage() {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [duplicateWarning, setDuplicateWarning] = useState<{
@@ -26,19 +27,32 @@ export function ResultsPage() {
     runIds: string[];
   } | null>(null);
 
+  const requestQuery = useMemo(() => {
+    const parameters = new URLSearchParams({ latest_only: String(latestOnly), limit: "50" });
+    if (caseId) parameters.set("case_id", caseId);
+    if (schemaKey) parameters.set("schema_id", schemaKey);
+    if (status) parameters.set("status", status);
+    if (search.trim()) parameters.set("search", search.trim());
+    return parameters.toString();
+  }, [caseId, latestOnly, schemaKey, search, status]);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch("/api/extractions", { signal: controller.signal })
+    fetch(`/api/extractions?${requestQuery}`, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("Extraction runs request failed");
-        return response.json() as Promise<ExtractionRunSummary[]>;
+        return response.json() as Promise<ExtractionRunPage>;
       })
-      .then(setRows)
+      .then((page) => {
+        setRows(page.items);
+        setNextCursor(page.next_cursor);
+      })
       .catch((caught: unknown) => {
         if (!(caught instanceof DOMException && caught.name === "AbortError")) {
           setRows([]);
+          setNextCursor(null);
           setError("Extraction runs could not be loaded.");
         }
       })
@@ -46,13 +60,13 @@ export function ResultsPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [reloadToken]);
+  }, [reloadToken, requestQuery]);
 
   const schemas = useMemo(() => {
     const seen = new Map<string, string>();
     for (const row of rows) {
-      const key = `${row.schema_id}:${row.schema_version}`;
-      seen.set(key, `${row.schema_display_name} · v${row.schema_version}`);
+      // Pages arrive newest first; retain the display name from the newest observed version.
+      if (!seen.has(row.schema_id)) seen.set(row.schema_id, row.schema_display_name);
     }
     return [...seen.entries()];
   }, [rows]);
@@ -62,17 +76,7 @@ export function ResultsPage() {
     [rows],
   );
 
-  const visible = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return rows.filter(
-      (row) =>
-        (!caseId || row.case_id === caseId) &&
-        (!schemaKey || `${row.schema_id}:${row.schema_version}` === schemaKey) &&
-        (!status || row.status === status) &&
-        (!term || row.document_name.toLowerCase().includes(term)) &&
-        (!latestOnly || row.is_latest),
-    );
-  }, [rows, caseId, schemaKey, status, search, latestOnly]);
+  const visible = rows;
   const visibleIds = useMemo(
     () => new Set(visible.map((row) => row.extraction_run_id)),
     [visible],
@@ -152,6 +156,25 @@ export function ResultsPage() {
       return;
     }
     void runExport(selection);
+  }
+
+  async function loadMore() {
+    if (!nextCursor) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const parameters = new URLSearchParams(requestQuery);
+      parameters.set("cursor", nextCursor);
+      const response = await fetch(`/api/extractions?${parameters.toString()}`);
+      if (!response.ok) throw new Error("Extraction runs request failed");
+      const page = (await response.json()) as ExtractionRunPage;
+      setRows((current) => [...current, ...page.items]);
+      setNextCursor(page.next_cursor);
+    } catch {
+      setError("More extraction runs could not be loaded.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -286,8 +309,6 @@ export function ResultsPage() {
                 <th>Document</th>
                 <th>Schema</th>
                 <th>Extracted</th>
-                <th>Records</th>
-                <th>Quality</th>
                 <th>Status</th>
               </tr>
             </thead>
@@ -310,16 +331,6 @@ export function ResultsPage() {
                   </td>
                   <td>{row.schema_display_name} · v{row.schema_version}</td>
                   <td>{formatter.format(new Date(row.started_at))}</td>
-                  <td>{row.records_count}</td>
-                  <td>
-                    {row.issues_count > 0 ? (
-                      <span className="validation-badge validation-review_required">
-                        {row.issues_count} {row.issues_count === 1 ? "issue" : "issues"}
-                      </span>
-                    ) : (
-                      <span className="validation-badge validation-validated_pass">No issues</span>
-                    )}
-                  </td>
                   <td>
                     <span className={`status-label status-${row.status.toLowerCase()}`}>{row.status}</span>
                   </td>
@@ -327,6 +338,12 @@ export function ResultsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      ) : null}
+      {!loading && !error && nextCursor ? (
+        <div className="results-page-limit">
+          <span>Showing 50 matching runs.</span>
+          <button type="button" onClick={() => void loadMore()}>Load more</button>
         </div>
       ) : null}
     </section>

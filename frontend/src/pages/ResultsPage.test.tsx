@@ -17,8 +17,6 @@ const rows = [
     started_at: "2026-08-30T10:42:00Z",
     completed_at: "2026-08-30T10:43:00Z",
     is_latest: true,
-    records_count: 3,
-    issues_count: 0,
   },
   {
     extraction_run_id: "run-b",
@@ -32,8 +30,6 @@ const rows = [
     started_at: "2026-08-29T15:08:00Z",
     completed_at: "2026-08-29T15:09:00Z",
     is_latest: false,
-    records_count: 3,
-    issues_count: 5,
   },
 ];
 
@@ -51,7 +47,11 @@ afterEach(() => {
 
 describe("ResultsPage", () => {
   it("lists extraction runs, links to the detail page, and defaults to latest-only", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => rows }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString(), "http://idp.test");
+      const pageRows = url.searchParams.get("latest_only") === "false" ? rows : [rows[0]];
+      return { ok: true, json: async () => ({ items: pageRows, next_cursor: null }) };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
@@ -64,13 +64,11 @@ describe("ResultsPage", () => {
       "href",
       "/results/run-a",
     );
-    expect(screen.getByText("No issues")).toBeInTheDocument();
     // The older run for the same document is filtered out by "Latest runs only" (on by default).
     expect(bySchemaCellText()).toEqual(["Invoice v4 · v4"]);
 
     fireEvent.click(screen.getByLabelText("Latest runs only"));
     await waitFor(() => expect(bySchemaCellText()).toContain("Invoice v3 · v3"));
-    expect(screen.getByText("5 issues")).toBeInTheDocument();
   });
 
   it("shows a recoverable error state", async () => {
@@ -88,7 +86,9 @@ describe("ResultsPage", () => {
 
   it("warns before exporting two runs for the same document and schema, offering the latest", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
-      if (input === "/api/extractions") return { ok: true, json: async () => rows };
+      if (input.startsWith("/api/extractions?")) {
+        return { ok: true, json: async () => ({ items: rows, next_cursor: null }) };
+      }
       if (input === "/api/exports" && init) {
         return {
           ok: true,

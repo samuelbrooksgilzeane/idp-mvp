@@ -62,8 +62,11 @@ export type ExtractionRunSummary = {
   started_at: string;
   completed_at: string | null;
   is_latest: boolean;
-  records_count: number;
-  issues_count: number;
+};
+
+export type ExtractionRunPage = {
+  items: ExtractionRunSummary[];
+  next_cursor: string | null;
 };
 
 export type GenericExtractionRun = {

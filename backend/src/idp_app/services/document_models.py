@@ -67,6 +67,27 @@ class ExtractionRunRecord:
 
 
 @dataclass(frozen=True)
+class ExtractionRunListRecord:
+    """A compact, display-safe row for the paginated Results list.
+
+    It deliberately excludes the retained raw model result and every extracted field. Those
+    belong to the detail endpoint, not a list that must remain fast as run history grows.
+    """
+
+    extraction_run_id: str
+    document_id: str
+    document_name: str
+    case_id: str | None
+    schema_id: str
+    schema_version: int
+    schema_display_name: str
+    status: str
+    started_at: datetime
+    completed_at: datetime | None
+    is_latest: bool
+
+
+@dataclass(frozen=True)
 class ExtractedFieldRecord:
     extraction_run_id: str
     document_id: str
@@ -78,21 +99,6 @@ class ExtractedFieldRecord:
     citation_ids: list[int]
     citations: list[dict[str, Any]]
     extraction_error: str | None
-
-
-@dataclass(frozen=True)
-class FieldIssueSignal:
-    """The minimum the Results list needs to judge one extracted leaf.
-
-    A field policy only ever tests two things -- the confidence score against its threshold,
-    and whether a required citation came back -- so the list can count issues from these four
-    columns instead of loading every leaf's value and rebuilding its record tree per run.
-    """
-
-    run_id: str
-    field_path: str
-    confidence_score: float | None
-    has_citation: bool
 
 
 @dataclass(frozen=True)

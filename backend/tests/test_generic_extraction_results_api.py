@@ -184,8 +184,8 @@ def test_list_extractions_summarizes_runs_for_the_results_page(tmp_path: Path) -
     )
     run_id = _wait_extraction(client, document_id)["extraction_run_id"]
 
-    summaries = client.get("/api/extractions").json()
-    row = next(s for s in summaries if s["extraction_run_id"] == run_id)
+    page = client.get("/api/extractions").json()
+    row = next(s for s in page["items"] if s["extraction_run_id"] == run_id)
     assert row["document_id"] == document_id
     assert row["document_name"] == "doc.pdf"
     assert row["schema_id"] == schema["schema_id"]
@@ -193,13 +193,45 @@ def test_list_extractions_summarizes_runs_for_the_results_page(tmp_path: Path) -
     assert row["schema_display_name"] == schema["display_name"]
     assert row["status"] == "EXTRACTED"
     assert row["is_latest"] is True
-    assert row["records_count"] == 1
+    assert "records_count" not in row
+    assert "issues_count" not in row
 
-    filtered = client.get(f"/api/extractions?schema_id={schema['schema_id']}").json()
+    filtered = client.get(f"/api/extractions?schema_id={schema['schema_id']}").json()["items"]
     assert filtered and all(s["schema_id"] == schema["schema_id"] for s in filtered)
 
-    filtered_out = client.get("/api/extractions?schema_id=does-not-exist").json()
+    filtered_out = client.get("/api/extractions?schema_id=does-not-exist").json()["items"]
     assert filtered_out == []
+
+
+def test_results_list_uses_a_stable_cursor_and_can_include_history(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    document_id = _upload_and_parse(client)
+    schema = _create_and_publish_flat_schema(client)
+
+    client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": schema["schema_id"], "schema_version": schema["schema_version"]},
+    )
+    first_run_id = _wait_extraction(client, document_id)["extraction_run_id"]
+    client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": schema["schema_id"], "schema_version": schema["schema_version"]},
+    )
+    second_run_id = _wait_extraction(client, document_id)["extraction_run_id"]
+
+    latest_page = client.get("/api/extractions?limit=1").json()
+    assert [row["extraction_run_id"] for row in latest_page["items"]] == [second_run_id]
+    assert latest_page["next_cursor"] is None
+
+    first_page = client.get("/api/extractions?latest_only=false&limit=1").json()
+    assert len(first_page["items"]) == 1
+    assert first_page["next_cursor"]
+
+    second_page = client.get(
+        "/api/extractions?latest_only=false&limit=1&cursor=" + first_page["next_cursor"]
+    ).json()
+    assert [row["extraction_run_id"] for row in second_page["items"]] == [first_run_id]
+    assert second_page["next_cursor"] is None
 
 
 def test_export_of_two_schema_versions_produces_separate_workbooks(tmp_path: Path) -> None:
@@ -289,9 +321,8 @@ def test_records_are_persisted_on_first_read_and_reused_on_later_reads(
     # The second read must come from the persisted tables, not a second walk_extraction call.
     assert len(calls) == 1
 
-    # The Results list computes the same run's records_count from the persisted cache too,
-    # without triggering another walk_extraction call.
-    summaries = client.get("/api/extractions").json()
-    row = next(s for s in summaries if s["extraction_run_id"] == run_id)
-    assert row["records_count"] == 1
+    # The Results list does not touch the generic record tree at all.
+    page = client.get("/api/extractions").json()
+    row = next(s for s in page["items"] if s["extraction_run_id"] == run_id)
+    assert row["document_name"] == "doc.pdf"
     assert len(calls) == 1
