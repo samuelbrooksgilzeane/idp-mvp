@@ -605,6 +605,69 @@ Real sample data worth noting: three documents in case `new_batch` extracted a s
 line items under v3 but **no invoice number**, and one returned no seller either. Field presence
 across real templates is the thing the sampling exercise needs to settle.
 
+## The Results list must never read a run's record tree (2026-08-31)
+
+The deployed `/api/extractions` returned **HTTP 502** — the Apps gateway gave up while
+`list_summaries` was still working. The data was never the problem: 11 documents and 28
+extraction runs (24 `EXTRACTED`, 4 `FAILED`) were present throughout, and `/api/health` and
+`/api/documents` answered in 0.9s and 4.1s.
+
+The list was paying detail-view cost per row. For every run it called `_records_and_fields`
+— materialising that run's whole record tree — just to render `records_count` and
+`issues_count`, and `list_all` selected `TO_JSON(ai_result)`, the complete retained
+`ai_extract` payload, for all 28 runs. On a SQL warehouse that is ~57 sequential round trips
+per page load.
+
+The write-through cache that was meant to absorb this **cannot ever hit in this deployment**:
+
+- `list_generic_fields` filters `WHERE record_id IS NOT NULL`.
+- All 585 rows in `idp_dev_extracted_fields` have `record_id` NULL.
+- The extraction Job never writes the generic columns (`grep record_id
+  databricks_etl/src/extract_document.py` is empty), so only an app-side read could fill them.
+- `SHOW GRANTS` confirms the app service principal holds **SELECT only** on
+  `extracted_fields` — the MODIFY slot commit `6232bb7` gave up under the 20-resource cap.
+
+So the cache-hit test (`persisted_records and persisted_fields`) failed for every run on every
+load, and each miss recomputed `walk_extraction` and re-attempted a write that cannot succeed.
+
+The fix makes the list read only in bulk: `list_all_metadata` (run metadata with no
+`ai_result`), `count_root_records` and `list_field_issue_signals` — **three reads regardless of
+run count**, plus one per distinct schema version. `/api/extractions` now returns 28 runs in
+**7.9s** where it previously 502'd. Two guards were added: one asserts the list never touches a
+single run's tree, the other pins the list's issue counter against the detail view's so they
+cannot drift.
+
+Two things worth knowing:
+
+- Counting issues from the flattened `extracted_fields` rows rather than the record tree is
+  what makes the list independent of the dead cache: the Job writes one row per scalar leaf for
+  every run it completes, exactly as the walker emits one field per leaf.
+- `records_count` is **structurally always 0 or 1**: `walk_extraction` roots every run's tree at
+  exactly one record, so the Results page's "Records" column reads 1 even for the three-invoice
+  document. Behaviour is unchanged here deliberately, but the column does not currently mean
+  what it appears to mean.
+
+Still open: the detail view (`get_records`) keeps recomputing per run for the same
+grant reason. Warming it properly means having the extraction Job populate `record_id` /
+`instance_path` when it writes `extracted_fields`, which needs no new app grant.
+
+## `app.yaml` no longer ships at the repo root (2026-08-31)
+
+The App was found running in **mock** mode. It is now `databricks` again, verified by
+`/api/health`. The repo's root `app.yaml` (hardcoded `IDP_MODE=mock`) was renamed to
+`app.yaml.example` so it is no longer synced into the App source, leaving the `config:` block of
+`application.app.yml` as the only thing configuring the deployed App;
+`scripts/validate_configuration.py` and the two guides were updated to match.
+
+**The cause is not fully established.** `app.yaml` with `IDP_MODE: mock` is present in the
+deployed snapshots of 2026-08-29 23:25, 2026-08-30 21:19 and 2026-08-30 23:24 — the same window
+in which this document records `/api/health` returning `mode: databricks`. So the static file
+was not simply always shadowing the bundle config. The rename and a full
+`bundle deploy` + `bundle run … idp_app` were done together and were never isolated, so it is
+possible the redeploy alone would have restored Databricks mode. Treat the rename as a
+hardening measure, not a proven root cause, and suspect a CLI or Apps behaviour change around
+2026-08-31 if this recurs.
+
 ### Trusted dev variables
 
 ```text

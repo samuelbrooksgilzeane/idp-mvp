@@ -81,6 +81,21 @@ class ExtractedFieldRecord:
 
 
 @dataclass(frozen=True)
+class FieldIssueSignal:
+    """The minimum the Results list needs to judge one extracted leaf.
+
+    A field policy only ever tests two things -- the confidence score against its threshold,
+    and whether a required citation came back -- so the list can count issues from these four
+    columns instead of loading every leaf's value and rebuilding its record tree per run.
+    """
+
+    run_id: str
+    field_path: str
+    confidence_score: float | None
+    has_citation: bool
+
+
+@dataclass(frozen=True)
 class InvoiceCandidateRecord:
     case_id: str | None
     document_id: str

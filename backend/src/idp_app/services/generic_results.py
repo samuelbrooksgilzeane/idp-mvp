@@ -2,18 +2,26 @@
 
 The recursive record tree (`extracted_records` and the generic columns on
 `extracted_fields`) is a write-through cache: the first time a run's records are read (via
-`get_records` or `list_summaries`), `walk_extraction` computes them from the already-retained
-raw `ai_extract` response, exactly as before, and the result is persisted so every later read
-of that run hits the tables directly instead of recomputing. Nothing in the extraction
-pipeline itself (the Databricks job, the mock job runner) writes these tables -- only a read
-through this service ever does, so `walk_extraction` (already tested) remains the only thing
-that ever produces this data. A persistence failure never fails the read: it degrades back to
-recomputing on every call, not to an error.
+`get_records`), `walk_extraction` computes them from the already-retained raw `ai_extract`
+response, exactly as before, and the result is persisted so every later read of that run hits
+the tables directly instead of recomputing. Nothing in the extraction pipeline itself (the
+Databricks job, the mock job runner) writes these tables -- only a read through this service
+ever does, so `walk_extraction` (already tested) remains the only thing that ever produces
+this data. A persistence failure never fails the read: it degrades back to recomputing on
+every call, not to an error.
+
+`list_summaries` deliberately does *not* go through that cache. It reads only bulk aggregates,
+because a cache miss costs a recompute and the list would pay for one per run: where the cache
+cannot be written at all (an environment that grants the app SELECT but not MODIFY on
+`extracted_fields`), every run missed on every load and the endpoint timed out at the gateway
+instead of returning a list.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -23,13 +31,14 @@ from starlette.concurrency import run_in_threadpool
 from idp_app.services.document_models import (
     ExtractedRecordRow,
     ExtractionRunRecord,
+    FieldIssueSignal,
     GenericFieldRow,
 )
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.documents import DocumentServiceError
 from idp_app.services.extraction_result import walk_extraction
 from idp_app.services.extraction_runs import ExtractionRunRepository
-from idp_app.services.schema_models import SchemaRecord
+from idp_app.services.schema_models import FieldPolicy, SchemaRecord
 from idp_app.services.schema_registry import SchemaRepository
 
 _logger = logging.getLogger(__name__)
@@ -84,14 +93,23 @@ class ExtractionResultsService:
         status: str | None = None,
     ) -> list[ExtractionRunSummary]:
         """Every extraction run across every document, joined with just enough document and
-        schema context for the Results list -- records_count/issues_count come from the same
-        read-through cache `get_records` uses (`_records_and_fields`).
+        schema context for the Results list.
+
+        Every read here is bulk: the number of queries is fixed by the number of *distinct
+        schema versions*, not by the number of runs. Counting a run by materialising its
+        record tree (as `get_records` does) costs two round trips per run plus a recompute
+        whenever the tree is not cached, which on a SQL warehouse is seconds each and made
+        this endpoint time out at the gateway rather than return a slow list.
         """
-        runs = await run_in_threadpool(self._runs.list_all)
+        runs = await run_in_threadpool(self._runs.list_all_metadata)
         documents_by_id = {
             document.document_id: document
             for document in await run_in_threadpool(self._documents.list_documents)
         }
+        root_records = await run_in_threadpool(self._runs.count_root_records)
+        signals_by_run: dict[str, list[FieldIssueSignal]] = defaultdict(list)
+        for signal in await run_in_threadpool(self._runs.list_field_issue_signals):
+            signals_by_run[signal.run_id].append(signal)
         schema_cache: dict[tuple[str, int], SchemaRecord | None] = {}
 
         async def _schema_for(schema_id_: str, schema_version: int) -> SchemaRecord | None:
@@ -122,11 +140,13 @@ class ExtractionResultsService:
             if status is not None and run.status != status:
                 continue
             schema = await _schema_for(run.schema_id, run.schema_version)
-            records_count, issues_count = 0, 0
-            if schema is not None:
-                records, fields = await self._records_and_fields(run, schema)
-                records_count = sum(1 for record in records if record.parent_record_id is None)
-                issues_count = _count_issues(fields, schema)
+            signals = signals_by_run.get(run.extraction_run_id, [])
+            # `walk_extraction` roots every run's tree at exactly one record, so a run that
+            # produced any leaf has one root whether or not its tree has been walked and
+            # cached yet. Prefer the persisted count; fall back to that invariant rather than
+            # reporting a freshly extracted run as empty until someone opens it.
+            records_count = root_records.get(run.extraction_run_id) or (1 if signals else 0)
+            issues_count = _count_signal_issues(signals, schema) if schema is not None else 0
             summaries.append(
                 ExtractionRunSummary(
                     run=run,
@@ -228,22 +248,49 @@ class ExtractionResultsService:
         return run, schema
 
 
-def _count_issues(fields: list[GenericFieldRow], schema: SchemaRecord) -> int:
-    """A field is an "issue" when its confidence falls below the policy threshold for that
-    leaf, or a citation is required but none was returned. `GenericFieldRow.schema_path` uses
-    the walker's `[]` convention (e.g. `line_items[].amount`); `field_policies` is keyed by the
-    schema's own `[*]` wildcard convention (`schema_leaves`, `line_items[*].amount`) -- same
-    structure, different bracket fill, so the lookup converts one to the other.
+_INSTANCE_INDEX = re.compile(r"\[\d+\]")
+
+
+def _policy_key(path: str) -> str:
+    """`field_policies` is keyed by the schema's `[*]` wildcard convention (`schema_leaves`,
+    `line_items[*].amount`). The walker's `schema_path` uses `[]` for the same thing, and the
+    flattened `field_path` carries a concrete index (`line_items[0].amount`). All three
+    describe the same leaf, so every lookup goes through this one conversion.
     """
+    return _INSTANCE_INDEX.sub("[*]", path).replace("[]", "[*]")
+
+
+def _is_issue(policy: FieldPolicy, confidence_score: float | None, has_citation: bool) -> bool:
+    """A field is an "issue" when its confidence falls below the policy threshold for that
+    leaf, or a citation is required but none was returned. Both counters below apply this one
+    rule, so a list row and its detail view can never disagree about what an issue is.
+    """
+    low_confidence = (
+        confidence_score is not None and confidence_score < policy.confidence_threshold
+    )
+    return low_confidence or (policy.citation_required and not has_citation)
+
+
+def _count_issues(fields: list[GenericFieldRow], schema: SchemaRecord) -> int:
+    """Issue count over a materialised record tree, for the detail view."""
     issues = 0
     for entry in fields:
-        policy = schema.field_policies.get(entry.schema_path.replace("[]", "[*]"))
-        if policy is None:
-            continue
-        low_confidence = (
-            entry.confidence_score is not None
-            and entry.confidence_score < policy.confidence_threshold
-        )
-        if low_confidence or (policy.citation_required and not entry.citations):
+        policy = schema.field_policies.get(_policy_key(entry.schema_path))
+        if policy is not None and _is_issue(policy, entry.confidence_score, bool(entry.citations)):
+            issues += 1
+    return issues
+
+
+def _count_signal_issues(signals: list[FieldIssueSignal], schema: SchemaRecord) -> int:
+    """Issue count over the flattened `extracted_fields` rows, for the Results list.
+
+    The extraction job writes one row per scalar leaf, exactly as the walker emits one field
+    per scalar leaf, so this counts the same leaves as `_count_issues` without rebuilding the
+    tree -- and, unlike the record tree, these rows exist for every run the job completed.
+    """
+    issues = 0
+    for signal in signals:
+        policy = schema.field_policies.get(_policy_key(signal.field_path))
+        if policy is not None and _is_issue(policy, signal.confidence_score, signal.has_citation):
             issues += 1
     return issues

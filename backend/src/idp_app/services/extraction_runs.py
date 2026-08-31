@@ -11,6 +11,7 @@ from idp_app.services.document_models import (
     ExtractedFieldRecord,
     ExtractedRecordRow,
     ExtractionRunRecord,
+    FieldIssueSignal,
     GenericFieldRow,
     InvoiceCandidateRecord,
     InvoiceLineCandidateRecord,
@@ -70,7 +71,25 @@ class ExtractionRunRepository(Protocol):
 
     def list_for_document(self, document_id: str) -> list[ExtractionRunRecord]: ...
 
-    def list_all(self) -> list[ExtractionRunRecord]: ...
+    def list_all_metadata(self) -> list[ExtractionRunRecord]:
+        """Every run, without its retained `ai_result`.
+
+        The Results list needs run identity, status and timing, never the raw `ai_extract`
+        payload -- which is the largest column in the table and is returned per run, so
+        selecting it here costs megabytes to render a few columns. `ai_result` is always
+        `None` on these records; read a single run through `get` when the payload is needed.
+        """
+        ...
+
+    def count_root_records(self) -> dict[str, int]:
+        """Root records per run id, for runs whose tree has been persisted.
+
+        One aggregate read for the whole list, in place of materialising each run's record
+        tree just to count it. A run absent from the mapping has no persisted tree yet.
+        """
+        ...
+
+    def list_field_issue_signals(self) -> list[FieldIssueSignal]: ...
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]: ...
 
@@ -293,12 +312,40 @@ class SQLiteExtractionRunRepository:
             ).fetchall()
         return [_sqlite_row_to_run(row) for row in rows]
 
-    def list_all(self) -> list[ExtractionRunRecord]:
+    def list_all_metadata(self) -> list[ExtractionRunRecord]:
+        columns = ", ".join(
+            "NULL AS ai_result" if column == "ai_result" else column for column in RUN_COLUMNS
+        )
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM extraction_runs ORDER BY started_at DESC, extraction_run_id DESC"
+                f"SELECT {columns} FROM extraction_runs "
+                "ORDER BY started_at DESC, extraction_run_id DESC"
             ).fetchall()
         return [_sqlite_row_to_run(row) for row in rows]
+
+    def count_root_records(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT run_id, count(*) AS records FROM extracted_records "
+                "WHERE parent_record_id IS NULL GROUP BY run_id"
+            ).fetchall()
+        return {str(row["run_id"]): int(row["records"]) for row in rows}
+
+    def list_field_issue_signals(self) -> list[FieldIssueSignal]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT extraction_run_id, field_path, confidence_score, citations "
+                "FROM extracted_fields"
+            ).fetchall()
+        return [
+            FieldIssueSignal(
+                run_id=str(row["extraction_run_id"]),
+                field_path=str(row["field_path"]),
+                confidence_score=row["confidence_score"],
+                has_citation=bool(json.loads(row["citations"])) if row["citations"] else False,
+            )
+            for row in rows
+        ]
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
         with self._connect() as connection:
@@ -533,11 +580,34 @@ class DatabricksExtractionRunRepository:
         )
         return [_databricks_row_to_run(row) for row in rows]
 
-    def list_all(self) -> list[ExtractionRunRecord]:
+    def list_all_metadata(self) -> list[ExtractionRunRecord]:
         rows = self._sql.execute_sql(
-            self._select_runs() + " ORDER BY started_at DESC, extraction_run_id DESC LIMIT 2000"
+            self._select_runs(include_ai_result=False)
+            + " ORDER BY started_at DESC, extraction_run_id DESC LIMIT 2000"
         )
         return [_databricks_row_to_run(row) for row in rows]
+
+    def count_root_records(self) -> dict[str, int]:
+        rows = self._sql.execute_sql(
+            f"SELECT run_id, count(*) FROM {self._records} "
+            "WHERE parent_record_id IS NULL GROUP BY run_id"
+        )
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    def list_field_issue_signals(self) -> list[FieldIssueSignal]:
+        rows = self._sql.execute_sql(
+            "SELECT extraction_run_id, field_path, confidence_score, TO_JSON(citations) "
+            f"FROM {self._fields}"
+        )
+        return [
+            FieldIssueSignal(
+                run_id=str(row[0]),
+                field_path=str(row[1]),
+                confidence_score=float(row[2]) if row[2] is not None else None,
+                has_citation=bool(json.loads(row[3])) if row[3] else False,
+            )
+            for row in rows
+        ]
 
     def list_for_job_run(self, job_run_id: int) -> list[ExtractionRunRecord]:
         rows = self._sql.execute_sql(
@@ -660,10 +730,14 @@ class DatabricksExtractionRunRepository:
         )
         return [_databricks_row_to_generic_field(row) for row in rows]
 
-    def _select_runs(self) -> str:
+    def _select_runs(self, *, include_ai_result: bool = True) -> str:
+        # The retained ai_extract payload is by far the largest column here, so the callers
+        # that only need run metadata select a NULL of the same shape instead, keeping the
+        # column order `_databricks_row_to_run` zips against.
+        ai_result = "TO_JSON(ai_result)" if include_ai_result else "CAST(NULL AS STRING)"
         return (
             "SELECT extraction_run_id, document_id, parse_run_id, schema_id, schema_version, "
-            "schema_hash, extractor_version, TO_JSON(options), TO_JSON(ai_result), error_message, "
+            f"schema_hash, extractor_version, TO_JSON(options), {ai_result}, error_message, "
             f"status, requested_by, job_run_id, started_at, completed_at FROM {self._runs}"
         )
 
