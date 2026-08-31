@@ -41,15 +41,15 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def validate_app_config() -> None:
-    config = load_yaml(ROOT / "app.yaml")
+    config = load_yaml(ROOT / "app.yaml.example")
     command = config.get("command")
     if not isinstance(command, list) or "idp_app.main:create_app" not in command:
-        raise ValueError("app.yaml must start the IDP FastAPI application factory")
+        raise ValueError("app.yaml.example must start the IDP FastAPI application factory")
 
     serialized = yaml.safe_dump(config).lower()
     for forbidden in ("token", "password", "client_secret"):
         if forbidden in serialized:
-            raise ValueError(f"app.yaml must not contain {forbidden}")
+            raise ValueError(f"app.yaml.example must not contain {forbidden}")
 
 
 def validate_bundle_config() -> None:
