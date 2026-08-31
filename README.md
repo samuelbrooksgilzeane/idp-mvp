@@ -1,6 +1,19 @@
 # IDP MVP
 
-Incremental Intelligent Document Processing application. The current branch includes the deployable FastAPI and React foundation, governed data bootstrap, secure PDF intake, an idempotent document parsing workflow, an authenticated parsed-page viewer, and a versioned read-only extraction schema registry. Extraction execution is not included.
+Incremental Intelligent Document Processing application. The current branch includes the
+deployable FastAPI and React application, governed PDF intake, parsing and page evidence,
+versioned extraction schemas, single and batch extraction, deterministic validation, generic
+result review, and XLSX/CSV export. Mock mode runs locally without Databricks credentials; the
+deployed mode uses Databricks Jobs, SQL, Unity Catalog volumes and governed Delta tables.
+
+## Engineering guides
+
+- [`docs/SOLUTION_GUIDE.md`](docs/SOLUTION_GUIDE.md) explains the architecture, data model and
+  end-to-end workflow for a technical presentation.
+- [`docs/PERFORMANCE_AND_SIMPLIFICATION_REVIEW.md`](docs/PERFORMANCE_AND_SIMPLIFICATION_REVIEW.md)
+  records the Results-page findings and the prioritized performance/code-reduction roadmap.
+- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) contains the chronological implementation
+  and deployment evidence.
 
 ## Prerequisites
 

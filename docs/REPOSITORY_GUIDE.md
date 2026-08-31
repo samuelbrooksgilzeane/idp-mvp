@@ -1,6 +1,11 @@
 # IDP MVP Repository Guide
 
-This guide explains the purpose and ownership of the repository's folders. For setup and commands, see `README.md`. For current implementation status, see `docs/PROJECT_CONTEXT.md`. The files under `docs/implementation/` remain the authoritative requirements.
+This guide explains the purpose and ownership of the repository's folders. For setup and commands,
+see `README.md`. For a presentation-oriented explanation of the running solution, see
+`docs/SOLUTION_GUIDE.md`. For the current performance and maintainability review, see
+`docs/PERFORMANCE_AND_SIMPLIFICATION_REVIEW.md`. Current implementation evidence is in
+`docs/PROJECT_CONTEXT.md`; the files under `docs/implementation/` remain the authoritative
+requirements.
 
 ## Repository root
 
