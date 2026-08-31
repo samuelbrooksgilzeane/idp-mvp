@@ -56,7 +56,7 @@ describe("ResultsPage", () => {
 
     render(
       <MemoryRouter initialEntries={["/results"]}>
-        <ResultsPage caseIds={["CASE-A", "CASE-B"]} />
+        <ResultsPage />
       </MemoryRouter>,
     );
 
@@ -78,7 +78,7 @@ describe("ResultsPage", () => {
 
     render(
       <MemoryRouter initialEntries={["/results"]}>
-        <ResultsPage caseIds={[]} />
+        <ResultsPage />
       </MemoryRouter>,
     );
 
@@ -103,7 +103,7 @@ describe("ResultsPage", () => {
 
     render(
       <MemoryRouter initialEntries={["/results"]}>
-        <ResultsPage caseIds={["CASE-A"]} />
+        <ResultsPage />
       </MemoryRouter>,
     );
 

@@ -58,6 +58,7 @@ export function App() {
   const [caseIds, setCaseIds] = useState<string[]>([]);
   const [documentCaseId, setDocumentCaseId] = useState<string | null>(null);
   const location = useLocation();
+  const isRegistryRoute = location.pathname === "/";
 
   const loadDocuments = useCallback(async (caseId: string | null, signal?: AbortSignal) => {
     setDocumentsLoading(true);
@@ -91,8 +92,9 @@ export function App() {
   }, []);
 
   const refreshDocuments = useCallback(async () => {
+    if (!isRegistryRoute) return;
     await Promise.all([loadDocuments(documentCaseId), loadCaseIds()]);
-  }, [documentCaseId, loadCaseIds, loadDocuments]);
+  }, [documentCaseId, isRegistryRoute, loadCaseIds, loadDocuments]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -107,10 +109,25 @@ export function App() {
           setRuntime({ kind: "unavailable" });
         }
       });
-    void loadDocuments(null, controller.signal);
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!isRegistryRoute) {
+      setDocumentsLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    void loadDocuments(documentCaseId, controller.signal);
+    return () => controller.abort();
+  }, [documentCaseId, isRegistryRoute, loadDocuments]);
+
+  useEffect(() => {
+    if (!isRegistryRoute) return;
+    const controller = new AbortController();
     void loadCaseIds(controller.signal);
     return () => controller.abort();
-  }, [loadCaseIds, loadDocuments]);
+  }, [isRegistryRoute, loadCaseIds]);
 
   const appName = runtime.kind === "ready" ? runtime.health.application_name : "IDP MVP";
   const runtimeMode = runtime.kind === "ready" ? runtime.health.mode : "unknown";
@@ -150,7 +167,6 @@ export function App() {
                 selectedCaseId={documentCaseId}
                 onCaseChanged={(caseId) => {
                   setDocumentCaseId(caseId);
-                  void loadDocuments(caseId);
                 }}
                 onDocumentsChanged={refreshDocuments}
               />
@@ -160,7 +176,7 @@ export function App() {
             path="/documents/:documentId"
             element={<DocumentDetailPage onDocumentsChanged={() => void refreshDocuments()} />}
           />
-          <Route path="/results" element={<ResultsPage caseIds={caseIds} />} />
+          <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:runId" element={<ResultDetailPage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>

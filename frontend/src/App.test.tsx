@@ -140,12 +140,13 @@ describe("App", () => {
   });
 
   it("serves the schema contract from its own route", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => (input.toString().endsWith("/health") ? health : []),
+    }));
     vi.stubGlobal(
       "fetch",
-      vi.fn(async (input: RequestInfo | URL) => ({
-        ok: true,
-        json: async () => (input.toString().endsWith("/health") ? health : []),
-      })),
+      fetchMock,
     );
 
     renderApp("/schema");
@@ -154,5 +155,23 @@ describe("App", () => {
       await screen.findByRole("heading", { name: "Extraction contract" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Schema library" })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents");
+    expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents/cases");
+  });
+
+  it("does not load the registry when Results is opened directly", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => (input.toString().endsWith("/health") ? health : []),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/results");
+
+    expect(await screen.findByText("No extraction runs")).toBeInTheDocument();
+    const requested = fetchMock.mock.calls.map(([input]) => input.toString());
+    expect(requested).toContain("/api/extractions");
+    expect(requested).not.toContain("/api/documents");
+    expect(requested).not.toContain("/api/documents/cases");
   });
 });

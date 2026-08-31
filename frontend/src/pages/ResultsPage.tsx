@@ -4,11 +4,9 @@ import { Link } from "react-router-dom";
 
 import type { ExtractionRunSummary } from "../types";
 
-type ResultsPageProps = { caseIds: string[] };
-
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
-export function ResultsPage({ caseIds }: ResultsPageProps) {
+export function ResultsPage() {
   const [rows, setRows] = useState<ExtractionRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +57,10 @@ export function ResultsPage({ caseIds }: ResultsPageProps) {
     return [...seen.entries()];
   }, [rows]);
   const statuses = useMemo(() => [...new Set(rows.map((row) => row.status))].sort(), [rows]);
+  const caseIds = useMemo(
+    () => [...new Set(rows.flatMap((row) => (row.case_id ? [row.case_id] : [])))].sort(),
+    [rows],
+  );
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
