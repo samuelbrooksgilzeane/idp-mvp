@@ -18,6 +18,7 @@ from idp_app.services.extraction_result import (
     build_invoice_candidates,
     build_invoice_line_candidates,
     flatten_result,
+    walk_extraction,
 )
 from idp_app.services.extraction_runs import ExtractionRunRepository
 from idp_app.services.job_batches import batch_idempotency_token, encode_inputs
@@ -100,9 +101,17 @@ class MockExtractionJobRunner:
             if isinstance(error_message, str) and error_message:
                 raise RuntimeError(error_message)
             fields = flatten_result(request.run, request.schema, ai_result)
+            records, generic_fields = walk_extraction(request.run, request.schema, ai_result)
             candidates = build_invoice_candidates(request.run, request.document, fields)
             lines = build_invoice_line_candidates(request.run, fields)
-            self._runs.complete(request.run.extraction_run_id, fields, candidates, lines)
+            self._runs.complete(
+                request.run.extraction_run_id,
+                fields,
+                candidates,
+                lines,
+                records,
+                generic_fields,
+            )
             self._documents.update_status(request.document.document_id, {"EXTRACTING"}, "EXTRACTED")
         except Exception as error:
             current = self._runs.get(request.run.extraction_run_id)

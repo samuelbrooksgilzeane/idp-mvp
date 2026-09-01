@@ -774,6 +774,51 @@ def test_the_two_projections_agree_on_a_document_stating_several_invoices() -> N
     assert [line[-2] for line in lines] == [Decimal("60.00"), Decimal("40.00"), Decimal("250.00")]
 
 
+def test_databricks_job_builds_the_generic_projection_during_extraction() -> None:
+    etl = _etl_module()
+    schema = {
+        "invoices": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "number": {"type": "string"},
+                    "lines": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {"amount": {"type": "number"}},
+                        },
+                    },
+                },
+            },
+        }
+    }
+    ai_result = {
+        "response": {
+            "invoices": [
+                {
+                    "number": {"value": "INV-1"},
+                    "lines": [{"amount": {"value": 25}}],
+                }
+            ]
+        }
+    }
+
+    records, fields = etl.build_generic_projection("run-1", "doc-1", schema, ai_result)
+
+    assert [record["instance_path"] for record in records] == [
+        "$",
+        "invoices[0]",
+        "invoices[0].lines[0]",
+    ]
+    assert [field["instance_path"] for field in fields] == [
+        "invoices[0].number",
+        "invoices[0].lines[0].amount",
+    ]
+    assert all(field["record_id"] for field in fields)
+
+
 def test_a_flat_contract_still_projects_one_invoice_at_index_zero() -> None:
     """Documents extracted under v1 to v3 keep projecting exactly as they always have."""
     etl = _etl_module()

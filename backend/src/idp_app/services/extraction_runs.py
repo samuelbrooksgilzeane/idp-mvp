@@ -63,6 +63,8 @@ class ExtractionRunRepository(Protocol):
         fields: list[ExtractedFieldRecord],
         candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
+        records: list[ExtractedRecordRow] | None = None,
+        generic_fields: list[GenericFieldRow] | None = None,
     ) -> None: ...
 
     def fail(self, extraction_run_id: str, error_message: str) -> None: ...
@@ -247,6 +249,8 @@ class SQLiteExtractionRunRepository:
         fields: list[ExtractedFieldRecord],
         candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
+        records: list[ExtractedRecordRow] | None = None,
+        generic_fields: list[GenericFieldRow] | None = None,
     ) -> None:
         with self._connect() as connection:
             for field in fields:
@@ -270,6 +274,7 @@ class SQLiteExtractionRunRepository:
                 f"VALUES ({', '.join('?' for _ in LINE_COLUMNS)})",
                 [_line_values(line) for line in lines],
             )
+            _persist_sqlite_generic(connection, records or [], generic_fields or [])
             cursor = connection.execute(
                 "UPDATE extraction_runs SET status = 'EXTRACTED', error_message = NULL, "
                 "completed_at = ? WHERE extraction_run_id = ? AND status = 'RUNNING' "
@@ -422,33 +427,7 @@ class SQLiteExtractionRunRepository:
         self, records: list[ExtractedRecordRow], fields: list[GenericFieldRow]
     ) -> None:
         with self._connect() as connection:
-            for record in records:
-                connection.execute(
-                    "INSERT OR IGNORE INTO extracted_records "
-                    "(run_id, document_id, record_id, parent_record_id, schema_path, "
-                    "instance_path, ordinal) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    _record_values(record),
-                )
-            for field in fields:
-                cursor = connection.execute(
-                    "UPDATE extracted_fields SET record_id = ?, schema_path = ?, "
-                    "instance_path = ?, declared_type = ?, validation_status = ?, "
-                    "validation_message = ? WHERE extraction_run_id = ? AND field_path = ?",
-                    _generic_field_update_values(field),
-                )
-                if cursor.rowcount == 0:
-                    # Defensive fallback: flatten_result and walk_extraction should always
-                    # agree on the same leaf set, but if a row was never written at
-                    # extraction time, insert one rather than silently dropping this field.
-                    connection.execute(
-                        "INSERT OR IGNORE INTO extracted_fields "
-                        "(extraction_run_id, document_id, field_path, field_type, value, "
-                        "value_string, confidence_score, citation_ids, citations, "
-                        "extraction_error, record_id, schema_path, instance_path, "
-                        "declared_type, validation_status, validation_message) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        _generic_field_insert_values(field),
-                    )
+            _persist_sqlite_generic(connection, records, fields)
 
     def list_generic_records(self, extraction_run_id: str) -> list[ExtractedRecordRow]:
         with self._connect() as connection:
@@ -530,6 +509,8 @@ class DatabricksExtractionRunRepository:
         fields: list[ExtractedFieldRecord],
         candidates: list[InvoiceCandidateRecord],
         lines: list[InvoiceLineCandidateRecord],
+        records: list[ExtractedRecordRow] | None = None,
+        generic_fields: list[GenericFieldRow] | None = None,
     ) -> None:
         for field in fields:
             self._sql.execute_sql(
@@ -579,6 +560,8 @@ class DatabricksExtractionRunRepository:
                     "amount": _text(line.amount),
                 },
             )
+        if records or generic_fields:
+            self.persist_generic(records or [], generic_fields or [])
         self._sql.execute_sql(
             f"UPDATE {self._runs} SET status = 'EXTRACTED', error_message = NULL, "
             "completed_at = CURRENT_TIMESTAMP() WHERE extraction_run_id = :extraction_run_id "
@@ -1028,6 +1011,36 @@ def _record_values(record: ExtractedRecordRow) -> tuple[object, ...]:
         record.instance_path,
         record.ordinal,
     )
+
+
+def _persist_sqlite_generic(
+    connection: sqlite3.Connection,
+    records: list[ExtractedRecordRow],
+    fields: list[GenericFieldRow],
+) -> None:
+    """Persist the generic projection in the extraction completion transaction."""
+    connection.executemany(
+        "INSERT OR IGNORE INTO extracted_records "
+        "(run_id, document_id, record_id, parent_record_id, schema_path, "
+        "instance_path, ordinal) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [_record_values(record) for record in records],
+    )
+    for field in fields:
+        cursor = connection.execute(
+            "UPDATE extracted_fields SET record_id = ?, schema_path = ?, "
+            "instance_path = ?, declared_type = ?, validation_status = ?, "
+            "validation_message = ? WHERE extraction_run_id = ? AND field_path = ?",
+            _generic_field_update_values(field),
+        )
+        if cursor.rowcount == 0:
+            connection.execute(
+                "INSERT OR IGNORE INTO extracted_fields "
+                "(extraction_run_id, document_id, field_path, field_type, value, "
+                "value_string, confidence_score, citation_ids, citations, extraction_error, "
+                "record_id, schema_path, instance_path, declared_type, validation_status, "
+                "validation_message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                _generic_field_insert_values(field),
+            )
 
 
 def _record_parameters(record: ExtractedRecordRow) -> dict[str, object]:

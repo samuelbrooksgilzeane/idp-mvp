@@ -8,10 +8,12 @@ from idp_app.api.dependencies import (
     get_extraction_service,
 )
 from idp_app.api.models import (
+    DocumentResponse,
     ErrorResponse,
     ExtractedFieldResponse,
     ExtractionRequest,
     ExtractionResultResponse,
+    ExtractionReviewResponse,
     ExtractionRunPageResponse,
     ExtractionRunResponse,
     ExtractionRunSummaryResponse,
@@ -20,6 +22,7 @@ from idp_app.api.models import (
     GenericFieldResultResponse,
     GenericRecordResponse,
     InvoiceCandidateResponse,
+    ReviewFieldPolicyResponse,
 )
 from idp_app.services.document_models import ExtractionRunRecord
 from idp_app.services.extraction import ExtractionService
@@ -142,6 +145,35 @@ async def list_all_extraction_runs(
         for item in page.items
         ],
         next_cursor=page.next_cursor,
+    )
+
+
+@extraction_router.get(
+    "/extractions/{extraction_run_id}/review",
+    response_model=ExtractionReviewResponse,
+    responses={404: {"model": ErrorResponse}, 409: {"model": ErrorResponse}},
+)
+async def extraction_review(
+    extraction_run_id: str,
+    service: Annotated[ExtractionResultsService, Depends(get_extraction_results_service)],
+) -> ExtractionReviewResponse:
+    """The complete, read-only view model used by both extraction review routes."""
+    review = await service.get_review(extraction_run_id)
+    return ExtractionReviewResponse(
+        run=_run_response(review.run),
+        document=DocumentResponse.model_validate(review.document),
+        schema_id=review.schema.schema_id,
+        schema_version=review.schema.schema_version,
+        root_mode=infer_root_mode(review.schema.ai_extract_schema),
+        result=review.hierarchy,
+        fields=[GenericFieldResultResponse.model_validate(field) for field in review.fields],
+        field_policies={
+            path: ReviewFieldPolicyResponse(
+                confidence_threshold=policy.confidence_threshold,
+                citation_required=policy.citation_required,
+            )
+            for path, policy in review.schema.field_policies.items()
+        },
     )
 
 

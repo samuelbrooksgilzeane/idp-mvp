@@ -271,13 +271,10 @@ def test_export_of_two_schema_versions_produces_separate_workbooks(tmp_path: Pat
     )
 
 
-def test_records_are_persisted_on_first_read_and_reused_on_later_reads(
+def test_records_are_persisted_during_extraction_and_review_reads_are_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The recursive record tree is a write-through cache: the first GET .../records
-    computes it via walk_extraction and persists it; every later read (this GET, or the
-    Results list) must come from the persisted tables instead of recomputing.
-    """
+    """The extraction job writes the recursive tree; later reads only query it."""
     import idp_app.services.generic_results as generic_results_module
 
     client = _client(tmp_path)
@@ -300,7 +297,7 @@ def test_records_are_persisted_on_first_read_and_reused_on_later_reads(
 
     first = client.get(f"/api/extractions/{run_id}/records")
     assert first.status_code == 200
-    assert len(calls) == 1
+    assert len(calls) == 0
 
     database = tmp_path / "idp" / "registry.sqlite3"
     with sqlite3.connect(database) as connection:
@@ -318,11 +315,17 @@ def test_records_are_persisted_on_first_read_and_reused_on_later_reads(
     second = client.get(f"/api/extractions/{run_id}/records")
     assert second.status_code == 200
     assert second.json() == first.json()
-    # The second read must come from the persisted tables, not a second walk_extraction call.
-    assert len(calls) == 1
+    assert len(calls) == 0
 
     # The Results list does not touch the generic record tree at all.
     page = client.get("/api/extractions").json()
     row = next(s for s in page["items"] if s["extraction_run_id"] == run_id)
     assert row["document_name"] == "doc.pdf"
-    assert len(calls) == 1
+    assert len(calls) == 0
+
+    review = client.get(f"/api/extractions/{run_id}/review")
+    assert review.status_code == 200
+    assert review.json()["document"]["document_id"] == document_id
+    assert review.json()["result"]["total"]["value"] == 114.0
+    assert review.json()["fields"] == first.json()["fields"]
+    assert len(calls) == 0

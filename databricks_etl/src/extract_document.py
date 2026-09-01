@@ -137,6 +137,7 @@ def main() -> None:
     schemas = qualified(parameters, "schema_registry")
     extraction_runs = qualified(parameters, "extraction_runs")
     extracted_fields = qualified(parameters, "extracted_fields")
+    extracted_records = qualified(parameters, "extracted_records")
     invoice_candidates = qualified(parameters, "invoice_candidates")
     invoice_line_candidates = qualified(parameters, "invoice_line_candidates")
 
@@ -274,7 +275,17 @@ def main() -> None:
             manifest["ai_extract_schema"],
             ai_result,
         )
+        records, generic_fields = build_generic_projection(
+            parameters.extraction_run_id,
+            parameters.document_id,
+            manifest["ai_extract_schema"],
+            ai_result,
+        )
+        generic_by_path = {field["instance_path"]: field for field in generic_fields}
+        for field in fields:
+            field.update(generic_by_path[field["field_path"]])
         write_fields(extracted_fields, fields)
+        write_records(extracted_records, records)
         # The generic extracted-field rows above carry every schema shape. The typed candidate
         # projection below understands one invoice per document, so a schema that nests its
         # invoices is captured and left unprojected rather than written as a row of nulls that
@@ -447,6 +458,125 @@ def value_string(value: object) -> str | None:
     return str(value)
 
 
+def build_generic_projection(
+    extraction_run_id: str,
+    document_id: str,
+    schema: dict[str, Any],
+    ai_result: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Build the review projection once inside the extraction job."""
+    response = ai_result.get("response")
+    if not isinstance(response, dict):
+        raise ValueError("ai_extract response is missing its response object")
+    records: list[dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
+    root_id = record_id(extraction_run_id, "$")
+    records.append(
+        {
+            "run_id": extraction_run_id,
+            "document_id": document_id,
+            "record_id": root_id,
+            "parent_record_id": None,
+            "schema_path": "$",
+            "instance_path": "$",
+            "ordinal": None,
+        }
+    )
+
+    def walk_object(
+        properties: dict[str, Any],
+        payload: object,
+        schema_prefix: str,
+        instance_prefix: str,
+        parent_id: str,
+    ) -> None:
+        element = payload if isinstance(payload, dict) else {}
+        for name, definition in properties.items():
+            schema_path = name if schema_prefix == "$" else f"{schema_prefix}.{name}"
+            instance_path = name if instance_prefix == "$" else f"{instance_prefix}.{name}"
+            walk_node(definition, element.get(name), schema_path, instance_path, parent_id)
+
+    def walk_node(
+        definition: Any,
+        payload: object,
+        schema_path: str,
+        instance_path: str,
+        parent_id: str,
+    ) -> None:
+        if not isinstance(definition, dict):
+            raise ValueError(f"Registered field definition is invalid: {schema_path}")
+        field_type = definition.get("type")
+        if field_type == "array":
+            items = definition.get("items")
+            if isinstance(items, dict) and isinstance(payload, list):
+                for index, element in enumerate(payload):
+                    item_path = f"{instance_path}[{index}]"
+                    item_schema_path = f"{schema_path}[]"
+                    if items.get("type") in ("object", "array"):
+                        child_id = record_id(extraction_run_id, item_path)
+                        records.append(
+                            {
+                                "run_id": extraction_run_id,
+                                "document_id": document_id,
+                                "record_id": child_id,
+                                "parent_record_id": parent_id,
+                                "schema_path": item_schema_path,
+                                "instance_path": item_path,
+                                "ordinal": index,
+                            }
+                        )
+                        if items.get("type") == "object":
+                            walk_object(
+                                items.get("properties", {}),
+                                element,
+                                item_schema_path,
+                                item_path,
+                                child_id,
+                            )
+                        else:
+                            walk_node(items, element, item_schema_path, item_path, child_id)
+                    else:
+                        fields.append(generic_field(parent_id, item_schema_path, item_path, items))
+            return
+        if field_type == "object":
+            child_id = record_id(extraction_run_id, instance_path)
+            records.append(
+                {
+                    "run_id": extraction_run_id,
+                    "document_id": document_id,
+                    "record_id": child_id,
+                    "parent_record_id": parent_id,
+                    "schema_path": schema_path,
+                    "instance_path": instance_path,
+                    "ordinal": None,
+                }
+            )
+            walk_object(
+                definition.get("properties", {}), payload, schema_path, instance_path, child_id
+            )
+            return
+        fields.append(generic_field(parent_id, schema_path, instance_path, definition))
+
+    def generic_field(
+        parent_id: str, schema_path: str, instance_path: str, definition: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "record_id": parent_id,
+            "schema_path": schema_path,
+            "instance_path": instance_path,
+            "declared_type": definition.get("type"),
+            "validation_status": None,
+            "validation_message": None,
+        }
+
+    walk_object(schema, response, "$", "$", root_id)
+    return records, fields
+
+
+def record_id(run_id: str, instance_path: str) -> str:
+    return hashlib.sha256(f"{run_id}:{instance_path}".encode()).hexdigest()[:32]
+
+
 def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
     from pyspark.sql.types import (  # type: ignore[import-not-found]
         ArrayType,
@@ -463,6 +593,8 @@ def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
             field["field_type"], json.dumps(field["value"], separators=(",", ":")),
             field["value_string"], field["confidence_score"], field["citation_ids"],
             json.dumps(field["citations"], separators=(",", ":")), field["extraction_error"],
+            field["record_id"], field["schema_path"], field["instance_path"],
+            field["declared_type"], field["validation_status"], field["validation_message"],
         )
         for field in fields
     ]
@@ -478,6 +610,12 @@ def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
             StructField("citation_ids", ArrayType(IntegerType()), False),
             StructField("citations_json", StringType(), False),
             StructField("extraction_error", StringType(), True),
+            StructField("record_id", StringType(), False),
+            StructField("schema_path", StringType(), False),
+            StructField("instance_path", StringType(), False),
+            StructField("declared_type", StringType(), False),
+            StructField("validation_status", StringType(), True),
+            StructField("validation_message", StringType(), True),
         ]
     )
     spark.createDataFrame(rows, schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
@@ -487,11 +625,50 @@ def write_fields(table: str, fields: list[dict[str, Any]]) -> None:
         f"""
         INSERT INTO {table}
         (extraction_run_id, document_id, field_path, field_type,
-         value, value_string, confidence_score, citation_ids, citations, extraction_error)
+         value, value_string, confidence_score, citation_ids, citations, extraction_error,
+         record_id, schema_path, instance_path, declared_type, validation_status,
+         validation_message)
         SELECT extraction_run_id, document_id, field_path, field_type,
                PARSE_JSON(value_json), value_string, confidence_score,
-               citation_ids, PARSE_JSON(citations_json), extraction_error
+               citation_ids, PARSE_JSON(citations_json), extraction_error,
+               record_id, schema_path, instance_path, declared_type, validation_status,
+               validation_message
         FROM idp_extracted_fields_to_insert
+        """
+    )
+
+
+def write_records(table: str, records: list[dict[str, Any]]) -> None:
+    from pyspark.sql.types import IntegerType, StringType, StructField, StructType  # type: ignore[import-not-found]
+
+    schema = StructType(
+        [
+            StructField("run_id", StringType(), False),
+            StructField("document_id", StringType(), False),
+            StructField("record_id", StringType(), False),
+            StructField("parent_record_id", StringType(), True),
+            StructField("schema_path", StringType(), False),
+            StructField("instance_path", StringType(), False),
+            StructField("ordinal", IntegerType(), True),
+        ]
+    )
+    rows = [
+        tuple(record[key] for key in (
+            "run_id", "document_id", "record_id", "parent_record_id", "schema_path",
+            "instance_path", "ordinal",
+        ))
+        for record in records
+    ]
+    spark.createDataFrame(rows, schema).createOrReplaceTempView(  # type: ignore[name-defined]  # noqa: F821
+        "idp_extracted_records_to_insert"
+    )
+    spark.sql(  # type: ignore[name-defined]  # noqa: F821
+        f"""
+        INSERT INTO {table}
+        (run_id, document_id, record_id, parent_record_id, schema_path, instance_path, ordinal)
+        SELECT run_id, document_id, record_id, parent_record_id, schema_path, instance_path,
+               ordinal
+        FROM idp_extracted_records_to_insert
         """
     )
 

@@ -308,9 +308,8 @@ def test_records_only_cache_still_recomputes_fields_rather_than_dropping_them() 
 
     (first_records, first_fields), (second_records, second_fields) = asyncio.run(_twice())
 
-    # Every read still attempts (and fails) the write -- correctness matters more here than
-    # avoiding a redundant, harmlessly-failing call.
-    assert repository.persist_calls == 2
+    # Review reads never attempt a write, even when only half of a legacy projection exists.
+    assert repository.persist_calls == 0
     assert len(first_records) == len(expected_records)
     assert len(first_fields) == len(expected_fields)
     assert len(second_records) == len(expected_records)

@@ -363,6 +363,24 @@ class GenericExtractionRecordsResponse(BaseModel):
     fields: list[GenericFieldResultResponse]
 
 
+class ReviewFieldPolicyResponse(BaseModel):
+    confidence_threshold: float
+    citation_required: bool
+
+
+class ExtractionReviewResponse(BaseModel):
+    """One read model for rendering extraction values beside their source document."""
+
+    run: ExtractionRunResponse
+    document: DocumentResponse
+    schema_id: str
+    schema_version: int
+    root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
+    result: dict[str, Any]
+    fields: list[GenericFieldResultResponse]
+    field_policies: dict[str, ReviewFieldPolicyResponse]
+
+
 class ExportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
