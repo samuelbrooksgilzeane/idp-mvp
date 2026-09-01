@@ -88,6 +88,30 @@ describe("DocumentsPage", () => {
     expect(screen.getByText("3 selected")).toBeInTheDocument();
   });
 
+  it("warms a document's latest extraction review when its detail button is previewed", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === "/api/documents/doc-2/extraction-runs") {
+        return {
+          ok: true,
+          json: async () => [{ extraction_run_id: "run-doc-2", status: "EXTRACTED" }],
+        };
+      }
+      if (url === "/api/extractions/run-doc-2/review") {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "beta-invoice.pdf" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/extractions/run-doc-2/review", undefined),
+    );
+  });
+
   it("registers multiple PDFs as bounded one-file requests", async () => {
     const onDocumentsChanged = vi.fn();
     const first = document({ document_id: "uploaded-1", file_name: "first.pdf" });

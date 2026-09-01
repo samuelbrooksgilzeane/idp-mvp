@@ -2,6 +2,7 @@ import { LoaderCircle, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DocumentRecord, ExtractionReview } from "../types";
+import { loadExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { CitationTarget } from "./DocumentViewer";
 import { type FieldPolicy, GenericResultView } from "./GenericResultView";
 
@@ -144,13 +145,7 @@ export function ExtractionPanel({
     const controller = new AbortController();
     setReview(null);
     setResultState("loading");
-    fetch(`/api/extractions/${selectedRun.extraction_run_id}/review`, {
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("Extraction result request failed");
-        return response.json() as Promise<unknown>;
-      })
+    loadExtractionReview(selectedRun.extraction_run_id, controller.signal)
       .then((payload) => {
         if (controller.signal.aborted) return;
         if (!isExtractionReview(payload)) throw new Error("Extraction review was invalid");

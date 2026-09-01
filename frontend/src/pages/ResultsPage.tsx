@@ -2,6 +2,7 @@ import { Download, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { prefetchExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { ExtractionRunPage, ExtractionRunSummary } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -324,7 +325,16 @@ export function ResultsPage() {
                     />
                   </td>
                   <td>
-                    <Link className="document-link" to={`/results/${row.extraction_run_id}`}>
+                    <Link
+                      className="document-link"
+                      to={`/results/${row.extraction_run_id}`}
+                      onPointerEnter={() => {
+                        if (row.status === "EXTRACTED") prefetchExtractionReview(row.extraction_run_id);
+                      }}
+                      onFocus={() => {
+                        if (row.status === "EXTRACTED") prefetchExtractionReview(row.extraction_run_id);
+                      }}
+                    >
                       {row.document_name}
                     </Link>
                     {row.is_latest ? <span className="latest-badge">Latest</span> : null}

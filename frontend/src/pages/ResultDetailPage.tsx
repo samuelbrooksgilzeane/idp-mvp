@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { DocumentViewer, type CitationTarget } from "../components/DocumentViewer";
 import { type FieldPolicy, GenericResultView } from "../components/GenericResultView";
+import { loadExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { ExtractionReview } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -23,9 +24,7 @@ export function ResultDetailPage() {
     setState("loading");
     setCitationTarget(null);
     try {
-      const response = await fetch(`/api/extractions/${runId}/review`);
-      if (!response.ok) throw new Error("Extraction review request failed");
-      const payload = (await response.json()) as ExtractionReview;
+      const payload = await loadExtractionReview(runId);
       setReview(payload);
       setFieldPolicies(
         new Map(

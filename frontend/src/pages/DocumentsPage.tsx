@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
 import { UploadPanel, type UploadInput } from "../components/UploadPanel";
+import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { ApiError, DocumentRecord, DocumentStatus, Notice } from "../types";
 import { useMemo, useState } from "react";
 
@@ -226,6 +227,7 @@ export function DocumentsPage({
           selectedDocumentId={null}
           onRefresh={() => void onDocumentsChanged()}
           onSelect={(document) => navigate(`/documents/${document.document_id}`)}
+          onPreview={(document) => prefetchDocumentExtractionReview(document.document_id)}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAll}

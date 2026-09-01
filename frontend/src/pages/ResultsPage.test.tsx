@@ -84,6 +84,32 @@ describe("ResultsPage", () => {
     expect(screen.getByRole("button", { name: "Refresh extraction runs" })).toBeInTheDocument();
   });
 
+  it("prefetches a completed run when its detail link is previewed", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.startsWith("/api/extractions?")) {
+        return { ok: true, json: async () => ({ items: [rows[0]], next_cursor: null }) };
+      }
+      if (url === "/api/extractions/run-a/review") {
+        return { ok: true, json: async () => ({}) };
+      }
+      return { ok: false, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <MemoryRouter initialEntries={["/results"]}>
+        <ResultsPage />
+      </MemoryRouter>,
+    );
+
+    fireEvent.pointerEnter(await screen.findByRole("link", { name: "invoice-a.pdf" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/extractions/run-a/review", undefined),
+    );
+  });
+
   it("warns before exporting two runs for the same document and schema, offering the latest", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
       if (input.startsWith("/api/extractions?")) {

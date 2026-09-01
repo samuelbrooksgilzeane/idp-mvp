@@ -8,6 +8,7 @@ type DocumentListProps = {
   selectedDocumentId: string | null;
   onRefresh: () => void;
   onSelect: (document: DocumentRecord) => void;
+  onPreview?: (document: DocumentRecord) => void;
   selectedIds?: Set<string>;
   onToggleSelect?: (documentId: string) => void;
   onToggleAll?: () => void;
@@ -33,6 +34,7 @@ export function DocumentList({
   selectedDocumentId,
   onRefresh,
   onSelect,
+  onPreview,
   selectedIds,
   onToggleSelect,
   onToggleAll,
@@ -120,6 +122,8 @@ export function DocumentList({
                       className="document-link"
                       type="button"
                       onClick={() => onSelect(document)}
+                      onPointerEnter={() => onPreview?.(document)}
+                      onFocus={() => onPreview?.(document)}
                     >
                       {document.file_name}
                     </button>
