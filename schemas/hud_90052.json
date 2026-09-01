@@ -1,0 +1,77 @@
+{
+  "schema_id": "hud_90052",
+  "schema_version": 1,
+  "display_name": "HUD 90052 Closing Worksheet",
+  "use_case": "government_form",
+  "status": "PRODUCTION",
+  "description": "VAREX HUD 90052 pre-foreclosure sale closing worksheet contract with case metadata, purchaser records, payable items, and approvals.",
+  "instructions": "Extract only values explicitly stated in the HUD 90052 closing worksheet. Do not infer, calculate, reconcile, split combined values, or populate a missing value. Extract every populated purchaser and payable-from-sales-proceeds entry as a separate item in document order. Preserve combined signature-and-date and item-detail strings exactly as stated. Return null when the source does not state a scalar value and an empty array when it states no repeated entries.",
+  "ai_extract_schema": {
+    "mortgagee_contact_person": {"type": "string", "description": "Contact person for the mortgagee."},
+    "phone_number": {"type": "string", "description": "Phone number of the mortgagee contact person."},
+    "account_control_number": {"type": "string", "description": "Account or control number."},
+    "fha_case_number": {"type": "string", "description": "FHA case number."},
+    "homeowner_name": {"type": "string", "description": "Name of the homeowner."},
+    "property_address": {"type": "string", "description": "Address of the property."},
+    "seller_initials_and_date": {"type": "string", "description": "Seller initials and date exactly as stated together."},
+    "sales_agent_broker_signature_and_date": {"type": "string", "description": "Sales agent or broker signature name and date exactly as stated together."},
+    "mortgagee_authorizing_official_signature_and_date": {"type": "string", "description": "Mortgagee authorizing official signature name and date exactly as stated together."},
+    "closing_agent_signature_and_date": {"type": "string", "description": "Closing agent signature name and date exactly as stated together."},
+    "purchaser_info": {
+      "type": "array",
+      "description": "Every populated purchaser entry in document order.",
+      "items": {
+        "type": "object",
+        "description": "One purchaser entry.",
+        "properties": {
+          "purchaser_details": {"type": "string", "description": "Purchaser details exactly as stated in the populated row."}
+        }
+      }
+    },
+    "payable_from_sales_proceeds": {
+      "type": "array",
+      "description": "Every populated item payable from sales proceeds in document order.",
+      "items": {
+        "type": "object",
+        "description": "One payable-from-sales-proceeds entry.",
+        "properties": {
+          "item_details": {"type": "string", "description": "Payable item description and amount exactly as stated together."}
+        }
+      }
+    }
+  },
+  "field_policies": {
+    "mortgagee_contact_person": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "phone_number": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "medium"},
+    "account_control_number": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "fha_case_number": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "homeowner_name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "property_address": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "seller_initials_and_date": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "sales_agent_broker_signature_and_date": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "mortgagee_authorizing_official_signature_and_date": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "closing_agent_signature_and_date": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "purchaser_info[*].purchaser_details": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "payable_from_sales_proceeds[*].item_details": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"}
+  },
+  "document_rules": [
+    {
+      "rule_id": "hud_90052_required_fields",
+      "rule_type": "required_fields",
+      "description": "Check that the case, homeowner, property, purchaser, payable-item, and approval details are present.",
+      "field_paths": [
+        "mortgagee_contact_person",
+        "phone_number",
+        "account_control_number",
+        "fha_case_number",
+        "homeowner_name",
+        "property_address",
+        "purchaser_info[*].purchaser_details",
+        "payable_from_sales_proceeds[*].item_details",
+        "sales_agent_broker_signature_and_date",
+        "mortgagee_authorizing_official_signature_and_date",
+        "closing_agent_signature_and_date"
+      ]
+    }
+  ]
+}

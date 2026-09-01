@@ -113,6 +113,23 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
         "${workspace.file_path}/schemas/invoice_v1.json"
     )
     assert tasks[4]["environment_key"] == "default"
+    additional = [
+        (8, "register_sf2823_14", "register_production_schemas_v4", "sf2823_14.json"),
+        (9, "register_hud_50080tihd", "register_sf2823_14", "hud_50080tihd.json"),
+        (10, "register_hud_90052", "register_hud_50080tihd", "hud_90052.json"),
+        (11, "register_of1017_g_79", "register_hud_90052", "of1017_g_79.json"),
+    ]
+    for index, task_key, dependency, filename in additional:
+        assert tasks[index]["task_key"] == task_key
+        assert tasks[index]["depends_on"] == [{"task_key": dependency}]
+        assert tasks[index]["spark_python_task"]["python_file"] == (
+            "../src/register_schemas.py"
+        )
+        assert tasks[index]["spark_python_task"]["parameters"][-1] == (
+            f"${{workspace.file_path}}/schemas/{filename}"
+        )
+    assert tasks[12]["task_key"] == "create_governed_views"
+    assert tasks[12]["depends_on"] == [{"task_key": "register_of1017_g_79"}]
 
 
 def test_parsing_schema_migration_is_guarded_and_non_destructive() -> None:

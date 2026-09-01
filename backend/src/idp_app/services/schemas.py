@@ -333,7 +333,13 @@ def manifest_directory() -> Path:
 
 def load_source_manifests(directory: Path | None = None) -> list[SchemaManifest]:
     root = directory or manifest_directory()
-    manifests = [load_manifest(path) for path in sorted(root.glob("*.json"))]
+    paths = sorted(
+        root.glob("*.json"),
+        key=lambda path: (not path.name.startswith("invoice_v"), path.name),
+    )
+    # Keep the historical Invoice v1-v4 prefix stable for callers that select a legacy
+    # invoice contract by its list position; additional governed schemas follow by filename.
+    manifests = [load_manifest(path) for path in paths]
     if not manifests:
         raise RuntimeError("No source-controlled extraction schema manifests were found")
     return manifests

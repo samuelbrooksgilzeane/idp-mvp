@@ -255,7 +255,7 @@ describe("ExtractionPanel", () => {
     // Latest run first: the raw extracted value appears once, not duplicated by a typed column.
     expect(await screen.findAllByText("888.55")).toHaveLength(1);
 
-    fireEvent.change(screen.getByRole("combobox"), {
+    fireEvent.change(screen.getByRole("combobox", { name: /Extraction run/i }), {
       target: { value: olderRunId },
     });
 
@@ -277,6 +277,47 @@ describe("ExtractionPanel", () => {
       await screen.findByText("A successful parse is required before extraction."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /extraction/i })).toBeDisabled();
+  });
+
+  it("lets the reviewer choose which published schema to apply", async () => {
+    const beneficiarySchema = {
+      ...schema,
+      schema_id: "sf2823_14",
+      display_name: "SF 2823-14 Designation of Beneficiary",
+      schema_hash: "c".repeat(64),
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.includes("/extraction-runs")) return { ok: true, json: async () => [] };
+      if (url.includes("/api/schemas")) {
+        return { ok: true, json: async () => [schema, beneficiarySchema] };
+      }
+      if (url.endsWith("/extract") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body));
+        expect(body).toMatchObject({ schema_id: "sf2823_14", schema_version: 1 });
+        return { ok: true, json: async () => ({ ...run(latestRunId), status: "RUNNING" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <ExtractionPanel
+        document={{ ...document, status: "PARSED" }}
+        onViewEvidence={vi.fn()}
+        onDocumentsChanged={vi.fn()}
+      />,
+    );
+
+    const selector = await screen.findByRole("combobox", { name: /Extraction schema/i });
+    fireEvent.change(selector, { target: { value: "sf2823_14:1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run extraction" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/documents/${documentId}/extract`,
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
   });
 });
 

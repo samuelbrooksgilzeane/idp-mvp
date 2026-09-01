@@ -52,11 +52,12 @@ type ExtractionResult = {
   candidates: InvoiceCandidate[];
 };
 
-type ProductionSchema = {
+type ExtractableSchema = {
   schema_id: string;
   schema_version: number;
   display_name: string;
   schema_hash: string;
+  status: "PRODUCTION" | "PUBLISHED";
 };
 
 type ExtractionPanelProps = {
@@ -81,7 +82,8 @@ export function ExtractionPanel({
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [result, setResult] = useState<ExtractionResult | null>(null);
   const [resultState, setResultState] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [schema, setSchema] = useState<ProductionSchema | null>(null);
+  const [schemas, setSchemas] = useState<ExtractableSchema[]>([]);
+  const [schemaKey, setSchemaKey] = useState("");
   const [triggering, setTriggering] = useState(false);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,19 +134,33 @@ export function ExtractionPanel({
 
   useEffect(() => {
     const controller = new AbortController();
-    setSchema(null);
-    fetch(`/api/schemas?status=PRODUCTION&use_case=${encodeURIComponent(document.use_case)}`, {
-      signal: controller.signal,
-    })
+    setSchemas([]);
+    setSchemaKey("");
+    fetch("/api/schemas?status=ALL", { signal: controller.signal })
       .then((response) => (response.ok ? (response.json() as Promise<unknown>) : []))
       .then((payload) => {
         if (controller.signal.aborted) return;
-        const available = Array.isArray(payload) ? payload.filter(isProductionSchema) : [];
-        setSchema(available[0] ?? null);
+        const available = Array.isArray(payload) ? payload.filter(isExtractableSchema) : [];
+        setSchemas(available);
+        const preferred = available.find(
+          (item) =>
+            item.schema_id === document.template_id ||
+            `${item.schema_id}_v${item.schema_version}` === document.template_id,
+        );
+        const selected = preferred ?? available[0];
+        setSchemaKey(selected ? `${selected.schema_id}:${selected.schema_version}` : "");
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [document.use_case]);
+  }, [document.template_id]);
+
+  const schema = useMemo(
+    () =>
+      schemas.find(
+        (item) => `${item.schema_id}:${item.schema_version}` === schemaKey,
+      ) ?? null,
+    [schemaKey, schemas],
+  );
 
   const selectedRun = useMemo(
     () => runs.find((run) => run.extraction_run_id === selectedRunId) ?? null,
@@ -289,6 +305,31 @@ export function ExtractionPanel({
       ) : null}
       {error ? (
         <p className="extraction-error" role="alert">{error}</p>
+      ) : null}
+
+      {parsed ? (
+        <div className="extraction-selector-row">
+          <label htmlFor="extraction-schema-selector">
+            Extraction schema
+            <span>Choose the published contract to apply to this document.</span>
+          </label>
+          <select
+            id="extraction-schema-selector"
+            value={schemaKey}
+            disabled={busy || !schemas.length}
+            onChange={(event) => setSchemaKey(event.target.value)}
+          >
+            {!schemas.length ? <option value="">No extractable schema published</option> : null}
+            {schemas.map((item) => {
+              const key = `${item.schema_id}:${item.schema_version}`;
+              return (
+                <option key={key} value={key}>
+                  {item.display_name} · v{item.schema_version}
+                </option>
+              );
+            })}
+          </select>
+        </div>
       ) : null}
 
       {runsState === "loading" ? <p className="extraction-hint">Loading extraction history…</p> : null}
@@ -736,13 +777,15 @@ function isExtractionRun(value: unknown): value is ExtractionRun {
   );
 }
 
-function isProductionSchema(value: unknown): value is ProductionSchema {
+function isExtractableSchema(value: unknown): value is ExtractableSchema {
   if (!value || typeof value !== "object") return false;
-  const schema = value as Partial<ProductionSchema> & { status?: string };
+  const schema = value as Partial<ExtractableSchema> & { status?: string };
   return (
     typeof schema.schema_id === "string" &&
     typeof schema.schema_version === "number" &&
-    schema.status === "PRODUCTION"
+    typeof schema.display_name === "string" &&
+    typeof schema.schema_hash === "string" &&
+    (schema.status === "PRODUCTION" || schema.status === "PUBLISHED")
   );
 }
 

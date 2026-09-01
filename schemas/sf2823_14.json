@@ -1,0 +1,142 @@
+{
+  "schema_id": "sf2823_14",
+  "schema_version": 1,
+  "display_name": "SF 2823-14 Designation of Beneficiary",
+  "use_case": "government_form",
+  "status": "PRODUCTION",
+  "description": "VAREX SF 2823-14 extraction contract for insured details, beneficiaries, allocation percentages, and the insured or assignee statement.",
+  "instructions": "Extract only values explicitly stated in the SF 2823 designation of beneficiary form. Do not infer, calculate, reconcile, or populate a missing value. Extract every populated beneficiary row as a separate item in document order. Preserve names, identifiers, dates, addresses, relationships, and numeric percentages exactly as stated. Return null when the source does not state a scalar value and an empty array when it states no beneficiary rows.",
+  "ai_extract_schema": {
+    "insured_name": {
+      "type": "string",
+      "description": "Name of the insured person exactly as stated."
+    },
+    "insured_date_of_birth": {
+      "type": "string",
+      "description": "Date of birth of the insured exactly as stated."
+    },
+    "insured_ssn": {
+      "type": "string",
+      "description": "Social Security Number of the insured exactly as stated."
+    },
+    "insured_claim_number": {
+      "type": "number",
+      "description": "CSA, CSI, or OWCP claim number represented as a number in the VAREX benchmark."
+    },
+    "insured_department": {
+      "type": "string",
+      "description": "Department or agency where the insured works."
+    },
+    "insured_bureau": {
+      "type": "string",
+      "description": "Bureau or division of the insured's department."
+    },
+    "insured_location": {
+      "type": "string",
+      "description": "City, state, and ZIP code location of the insured's department."
+    },
+    "total_percentage": {
+      "type": "integer",
+      "description": "Total percentage designated for all beneficiaries."
+    },
+    "beneficiaries": {
+      "type": "array",
+      "description": "Every populated beneficiary row in document order.",
+      "items": {
+        "type": "object",
+        "description": "One beneficiary designation row.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the beneficiary."
+          },
+          "relationship": {
+            "type": "string",
+            "description": "Relationship of the beneficiary to the insured."
+          },
+          "percentage": {
+            "type": "integer",
+            "description": "Percentage of benefits designated for the beneficiary."
+          },
+          "address": {
+            "type": "string",
+            "description": "Address of the beneficiary."
+          }
+        }
+      }
+    },
+    "insured_assignee": {
+      "type": "object",
+      "description": "Statement and signature details for the insured or assignee.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the insured or assignee signing the statement."
+        },
+        "address": {
+          "type": "string",
+          "description": "Address of the insured or assignee."
+        },
+        "date": {
+          "type": "string",
+          "description": "Date of signature of the insured or assignee."
+        }
+      }
+    }
+  },
+  "field_policies": {
+    "insured_name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "insured_date_of_birth": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high", "semantic_type": "date"},
+    "insured_ssn": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "insured_claim_number": {"required": false, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "insured_department": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "insured_bureau": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "insured_location": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "total_percentage": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "beneficiaries[*].name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "beneficiaries[*].relationship": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "beneficiaries[*].percentage": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "beneficiaries[*].address": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "insured_assignee.name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "insured_assignee.address": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "insured_assignee.date": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high", "semantic_type": "date"}
+  },
+  "document_rules": [
+    {
+      "rule_id": "sf2823_required_identity",
+      "rule_type": "required_fields",
+      "description": "Check that insured identity, beneficiary details, the stated allocation total, and the signer statement are present.",
+      "field_paths": [
+        "insured_name",
+        "insured_date_of_birth",
+        "insured_ssn",
+        "insured_department",
+        "beneficiaries[*].name",
+        "beneficiaries[*].relationship",
+        "beneficiaries[*].percentage",
+        "total_percentage",
+        "insured_assignee.name",
+        "insured_assignee.date"
+      ]
+    },
+    {
+      "rule_id": "sf2823_total_is_one_hundred",
+      "rule_type": "range",
+      "description": "Require the stated total beneficiary allocation to equal 100 percent.",
+      "field_paths": ["total_percentage"],
+      "minimum": 100,
+      "maximum": 100
+    },
+    {
+      "rule_id": "sf2823_beneficiary_allocation",
+      "rule_type": "arithmetic_reconciliation",
+      "description": "Check that the beneficiary percentages add to the stated total percentage.",
+      "field_paths": ["beneficiaries[*].percentage", "total_percentage"],
+      "tolerance": 0,
+      "terms": [
+        {"field_path": "beneficiaries[*].percentage", "sign": "+", "aggregate": "sum"}
+      ],
+      "target": "total_percentage"
+    }
+  ]
+}

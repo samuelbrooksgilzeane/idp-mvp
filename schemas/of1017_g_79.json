@@ -1,0 +1,62 @@
+{
+  "schema_id": "of1017_g_79",
+  "schema_version": 1,
+  "display_name": "OF 1017-G Journal Voucher",
+  "use_case": "government_form",
+  "status": "PRODUCTION",
+  "description": "VAREX Optional Form 1017-G journal voucher contract with voucher metadata, repeated account explanations, preparer, and approver.",
+  "instructions": "Extract only values explicitly stated in the OF 1017-G journal voucher. Do not infer, calculate, reconcile, or populate a missing value. Extract every populated journal line as a separate item in document order, keeping the account and explanation from the same row together. Preserve identifiers, dates, names, account codes, and descriptions exactly as stated. Return null when the source does not state a scalar value and an empty array when it states no journal lines.",
+  "ai_extract_schema": {
+    "journal_voucher_number": {"type": "string", "description": "Unique journal voucher identifier."},
+    "date": {"type": "string", "description": "Date of the journal voucher exactly as stated."},
+    "line_items": {
+      "type": "array",
+      "description": "Every populated journal line in document order.",
+      "items": {
+        "type": "object",
+        "description": "One journal voucher line.",
+        "properties": {
+          "description": {"type": "string", "description": "Explanation or description stated on the line."},
+          "account": {"type": "string", "description": "Account code associated with the line."}
+        }
+      }
+    },
+    "prepared_by": {
+      "type": "object",
+      "description": "Person who prepared the journal voucher.",
+      "properties": {
+        "name": {"type": "string", "description": "Name of the preparer."}
+      }
+    },
+    "approved_by": {
+      "type": "object",
+      "description": "Person who approved the journal voucher.",
+      "properties": {
+        "name": {"type": "string", "description": "Name of the approver."}
+      }
+    }
+  },
+  "field_policies": {
+    "journal_voucher_number": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "date": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high", "semantic_type": "date"},
+    "line_items[*].description": {"required": true, "confidence_threshold": 0.85, "citation_required": true, "risk_tier": "medium"},
+    "line_items[*].account": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "prepared_by.name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "approved_by.name": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"}
+  },
+  "document_rules": [
+    {
+      "rule_id": "of1017_required_fields",
+      "rule_type": "required_fields",
+      "description": "Check that voucher identity, date, journal lines, preparer, and approver are present.",
+      "field_paths": [
+        "journal_voucher_number",
+        "date",
+        "line_items[*].description",
+        "line_items[*].account",
+        "prepared_by.name",
+        "approved_by.name"
+      ]
+    }
+  ]
+}

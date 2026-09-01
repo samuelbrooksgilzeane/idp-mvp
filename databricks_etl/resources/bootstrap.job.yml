@@ -108,9 +108,69 @@ resources:
               - --manifest-path
               - ${workspace.file_path}/schemas/invoice_v4.json
           environment_key: default
-        - task_key: create_governed_views
+        - task_key: register_sf2823_14
           depends_on:
             - task_key: register_production_schemas_v4
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/sf2823_14.json
+          environment_key: default
+        - task_key: register_hud_50080tihd
+          depends_on:
+            - task_key: register_sf2823_14
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/hud_50080tihd.json
+          environment_key: default
+        - task_key: register_hud_90052
+          depends_on:
+            - task_key: register_hud_50080tihd
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/hud_90052.json
+          environment_key: default
+        - task_key: register_of1017_g_79
+          depends_on:
+            - task_key: register_hud_90052
+          spark_python_task:
+            python_file: ../src/register_schemas.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --project-schema
+              - ${var.project_schema}
+              - --table-prefix
+              - ${var.table_prefix}
+              - --manifest-path
+              - ${workspace.file_path}/schemas/of1017_g_79.json
+          environment_key: default
+        - task_key: create_governed_views
+          depends_on:
+            - task_key: register_of1017_g_79
           sql_task:
             warehouse_id: ${var.warehouse_id}
             file:

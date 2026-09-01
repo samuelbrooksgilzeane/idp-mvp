@@ -11,7 +11,16 @@ from pathlib import Path
 from typing import Any
 
 ALLOWED_MANIFESTS = frozenset(
-    {"invoice_v1.json", "invoice_v2.json", "invoice_v3.json", "invoice_v4.json"}
+    {
+        "invoice_v1.json",
+        "invoice_v2.json",
+        "invoice_v3.json",
+        "invoice_v4.json",
+        "sf2823_14.json",
+        "hud_50080tihd.json",
+        "hud_90052.json",
+        "of1017_g_79.json",
+    }
 )
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 SCHEMA_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
@@ -56,7 +65,7 @@ def validate_parameters(parameters: Parameters) -> None:
     if any(SIMPLE_IDENTIFIER.fullmatch(value) is None for value in identifiers):
         raise ValueError("Databricks object configuration contains an invalid identifier")
     if parameters.manifest_path.name not in ALLOWED_MANIFESTS:
-        raise ValueError("Only source-controlled invoice manifests may be registered")
+        raise ValueError("Only reviewed source-controlled manifests may be registered")
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -72,7 +81,8 @@ def load_manifest(path: Path) -> dict[str, Any]:
         "field_policies",
         "document_rules",
     }
-    if set(manifest) != required:
+    optional = {"description"}
+    if not required.issubset(manifest) or set(manifest) - required - optional:
         raise ValueError("Schema manifest keys do not match the governed contract")
     if SCHEMA_IDENTIFIER.fullmatch(manifest["schema_id"]) is None:
         raise ValueError("schema_id is invalid")
@@ -84,6 +94,11 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise ValueError("Only production schemas may be registered")
     if not isinstance(manifest["instructions"], str) or not manifest["instructions"]:
         raise ValueError("instructions are required")
+    description = manifest.get("description")
+    if description is not None and (
+        not isinstance(description, str) or len(description) > 2000
+    ):
+        raise ValueError("description must be a string of at most 2000 characters")
     fields = manifest["ai_extract_schema"]
     policies = manifest["field_policies"]
     if not isinstance(fields, dict) or not fields:
@@ -196,6 +211,7 @@ def main() -> None:
         "document_rule_json": canonical_json(manifest["document_rules"]),
         "schema_hash": schema_hash,
         "status": manifest["status"],
+        "description": manifest.get("description"),
     }
     spark.sql(  # type: ignore[name-defined]  # noqa: F821 - Databricks injects Spark.
         f"""
@@ -214,7 +230,7 @@ def main() -> None:
             :status AS status,
             current_user() AS created_by,
             current_timestamp() AS created_at,
-            CAST(NULL AS STRING) AS description,
+            :description AS description,
             CAST(NULL AS TIMESTAMP) AS published_at
         ) AS source
         ON target.schema_id = source.schema_id

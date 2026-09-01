@@ -297,10 +297,15 @@ def test_every_hash_implementation_agrees_on_every_manifest() -> None:
         modules[name] = module
 
     manifests = load_source_manifests()
-    assert len(manifests) >= 3
+    assert len(manifests) >= 8
     for manifest in manifests:
+        filename = (
+            f"invoice_v{manifest.schema_version}.json"
+            if manifest.schema_id == "invoice"
+            else f"{manifest.schema_id}.json"
+        )
         raw = json.loads(
-            (root / "schemas" / f"invoice_v{manifest.schema_version}.json").read_text()
+            (root / "schemas" / filename).read_text()
         )
         digests = {
             manifest.schema_hash,
@@ -311,7 +316,46 @@ def test_every_hash_implementation_agrees_on_every_manifest() -> None:
                 modules["extract_document"].canonical_json(raw).encode("utf-8")
             ).hexdigest(),
         }
-        assert len(digests) == 1, f"hash implementations disagree for v{manifest.schema_version}"
+        assert len(digests) == 1, (
+            f"hash implementations disagree for {manifest.schema_id} "
+            f"v{manifest.schema_version}"
+        )
+
+
+def test_varex_demo_manifests_are_clean_extractable_and_nested() -> None:
+    manifests = {manifest.schema_id: manifest for manifest in load_source_manifests()}
+
+    assert {
+        "sf2823_14",
+        "hud_50080tihd",
+        "hud_90052",
+        "of1017_g_79",
+    }.issubset(manifests)
+    assert all(
+        manifests[schema_id].status == "PRODUCTION"
+        and manifests[schema_id].use_case == "government_form"
+        for schema_id in (
+            "sf2823_14",
+            "hud_50080tihd",
+            "hud_90052",
+            "of1017_g_79",
+        )
+    )
+
+    beneficiary = manifests["sf2823_14"]
+    assert beneficiary.ai_extract_schema["beneficiaries"].type == "array"
+    assert {
+        "beneficiaries[*].name",
+        "beneficiaries[*].relationship",
+        "beneficiaries[*].percentage",
+        "beneficiaries[*].address",
+    }.issubset(beneficiary.field_policies)
+
+    voucher = manifests["hud_50080tihd"]
+    assert voucher.ai_extract_schema["line_items"].type == "array"
+    assert "hud_50080_line_items_reconcile" in {
+        rule.rule_id for rule in voucher.document_rules
+    }
 
 
 def test_integral_numbers_hash_identically_however_they_are_written() -> None:

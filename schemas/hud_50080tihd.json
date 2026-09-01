@@ -1,0 +1,100 @@
+{
+  "schema_id": "hud_50080tihd",
+  "schema_version": 1,
+  "display_name": "HUD 50080-TIHD Payment Voucher",
+  "use_case": "government_form",
+  "status": "PRODUCTION",
+  "description": "VAREX HUD 50080-TIHD payment voucher contract with header parties, a voucher total, signatory data, and repeated requested amounts.",
+  "instructions": "Extract only values explicitly stated in the HUD 50080-TIHD payment voucher. Do not infer, calculate, reconcile, or populate a missing value. Extract every populated requested-amount row as a separate line item in document order. Preserve identifiers, dates, names, and amounts exactly as stated, excluding currency symbols from numeric values. Return null when the source does not state a scalar value and an empty array when it states no line items.",
+  "ai_extract_schema": {
+    "period_covered": {"type": "string", "description": "Date range covered by the voucher exactly as stated."},
+    "disbursement_type": {"type": "integer", "description": "Disbursement type, where 1 is partial and 2 is final."},
+    "voucher_total": {"type": "number", "description": "Total amount of the voucher without a currency symbol."},
+    "authorized_signatory": {"type": "string", "description": "Name and title of the authorized signatory."},
+    "date_of_request": {"type": "string", "description": "Date when the voucher request was made."},
+    "grantee": {
+      "type": "object",
+      "description": "Grantee organization details.",
+      "properties": {
+        "organization": {"type": "string", "description": "Name of the grantee organization."},
+        "tin": {"type": "string", "description": "Tax identification number of the grantee."}
+      }
+    },
+    "payee": {
+      "type": "object",
+      "description": "Payee organization details.",
+      "properties": {
+        "organization": {"type": "string", "description": "Name of the payee organization."},
+        "tin": {"type": "string", "description": "Tax identification number of the payee."}
+      }
+    },
+    "line_items": {
+      "type": "array",
+      "description": "Every populated requested-amount row in document order.",
+      "items": {
+        "type": "object",
+        "description": "One requested-amount row.",
+        "properties": {
+          "amount": {"type": "number", "description": "Amount requested on the row without a currency symbol."}
+        }
+      }
+    }
+  },
+  "field_policies": {
+    "period_covered": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "disbursement_type": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "voucher_total": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "authorized_signatory": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "date_of_request": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high", "semantic_type": "date"},
+    "grantee.organization": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "grantee.tin": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "payee.organization": {"required": true, "confidence_threshold": 0.9, "citation_required": true, "risk_tier": "high"},
+    "payee.tin": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"},
+    "line_items[*].amount": {"required": true, "confidence_threshold": 0.95, "citation_required": true, "risk_tier": "high"}
+  },
+  "document_rules": [
+    {
+      "rule_id": "hud_50080_required_fields",
+      "rule_type": "required_fields",
+      "description": "Check that voucher identity, parties, total, line amounts, signatory, and request date are present.",
+      "field_paths": [
+        "period_covered",
+        "disbursement_type",
+        "voucher_total",
+        "grantee.organization",
+        "grantee.tin",
+        "payee.organization",
+        "payee.tin",
+        "line_items[*].amount",
+        "authorized_signatory",
+        "date_of_request"
+      ]
+    },
+    {
+      "rule_id": "hud_50080_disbursement_type",
+      "rule_type": "range",
+      "description": "Require the disbursement type to be 1 or 2.",
+      "field_paths": ["disbursement_type"],
+      "minimum": 1,
+      "maximum": 2
+    },
+    {
+      "rule_id": "hud_50080_non_negative_amounts",
+      "rule_type": "range",
+      "description": "Require the voucher total and each requested amount to be non-negative.",
+      "field_paths": ["voucher_total", "line_items[*].amount"],
+      "minimum": 0
+    },
+    {
+      "rule_id": "hud_50080_line_items_reconcile",
+      "rule_type": "arithmetic_reconciliation",
+      "description": "Check that all requested amounts add to the stated voucher total.",
+      "field_paths": ["line_items[*].amount", "voucher_total"],
+      "tolerance": 0.01,
+      "terms": [
+        {"field_path": "line_items[*].amount", "sign": "+", "aggregate": "sum"}
+      ],
+      "target": "voucher_total"
+    }
+  ]
+}

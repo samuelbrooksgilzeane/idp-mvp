@@ -142,6 +142,10 @@ def validate_data_bootstrap() -> None:
         "register_production_schemas_v2",
         "register_production_schemas_v3",
         "register_production_schemas_v4",
+        "register_sf2823_14",
+        "register_hud_50080tihd",
+        "register_hud_90052",
+        "register_of1017_g_79",
         "create_governed_views",
         "migrate_generic_schema_registry",
         "migrate_generic_extraction_records",
@@ -216,9 +220,29 @@ def validate_data_bootstrap() -> None:
     if registration_python.get("parameters") != expected_registration_parameters:
         raise ValueError("Schema registration parameters must match the trusted contract")
 
-    view_task = tasks[8]
+    expected_additional_manifests = [
+        (8, "register_sf2823_14", "register_production_schemas_v4", "sf2823_14.json"),
+        (9, "register_hud_50080tihd", "register_sf2823_14", "hud_50080tihd.json"),
+        (10, "register_hud_90052", "register_hud_50080tihd", "hud_90052.json"),
+        (11, "register_of1017_g_79", "register_hud_90052", "of1017_g_79.json"),
+    ]
+    for index, task_key, dependency, manifest_name in expected_additional_manifests:
+        task = tasks[index]
+        registration = task.get("spark_python_task", {})
+        if task.get("task_key") != task_key or task.get("depends_on") != [
+            {"task_key": dependency}
+        ]:
+            raise ValueError(f"Schema registration task is out of order: {task_key}")
+        if registration.get("python_file") != "../src/register_schemas.py":
+            raise ValueError(f"Schema registration must use the reviewed task: {task_key}")
+        if registration.get("parameters", [])[-1] != (
+            f"${{workspace.file_path}}/schemas/{manifest_name}"
+        ):
+            raise ValueError(f"Schema registration manifest is incorrect: {task_key}")
+
+    view_task = tasks[12]
     view_sql = view_task.get("sql_task", {})
-    if view_task.get("depends_on") != [{"task_key": "register_production_schemas_v4"}]:
+    if view_task.get("depends_on") != [{"task_key": "register_of1017_g_79"}]:
         raise ValueError("Governed views must be created after the schema registrations")
     if view_sql.get("file", {}).get("path") != "../sql/create_views.sql":
         raise ValueError("Bootstrap must use the reviewed view definitions")
