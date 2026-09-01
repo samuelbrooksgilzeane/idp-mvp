@@ -11,6 +11,7 @@ cost for every run on the page.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import logging
@@ -139,14 +140,27 @@ class ExtractionResultsService:
 
     async def get_review(self, extraction_run_id: str) -> ExtractionReview:
         """Load the complete review workspace without duplicate run/schema reads or writes."""
-        run, schema = await self._load(extraction_run_id)
+        run = await run_in_threadpool(self._runs.get, extraction_run_id)
+        if run is None:
+            raise DocumentServiceError(
+                "EXTRACTION_RUN_NOT_FOUND", "Extraction run not found.", 404
+            )
         if run.ai_result is None:
             raise DocumentServiceError(
                 "EXTRACTION_RESULT_UNAVAILABLE",
                 "This extraction run has no retained ai_extract result.",
                 409,
             )
-        document = await run_in_threadpool(self._documents.get, run.document_id)
+        schema, document = await asyncio.gather(
+            run_in_threadpool(self._schemas.get, run.schema_id, run.schema_version),
+            run_in_threadpool(self._documents.get, run.document_id),
+        )
+        if schema is None:
+            raise DocumentServiceError(
+                "SCHEMA_NOT_FOUND",
+                "The schema version used by this extraction run is no longer available.",
+                404,
+            )
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         _records, fields = await self._records_and_fields(run, schema)
@@ -164,13 +178,9 @@ class ExtractionResultsService:
     ) -> tuple[list[ExtractedRecordRow], list[GenericFieldRow]]:
         """Read retained projections, with a read-only in-memory fallback for legacy runs."""
         try:
-            persisted_records = await run_in_threadpool(
-                self._runs.list_generic_records, run.extraction_run_id
-            )
-            persisted_fields = (
-                await run_in_threadpool(self._runs.list_generic_fields, run.extraction_run_id)
-                if persisted_records
-                else []
+            persisted_records, persisted_fields = await asyncio.gather(
+                run_in_threadpool(self._runs.list_generic_records, run.extraction_run_id),
+                run_in_threadpool(self._runs.list_generic_fields, run.extraction_run_id),
             )
             # A cache hit requires *both*: an environment where extracted_fields can be
             # written might never actually persist fields (e.g. the write is unavailable),

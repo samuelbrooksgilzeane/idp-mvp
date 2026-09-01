@@ -586,7 +586,7 @@ class DatabricksExtractionRunRepository:
 
     def list_for_document(self, document_id: str) -> list[ExtractionRunRecord]:
         rows = self._sql.execute_sql(
-            self._select_runs() + " WHERE document_id = :document_id "
+            self._select_runs(include_ai_result=False) + " WHERE document_id = :document_id "
             "ORDER BY started_at DESC, extraction_run_id DESC LIMIT 100",
             {"document_id": document_id},
         )

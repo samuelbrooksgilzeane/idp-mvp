@@ -240,10 +240,14 @@ class ExtractionService:
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         runs = await run_in_threadpool(self._runs.list_for_document, document_id)
+        refreshed = False
         for run in runs:
             if run.status == "RUNNING" and run.job_run_id is not None:
                 await self._refresh(run)
-        return await run_in_threadpool(self._runs.list_for_document, document_id)
+                refreshed = True
+        if refreshed:
+            return await run_in_threadpool(self._runs.list_for_document, document_id)
+        return runs
 
     async def latest(
         self, document_id: str
