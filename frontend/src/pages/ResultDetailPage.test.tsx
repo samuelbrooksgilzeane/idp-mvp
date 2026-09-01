@@ -96,7 +96,7 @@ describe("ResultDetailPage", () => {
   it("loads one review model and renders the header and drawer", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
       if (input === `/api/extractions/${runId}/review`) return { ok: true, json: async () => review };
-      if (input === `/api/documents/${documentId}/pages`) return { ok: true, json: async () => [] };
+      if (input === `/api/documents/${documentId}/pages?parse_run_id=parse-1`) return { ok: true, json: async () => [] };
       return { ok: false, json: async () => ({}) };
     }));
 
@@ -105,6 +105,10 @@ describe("ResultDetailPage", () => {
     expect(await screen.findByText("invoice-a.pdf")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "invoice · v4" })).toBeInTheDocument();
     expect(screen.getByText("114")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      `/api/documents/${documentId}/pages?parse_run_id=parse-1`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
 
     fireEvent.click(screen.getByText("Run details"));
     expect(screen.getByText(runId)).toBeInTheDocument();
@@ -114,7 +118,7 @@ describe("ResultDetailPage", () => {
   it("re-running extraction starts a new run and navigates to it", async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
       if (input === `/api/extractions/${runId}/review`) return { ok: true, json: async () => review };
-      if (input === `/api/documents/${documentId}/pages`) return { ok: true, json: async () => [] };
+      if (input === `/api/documents/${documentId}/pages?parse_run_id=parse-1`) return { ok: true, json: async () => [] };
       if (input === `/api/documents/${documentId}/extract` && init) {
         return { ok: true, json: async () => ({ extraction_run_id: "run-new" }) };
       }

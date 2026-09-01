@@ -109,8 +109,10 @@ class ViewerService:
         self._parse_runs = parse_runs
         self._images = images
 
-    async def list_pages(self, document_id: str) -> list[ParsedPage]:
-        run = await self._latest_successful(document_id)
+    async def list_pages(
+        self, document_id: str, parse_run_id: str | None = None
+    ) -> list[ParsedPage]:
+        run = await self._successful_run(document_id, parse_run_id)
         pages = _parsed_pages(run.parsed)
         elements = _parsed_elements(run.parsed)
         return [
@@ -138,8 +140,9 @@ class ViewerService:
         document_id: str,
         page_id: int,
         element_type: str | None = None,
+        parse_run_id: str | None = None,
     ) -> list[ParsedElement]:
-        run = await self._latest_successful(document_id)
+        run = await self._successful_run(document_id, parse_run_id)
         pages = _parsed_pages(run.parsed)
         if page_id not in {item[0] for item in pages}:
             raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
@@ -164,8 +167,10 @@ class ViewerService:
             )
         return result
 
-    async def open_page_image(self, document_id: str, page_id: int) -> PageImage:
-        run = await self._latest_successful(document_id)
+    async def open_page_image(
+        self, document_id: str, page_id: int, parse_run_id: str | None = None
+    ) -> PageImage:
+        run = await self._successful_run(document_id, parse_run_id)
         page = next(
             (item for item in _parsed_pages(run.parsed) if item[0] == page_id),
             None,
@@ -216,6 +221,22 @@ class ViewerService:
             raise DocumentServiceError(
                 "DOCUMENT_NOT_PARSED",
                 "The document does not have a successful parse to inspect.",
+                409,
+            )
+        return run
+
+    async def _successful_run(
+        self, document_id: str, parse_run_id: str | None
+    ) -> ParseRunRecord:
+        if parse_run_id is None:
+            return await self._latest_successful(document_id)
+        run = await run_in_threadpool(self._parse_runs.get, parse_run_id)
+        if run is None or run.document_id != document_id:
+            raise DocumentServiceError("PARSE_RUN_NOT_FOUND", "Parse run not found.", 404)
+        if run.status != "SUCCESS" or run.parsed is None:
+            raise DocumentServiceError(
+                "DOCUMENT_NOT_PARSED",
+                "The requested parse run is not available for inspection.",
                 409,
             )
         return run

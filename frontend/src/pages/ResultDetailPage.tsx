@@ -163,6 +163,7 @@ export function ResultDetailPage() {
           <DocumentViewer
             documentId={document.document_id}
             documentStatus={document.status}
+            parseRunId={run.parse_run_id}
             citationTarget={citationTarget}
           />
         </div>

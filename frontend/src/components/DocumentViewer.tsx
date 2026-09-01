@@ -67,6 +67,7 @@ type ViewerState =
 type DocumentViewerProps = {
   documentId: string;
   documentStatus: DocumentStatus;
+  parseRunId?: string;
   citationTarget?: CitationTarget | null;
 };
 
@@ -75,6 +76,7 @@ const zoomLevels = [75, 100, 125, 150, 200];
 export function DocumentViewer({
   documentId,
   documentStatus,
+  parseRunId,
   citationTarget,
 }: DocumentViewerProps) {
   const [viewer, setViewer] = useState<ViewerState>({ kind: "idle" });
@@ -107,7 +109,8 @@ export function DocumentViewer({
     }
 
     setViewer({ kind: "loading" });
-    fetch(`/api/documents/${documentId}/pages`, { signal: controller.signal })
+    const query = parseRunId ? `?parse_run_id=${encodeURIComponent(parseRunId)}` : "";
+    fetch(`/api/documents/${documentId}/pages${query}`, { signal: controller.signal })
       .then(async (response) => {
         if (response.status === 409) {
           const payload = (await response.json()) as { error?: { message?: string } };
@@ -134,7 +137,7 @@ export function DocumentViewer({
         }
       });
     return () => controller.abort();
-  }, [documentId, documentStatus]);
+  }, [documentId, documentStatus, parseRunId]);
 
   const currentPage = viewer.kind === "ready" ? viewer.pages[pageIndex] : null;
 
@@ -148,8 +151,10 @@ export function DocumentViewer({
     setNaturalSize({ width: 0, height: 0 });
     setRenderedSize({ width: 0, height: 0 });
     setSelectedTypes(new Set(currentPage.element_types));
+    const parameters = new URLSearchParams({ page_id: String(currentPage.page_id) });
+    if (parseRunId) parameters.set("parse_run_id", parseRunId);
     fetch(
-      `/api/documents/${documentId}/elements?page_id=${currentPage.page_id}`,
+      `/api/documents/${documentId}/elements?${parameters.toString()}`,
       { signal: controller.signal },
     )
       .then((response) => {
@@ -166,7 +171,7 @@ export function DocumentViewer({
         if (!controller.signal.aborted) setElementsLoading(false);
       });
     return () => controller.abort();
-  }, [currentPage, documentId]);
+  }, [currentPage, documentId, parseRunId]);
 
   useLayoutEffect(() => {
     const image = imageRef.current;

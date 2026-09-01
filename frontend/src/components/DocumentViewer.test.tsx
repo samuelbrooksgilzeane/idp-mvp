@@ -166,6 +166,50 @@ describe("DocumentViewer", () => {
     );
   });
 
+  it("scopes page metadata, elements, and images to a requested parse run", async () => {
+    const parseRunId = "parse-historical";
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith(`/pages?parse_run_id=${parseRunId}`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              ...pages[0],
+              image_url: `${pages[0].image_url}?parse_run_id=${parseRunId}`,
+            },
+          ],
+        };
+      }
+      if (url.endsWith(`/elements?page_id=0&parse_run_id=${parseRunId}`)) {
+        return { ok: true, status: 200, json: async () => pageOneElements };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <DocumentViewer
+        documentId={documentId}
+        documentStatus="EXTRACTED"
+        parseRunId={parseRunId}
+      />,
+    );
+
+    const image = await screen.findByAltText("Rendered page 1");
+    expect(image).toHaveAttribute(
+      "src",
+      `${pages[0].image_url}?parse_run_id=${parseRunId}`,
+    );
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/documents/${documentId}/elements?page_id=0&parse_run_id=${parseRunId}`,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+  });
+
   it("shows an intentional empty state before parsing", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

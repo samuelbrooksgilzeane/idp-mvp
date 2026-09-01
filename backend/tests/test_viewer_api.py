@@ -170,6 +170,66 @@ def test_page_image_cannot_cross_parse_run_boundary(tmp_path: Path) -> None:
     assert response.json()["error"]["code"] == "PAGE_IMAGE_INVALID"
 
 
+def test_viewer_can_be_scoped_to_the_parse_run_used_by_an_extraction(
+    tmp_path: Path,
+) -> None:
+    client, settings = _client(tmp_path)
+    document, first_run = _upload_and_parse(
+        client,
+        _pdf_bytes("Historical parse"),
+        "historical.pdf",
+    )
+    document_id = document["document_id"]
+
+    repository = SQLiteParseRunRepository(settings.local_data_dir / "registry.sqlite3")
+    retained = repository.get(first_run["parse_run_id"])
+    assert retained is not None and retained.parsed is not None
+    retained.parsed["document"]["pages"][0]["id"] = 7
+    database_path = settings.local_data_dir / "registry.sqlite3"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "UPDATE parse_runs SET parsed = ? WHERE parse_run_id = ?",
+            (json.dumps(retained.parsed), first_run["parse_run_id"]),
+        )
+
+    second = client.post(f"/api/documents/{document_id}/parse")
+    assert second.status_code == 202
+    second_run_id = second.json()["parse_run_id"]
+    for _ in range(100):
+        run = client.get(f"/api/runs/{second_run_id}").json()
+        if run["status"] != "RUNNING":
+            assert run["status"] == "SUCCESS"
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("Second parse run did not finish")
+
+    latest_pages = client.get(f"/api/documents/{document_id}/pages").json()
+    historical_pages = client.get(
+        f"/api/documents/{document_id}/pages",
+        params={"parse_run_id": first_run["parse_run_id"]},
+    ).json()
+
+    assert latest_pages[0]["page_id"] == 0
+    assert historical_pages[0]["page_id"] == 7
+    assert historical_pages[0]["image_url"].endswith(
+        f"?parse_run_id={first_run['parse_run_id']}"
+    )
+    assert client.get(historical_pages[0]["image_url"]).status_code == 200
+
+    foreign_document, foreign_run = _upload_and_parse(
+        client,
+        _pdf_bytes("Foreign parse"),
+        "foreign.pdf",
+    )
+    foreign_response = client.get(
+        f"/api/documents/{foreign_document['document_id']}/pages",
+        params={"parse_run_id": first_run["parse_run_id"]},
+    )
+    assert foreign_response.status_code == 404
+    assert foreign_response.json()["error"]["code"] == "PARSE_RUN_NOT_FOUND"
+
+
 def test_bounding_boxes_normalise_databricks_rectangles_and_mock_polygons() -> None:
     rectangle = normalise_box({"page_id": 0, "coord": [17, 850, 1425, 1310]})
     polygon = normalise_box(
