@@ -68,8 +68,13 @@ const document = {
   updated_at: "2026-08-30T09:00:00Z",
 };
 
-const schemaDetail = {
-  fields: [{ field_path: "total", confidence_threshold: 0.8, citation_required: false }],
+const review = {
+  ...genericResult,
+  document,
+  fields: genericRecords.fields,
+  field_policies: {
+    total: { confidence_threshold: 0.8, citation_required: false },
+  },
 };
 
 function renderPage() {
@@ -88,12 +93,9 @@ afterEach(() => {
 });
 
 describe("ResultDetailPage", () => {
-  it("loads a run's result, document and schema, and renders the header and drawer", async () => {
+  it("loads one review model and renders the header and drawer", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string) => {
-      if (input === `/api/extractions/${runId}`) return { ok: true, json: async () => genericResult };
-      if (input === `/api/extractions/${runId}/records`) return { ok: true, json: async () => genericRecords };
-      if (input === `/api/documents/${documentId}`) return { ok: true, json: async () => document };
-      if (input === "/api/schemas/invoice/versions/4") return { ok: true, json: async () => schemaDetail };
+      if (input === `/api/extractions/${runId}/review`) return { ok: true, json: async () => review };
       if (input === `/api/documents/${documentId}/pages`) return { ok: true, json: async () => [] };
       return { ok: false, json: async () => ({}) };
     }));
@@ -111,10 +113,7 @@ describe("ResultDetailPage", () => {
 
   it("re-running extraction starts a new run and navigates to it", async () => {
     const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
-      if (input === `/api/extractions/${runId}`) return { ok: true, json: async () => genericResult };
-      if (input === `/api/extractions/${runId}/records`) return { ok: true, json: async () => genericRecords };
-      if (input === `/api/documents/${documentId}`) return { ok: true, json: async () => document };
-      if (input === "/api/schemas/invoice/versions/4") return { ok: true, json: async () => schemaDetail };
+      if (input === `/api/extractions/${runId}/review`) return { ok: true, json: async () => review };
       if (input === `/api/documents/${documentId}/pages`) return { ok: true, json: async () => [] };
       if (input === `/api/documents/${documentId}/extract` && init) {
         return { ok: true, json: async () => ({ extraction_run_id: "run-new" }) };

@@ -133,6 +133,21 @@ export type GenericExtractionRecords = {
   fields: GenericField[];
 };
 
+/** One read model for rendering extraction values beside the source document. */
+export type ExtractionReview = {
+  run: GenericExtractionRun;
+  document: DocumentRecord;
+  schema_id: string;
+  schema_version: number;
+  root_mode: "SINGLE_RECORD" | "REPEATED_RECORDS";
+  result: Record<string, unknown>;
+  fields: GenericField[];
+  field_policies: Record<
+    string,
+    { confidence_threshold: number; citation_required: boolean }
+  >;
+};
+
 export type InvoiceSummary = {
   document_id: string;
   file_name: string;

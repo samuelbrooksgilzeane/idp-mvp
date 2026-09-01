@@ -4,26 +4,14 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { DocumentViewer, type CitationTarget } from "../components/DocumentViewer";
 import { type FieldPolicy, GenericResultView } from "../components/GenericResultView";
-import type {
-  DocumentRecord,
-  GenericExtractionRecords,
-  GenericExtractionResult,
-} from "../types";
+import type { ExtractionReview } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
-
-type SchemaFieldPolicy = {
-  field_path: string;
-  confidence_threshold: number;
-  citation_required: boolean;
-};
 
 export function ResultDetailPage() {
   const { runId = "" } = useParams();
   const navigate = useNavigate();
-  const [result, setResult] = useState<GenericExtractionResult | null>(null);
-  const [records, setRecords] = useState<GenericExtractionRecords | null>(null);
-  const [document, setDocument] = useState<DocumentRecord | null>(null);
+  const [review, setReview] = useState<ExtractionReview | null>(null);
   const [fieldPolicies, setFieldPolicies] = useState<Map<string, FieldPolicy>>(new Map());
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(null);
@@ -35,34 +23,21 @@ export function ResultDetailPage() {
     setState("loading");
     setCitationTarget(null);
     try {
-      const [resultResponse, recordsResponse] = await Promise.all([
-        fetch(`/api/extractions/${runId}`),
-        fetch(`/api/extractions/${runId}/records`),
-      ]);
-      if (!resultResponse.ok || !recordsResponse.ok) throw new Error("Extraction result request failed");
-      const resultPayload = (await resultResponse.json()) as GenericExtractionResult;
-      const recordsPayload = (await recordsResponse.json()) as GenericExtractionRecords;
-      setResult(resultPayload);
-      setRecords(recordsPayload);
-
-      const [documentResponse, schemaResponse] = await Promise.all([
-        fetch(`/api/documents/${resultPayload.run.document_id}`),
-        fetch(
-          `/api/schemas/${resultPayload.schema_id}/versions/${resultPayload.schema_version}`,
+      const response = await fetch(`/api/extractions/${runId}/review`);
+      if (!response.ok) throw new Error("Extraction review request failed");
+      const payload = (await response.json()) as ExtractionReview;
+      setReview(payload);
+      setFieldPolicies(
+        new Map(
+          Object.entries(payload.field_policies).map(([path, policy]) => [
+            path,
+            {
+              confidenceThreshold: policy.confidence_threshold,
+              citationRequired: policy.citation_required,
+            },
+          ]),
         ),
-      ]);
-      if (documentResponse.ok) setDocument((await documentResponse.json()) as DocumentRecord);
-      if (schemaResponse.ok) {
-        const schema = (await schemaResponse.json()) as { fields: SchemaFieldPolicy[] };
-        setFieldPolicies(
-          new Map(
-            schema.fields.map((field) => [
-              field.field_path,
-              { confidenceThreshold: field.confidence_threshold, citationRequired: field.citation_required },
-            ]),
-          ),
-        );
-      }
+      );
       setState("ready");
     } catch {
       setState("missing");
@@ -74,16 +49,16 @@ export function ResultDetailPage() {
   }, [load]);
 
   async function handleRerun() {
-    if (!result) return;
+    if (!review) return;
     setRerunning(true);
     setNotice(null);
     try {
-      const response = await fetch(`/api/documents/${result.run.document_id}/extract`, {
+      const response = await fetch(`/api/documents/${review.run.document_id}/extract`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          schema_id: result.schema_id,
-          schema_version: result.schema_version,
+          schema_id: review.schema_id,
+          schema_version: review.schema_version,
         }),
       });
       const payload = (await response.json()) as { extraction_run_id?: string; error?: { message: string } };
@@ -125,7 +100,7 @@ export function ResultDetailPage() {
   }
 
   if (state === "loading") return <p className="page-state">Loading extraction run…</p>;
-  if (state === "missing" || !result || !records) {
+  if (state === "missing" || !review) {
     return (
       <section className="page-state" role="alert">
         <strong>Extraction run not found</strong>
@@ -133,6 +108,8 @@ export function ResultDetailPage() {
       </section>
     );
   }
+
+  const { document, run } = review;
 
   return (
     <section className="document-detail result-detail" aria-labelledby="result-detail-title">
@@ -142,14 +119,14 @@ export function ResultDetailPage() {
 
       <div className="detail-header">
         <div>
-          <p className="eyebrow">{document?.file_name ?? result.run.document_id}</p>
+          <p className="eyebrow">{document.file_name}</p>
           <h2 id="result-detail-title">
-            {result.schema_id} · v{result.schema_version}
+            {review.schema_id} · v{review.schema_version}
           </h2>
           <span className="detail-identity">
-            Extracted {formatter.format(new Date(result.run.started_at))} ·{" "}
-            <span className={`status-label status-${result.run.status.toLowerCase()}`}>
-              {result.run.status}
+            Extracted {formatter.format(new Date(run.started_at))} ·{" "}
+            <span className={`status-label status-${run.status.toLowerCase()}`}>
+              {run.status}
             </span>
           </span>
         </div>
@@ -174,28 +151,26 @@ export function ResultDetailPage() {
       <details className="run-details-drawer">
         <summary><ChevronDown size={14} aria-hidden="true" /> Run details</summary>
         <dl>
-          <div><dt>Run ID</dt><dd>{result.run.extraction_run_id}</dd></div>
-          <div><dt>Schema hash</dt><dd className="run-details-hash">{result.run.schema_hash}</dd></div>
-          <div><dt>Parse run</dt><dd>{result.run.parse_run_id}</dd></div>
-          <div><dt>Options</dt><dd>{JSON.stringify(result.run.options)}</dd></div>
+          <div><dt>Run ID</dt><dd>{run.extraction_run_id}</dd></div>
+          <div><dt>Schema hash</dt><dd className="run-details-hash">{run.schema_hash}</dd></div>
+          <div><dt>Parse run</dt><dd>{run.parse_run_id}</dd></div>
+          <div><dt>Options</dt><dd>{JSON.stringify(run.options)}</dd></div>
         </dl>
       </details>
 
       <div className="detail-workspace">
         <div className="detail-evidence">
-          {document ? (
-            <DocumentViewer
-              documentId={document.document_id}
-              documentStatus={document.status}
-              citationTarget={citationTarget}
-            />
-          ) : null}
+          <DocumentViewer
+            documentId={document.document_id}
+            documentStatus={document.status}
+            citationTarget={citationTarget}
+          />
         </div>
         <div className="detail-panel">
           <GenericResultView
-            rootMode={result.root_mode}
-            hierarchy={result.result}
-            fields={records.fields}
+            rootMode={review.root_mode}
+            hierarchy={review.result}
+            fields={review.fields}
             fieldPolicies={fieldPolicies}
             onViewEvidence={setCitationTarget}
           />
