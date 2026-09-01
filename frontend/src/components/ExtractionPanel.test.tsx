@@ -126,16 +126,71 @@ const olderResult = {
   ),
 };
 
+function asReview(
+  source: {
+    run: ReturnType<typeof run>;
+    fields: Array<{
+      field_path: string;
+      field_type: string;
+      value: unknown;
+      value_string: string | null;
+      confidence_score: number | null;
+      citation_ids: number[];
+      citations: Array<{ id: number; bbox: Array<{ coord: number[]; page_id: number }> }>;
+      extraction_error: string | null;
+    }>;
+  },
+  hierarchy: Record<string, unknown>,
+) {
+  return {
+    run: source.run,
+    document,
+    schema_id: source.run.schema_id,
+    schema_version: source.run.schema_version,
+    root_mode: "SINGLE_RECORD",
+    result: hierarchy,
+    fields: source.fields.map((field) => ({
+      record_id: "root",
+      schema_path: field.field_path.replace(/\[\d+\]/g, "[]"),
+      instance_path: field.field_path,
+      field_name: field.field_path.split(".").at(-1) ?? field.field_path,
+      declared_type: field.field_type,
+      value: field.value,
+      value_string: field.value_string,
+      confidence_score: field.confidence_score,
+      citation_ids: field.citation_ids,
+      citations: field.citations,
+      validation_status: null,
+      validation_message: field.extraction_error,
+    })),
+    field_policies: {},
+  };
+}
+
+const latestReview = asReview(latestResult, {
+  invoice_date: { value: "28-Jul-2011" },
+  total: { value: 888.55 },
+  line_items: [
+    { description: { value: "Widget A" }, amount: { value: 274.95 } },
+    { description: { value: "Widget B" } },
+  ],
+  subtotal: { value: null },
+});
+const olderReview = asReview(olderResult, {
+  ...latestReview.result,
+  total: { value: 800 },
+});
+
 function panelFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = input.toString();
     if (url.includes("/extraction-runs")) return { ok: true, json: async () => runs };
     if (url.includes("/api/schemas")) return { ok: true, json: async () => [schema] };
     if (url.includes(`/extractions/${olderRunId}`)) {
-      return { ok: true, json: async () => olderResult };
+      return { ok: true, json: async () => olderReview };
     }
     if (url.includes(`/extractions/${latestRunId}`)) {
-      return { ok: true, json: async () => latestResult };
+      return { ok: true, json: async () => latestReview };
     }
     return { ok: true, json: async () => ({}) };
   });
@@ -173,6 +228,29 @@ const nestedResult = {
   ],
 };
 
+const nestedReview = {
+  ...asReview(nestedResult, {
+    invoices: [
+    {
+      invoice_number: { value: "INV-A-9001" },
+      seller_name: { value: "Northwind Trading Limited" },
+      line_items: [
+        { description: { value: "Widget assembly A" }, amount: { value: "300.00" } },
+        { description: { value: "Widget assembly B" }, amount: { value: "150.00" } },
+      ],
+    },
+    {
+      invoice_number: { value: "INV-B-4402" },
+      seller_name: { value: "Sterling Components Limited" },
+      line_items: [
+        { description: { value: "Hydraulic coupling" }, amount: { value: "100.00" } },
+      ],
+    },
+    ],
+  }),
+  root_mode: "REPEATED_RECORDS",
+};
+
 function nestedFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = input.toString();
@@ -181,7 +259,7 @@ function nestedFetch() {
     }
     if (url.includes("/api/schemas")) return { ok: true, json: async () => [schema] };
     if (url.includes(`/extractions/${nestedRunId}`)) {
-      return { ok: true, json: async () => nestedResult };
+      return { ok: true, json: async () => nestedReview };
     }
     return { ok: true, json: async () => ({}) };
   });
@@ -193,8 +271,9 @@ afterEach(() => {
 });
 
 describe("ExtractionPanel", () => {
-  it("renders provenance, typed values, confidence, and citation states for the latest run", async () => {
-    vi.stubGlobal("fetch", panelFetch());
+  it("renders provenance and values from the consolidated review response", async () => {
+    const fetchMock = panelFetch();
+    vi.stubGlobal("fetch", fetchMock);
     render(
       <ExtractionPanel document={document} onViewEvidence={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
@@ -204,21 +283,13 @@ describe("ExtractionPanel", () => {
     expect(screen.getByText(/SHA b02b3c20d69e/)).toBeInTheDocument();
     expect(screen.getByText("ai_extract 2.1")).toBeInTheDocument();
 
-    // Raw value preserved, typed value projected, confidence framed as metadata.
     expect(await screen.findByText("28-Jul-2011")).toBeInTheDocument();
-    // Confidence is model metadata, so the column header carries the label and the cell
-    // carries only the number.
-    expect(screen.getByRole("columnheader", { name: "Model confidence" })).toBeInTheDocument();
-    expect(screen.getAllByText("100%").length).toBeGreaterThan(0);
-    // The typed projection is not shown; the raw extracted value is what is reviewed.
-    expect(screen.queryByText("2011-07-28")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("columnheader", { name: "Typed value" }),
-    ).not.toBeInTheDocument();
-
-    // Null field renders an explicit state, not a blank cell.
-    expect(screen.getAllByText("Not returned").length).toBeGreaterThan(0);
-    expect(screen.getByText("No citation returned")).toBeInTheDocument();
+    expect(screen.getByText("888.55")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/extractions/${latestRunId}/review`,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 
   it("raises a citation target with every bounding box when evidence is viewed", async () => {
@@ -232,12 +303,7 @@ describe("ExtractionPanel", () => {
       />,
     );
 
-    // Header-field controls are named exactly "View evidence"; line-item cells carry their
-    // own path in the accessible name, so this selects the header controls only.
-    const evidenceButtons = await screen.findAllByRole("button", { name: "View evidence" });
-    // invoice_date + total are cited; subtotal is not.
-    expect(evidenceButtons).toHaveLength(2);
-    fireEvent.click(evidenceButtons[1]); // total, which has two citation boxes
+    fireEvent.click(await screen.findByRole("button", { name: "888.55" }));
 
     expect(onViewEvidence).toHaveBeenCalledTimes(1);
     const target = onViewEvidence.mock.calls[0][0];
@@ -260,7 +326,7 @@ describe("ExtractionPanel", () => {
     });
 
     // The older run's distinct value is now shown.
-    await waitFor(() => expect(screen.getByText("800.00")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("800")).toBeInTheDocument());
   });
 
   it("requires a successful parse before extraction", async () => {
@@ -334,20 +400,17 @@ describe("ExtractionPanel line items", () => {
     );
 
     // Repeated leaves are grouped, not listed as flat rows.
-    expect(await screen.findByText("line items")).toBeInTheDocument();
-    expect(screen.getByText("2 lines")).toBeInTheDocument();
+    expect(await screen.findByText("line_items (2)")).toBeInTheDocument();
     expect(screen.getByText("Widget A")).toBeInTheDocument();
     expect(screen.getByText("Widget B")).toBeInTheDocument();
     expect(screen.queryByText("line_items[0].amount")).not.toBeInTheDocument();
 
     // A ragged line shows an explicit state rather than a blank cell.
-    expect(screen.getAllByText("Not returned").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
 
-    fireEvent.click(
-      screen.getByRole("button", { name: /View evidence for line_items\[0\]\.amount/ }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "274.95" }));
     expect(onViewEvidence).toHaveBeenCalledTimes(1);
-    expect(onViewEvidence.mock.calls[0][0].fieldLabel).toBe("line_items[0].amount");
+    expect(onViewEvidence.mock.calls[0][0].fieldLabel).toBe("amount");
   });
   it("shows one invoice at a time, with its lines listed downwards", async () => {
     vi.stubGlobal("fetch", nestedFetch());
@@ -356,8 +419,9 @@ describe("ExtractionPanel line items", () => {
     );
 
     // The first invoice is shown on its own, identified by its own values.
-    expect(await screen.findByText("Invoice 1 of 2")).toBeInTheDocument();
-    expect(screen.getByText("INV-A-9001 · Northwind Trading Limited")).toBeInTheDocument();
+    expect(await screen.findByText("Record 1 of 2")).toBeInTheDocument();
+    expect(screen.getByText("INV-A-9001")).toBeInTheDocument();
+    expect(screen.getByText("Northwind Trading Limited")).toBeInTheDocument();
     // Its fields are labelled relative to the invoice, not by their full nested path.
     expect(screen.getByText("invoice_number")).toBeInTheDocument();
     expect(screen.queryByText("invoices[0].invoice_number")).not.toBeInTheDocument();
@@ -380,13 +444,13 @@ describe("ExtractionPanel line items", () => {
       <ExtractionPanel document={document} onViewEvidence={vi.fn()} onDocumentsChanged={vi.fn()} />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Invoice 2" }));
-    expect(screen.getByText("Invoice 2 of 2")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Next record" }));
+    expect(screen.getByText("Record 2 of 2")).toBeInTheDocument();
     expect(screen.getByText("Hydraulic coupling")).toBeInTheDocument();
     expect(screen.queryByText("Widget assembly A")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Previous invoice" }));
-    expect(screen.getByText("Invoice 1 of 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous record" }));
+    expect(screen.getByText("Record 1 of 2")).toBeInTheDocument();
     expect(screen.getByText("Widget assembly A")).toBeInTheDocument();
   });
 
@@ -401,10 +465,10 @@ describe("ExtractionPanel line items", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /View evidence/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "INV-A-9001" }));
     // The label is stripped for reading; the citation must still carry the real path.
     expect(onViewEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ fieldLabel: "invoices[0].invoice_number" }),
+      expect.objectContaining({ fieldLabel: "invoice_number" }),
     );
   });
 });

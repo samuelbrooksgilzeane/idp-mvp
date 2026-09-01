@@ -145,7 +145,9 @@ export function GenericResultView({
               {items.map((item, index) => (
                 <tr key={index}>
                   {columns.map((column) => {
-                    const leaf = (item as Record<string, unknown>)[column] as { value: unknown };
+                    const leaf = (item as Record<string, unknown>)[column] as
+                      | { value: unknown }
+                      | undefined;
                     const itemPath = `${instancePath}[${index}].${column}`;
                     const field = fieldsByInstancePath.get(itemPath);
                     const hasEvidence = Boolean(field && field.citations.length > 0);
@@ -157,7 +159,7 @@ export function GenericResultView({
                           disabled={!hasEvidence}
                           onClick={() => viewEvidence(itemPath)}
                         >
-                          {leaf.value === null || leaf.value === undefined || leaf.value === ""
+                          {leaf?.value === null || leaf?.value === undefined || leaf.value === ""
                             ? "—"
                             : String(leaf.value)}
                         </button>
