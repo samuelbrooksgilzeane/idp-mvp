@@ -7,8 +7,6 @@ include:
 sync:
   paths:
     - ..
-  include:
-    - ../frontend/dist/**
 
 variables:
   catalog:

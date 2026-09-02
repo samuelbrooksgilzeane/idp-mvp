@@ -7,6 +7,8 @@ from databricks.sdk import WorkspaceClient
 class DocumentStorage(Protocol):
     def store(self, object_name: str, contents: BinaryIO) -> str: ...
 
+    def delete(self, object_name: str) -> None: ...
+
 
 class LocalVolumeStorage:
     def __init__(self, root: Path) -> None:
@@ -23,6 +25,11 @@ class LocalVolumeStorage:
             while chunk := contents.read(1024 * 1024):
                 target.write(chunk)
         return destination.as_posix()
+
+    def delete(self, object_name: str) -> None:
+        if Path(object_name).name != object_name:
+            raise ValueError("Storage object name must not contain a path")
+        (self._incoming / object_name).unlink(missing_ok=True)
 
 
 class DatabricksVolumeStorage:
@@ -47,3 +54,8 @@ class DatabricksVolumeStorage:
         self._client.files.create_directory(self._incoming)
         self._client.files.upload(destination, contents, overwrite=False)
         return destination
+
+    def delete(self, object_name: str) -> None:
+        if Path(object_name).name != object_name:
+            raise ValueError("Storage object name must not contain a path")
+        self._client.files.delete(f"{self._incoming}/{object_name}")

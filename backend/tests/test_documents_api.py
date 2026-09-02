@@ -160,6 +160,31 @@ def test_duplicate_content_is_deterministic(client: TestClient, second_name: str
     assert len(client.get("/api/documents").json()) == 1
 
 
+def test_delete_removes_document_and_allows_same_pdf_to_be_uploaded_again(
+    client: TestClient,
+) -> None:
+    first = upload_file(client).json()["documents"][0]
+
+    deleted = client.delete(f"/api/documents/{first['document_id']}")
+
+    assert deleted.status_code == 204
+    assert client.get("/api/documents").json() == []
+
+    replacement_response = upload_file(client, filename="replacement.pdf")
+    assert replacement_response.status_code == 201
+    replacement = replacement_response.json()["documents"][0]
+    assert replacement["document_id"] == first["document_id"]
+    assert replacement["file_name"] == "replacement.pdf"
+    assert replacement["status"] == "UPLOADED"
+
+
+def test_delete_unknown_document_returns_not_found(client: TestClient) -> None:
+    response = client.delete("/api/documents/missing")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "DOCUMENT_NOT_FOUND"
+
+
 def test_storage_failure_never_reports_upload_success(tmp_path: Path) -> None:
     registry = InMemoryRegistry()
     service = DocumentService(FailingStorage(), registry, 1024)

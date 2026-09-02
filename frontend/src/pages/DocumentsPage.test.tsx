@@ -49,6 +49,43 @@ afterEach(() => {
 });
 
 describe("DocumentsPage", () => {
+  it("paginates the registry in groups of ten", () => {
+    const manyDocuments = Array.from({ length: 12 }, (_, index) =>
+      document({ document_id: `doc-${index + 1}`, file_name: `document-${index + 1}.pdf` }),
+    );
+    const { container } = render(
+      <MemoryRouter>
+        <DocumentsPage
+          documents={manyDocuments}
+          loading={false}
+          caseIds={[]}
+          selectedCaseId={null}
+          onCaseChanged={vi.fn()}
+          onDocumentsChanged={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(container.querySelectorAll("button.document-link")).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    expect(container.querySelectorAll("button.document-link")).toHaveLength(2);
+    expect(screen.getByText("11–12 of 12 documents")).toBeInTheDocument();
+  });
+
+  it("deletes a confirmed document and refreshes the registry", async () => {
+    const onDocumentsChanged = vi.fn();
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(onDocumentsChanged);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete alpha-invoice.pdf" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/documents/doc-1", { method: "DELETE" }));
+    expect(await screen.findByText("alpha-invoice.pdf deleted. Extraction results were kept.")).toBeInTheDocument();
+    expect(onDocumentsChanged).toHaveBeenCalledTimes(1);
+  });
+
   it("narrows the registry by status and by file name", () => {
     renderPage();
     expect(screen.getByText("3 documents")).toBeInTheDocument();

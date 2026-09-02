@@ -180,6 +180,26 @@ class DocumentService:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         return document
 
+    async def delete_document(self, document_id: str) -> None:
+        document = await self.get_document(document_id)
+        if document.status == "DELETED":
+            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
+        object_name = f"{document.document_id}.pdf"
+        try:
+            await run_in_threadpool(self._storage.delete, object_name)
+        except Exception as error:
+            raise DocumentServiceError(
+                "FILE_DELETE_FAILED", "The uploaded PDF could not be deleted.", 502
+            ) from error
+        try:
+            await run_in_threadpool(self._registry.delete, document_id)
+        except KeyError as error:
+            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404) from error
+        except Exception as error:
+            raise DocumentServiceError(
+                "REGISTRY_WRITE_FAILED", "The document could not be removed from the registry.", 502
+            ) from error
+
 
 def sanitize_pdf_filename(filename: str | None) -> str:
     if not filename:

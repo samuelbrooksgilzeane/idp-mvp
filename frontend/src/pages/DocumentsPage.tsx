@@ -2,10 +2,11 @@ import { useNavigate } from "react-router-dom";
 
 import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
+import { Pagination } from "../components/Pagination";
 import { UploadPanel, type UploadInput } from "../components/UploadPanel";
 import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { ApiError, DocumentRecord, DocumentStatus, Notice } from "../types";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type UploadFailure = {
   file_name: string;
@@ -36,6 +37,8 @@ export function DocumentsPage({
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [status, setStatus] = useState<DocumentStatus | "">("");
   const [search, setSearch] = useState("");
@@ -60,6 +63,12 @@ export function DocumentsPage({
     () => new Set(visible.map((item) => item.document_id)),
     [visible],
   );
+  const pageCount = Math.max(1, Math.ceil(visible.length / 10));
+  const pageDocuments = visible.slice((page - 1) * 10, page * 10);
+
+  useEffect(() => {
+    setPage((current) => Math.min(current, pageCount));
+  }, [pageCount]);
   // A batch only ever acts on documents the filters leave visible, so a hidden document
   // can never be swept into a run the user cannot see.
   const selection = useMemo(
@@ -79,9 +88,9 @@ export function DocumentsPage({
   function toggleAll() {
     setSelectedIds((current) => {
       const allSelected =
-        visible.length > 0 && visible.every((item) => current.has(item.document_id));
+        pageDocuments.length > 0 && pageDocuments.every((item) => current.has(item.document_id));
       const next = new Set(current);
-      for (const item of visible) {
+      for (const item of pageDocuments) {
         if (allSelected) next.delete(item.document_id);
         else next.add(item.document_id);
       }
@@ -92,6 +101,28 @@ export function DocumentsPage({
   function changeCase(caseId: string | null) {
     setSelectedIds(new Set());
     onCaseChanged(caseId);
+    setPage(1);
+  }
+
+  async function handleDelete(document: DocumentRecord) {
+    if (!window.confirm(`Delete ${document.file_name} from the document registry? Extraction results will be kept.`)) return;
+    setDeletingId(document.document_id);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/documents/${document.document_id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("The document could not be deleted.");
+      setSelectedIds((current) => {
+        const next = new Set(current);
+        next.delete(document.document_id);
+        return next;
+      });
+      setNotice({ kind: "success", message: `${document.file_name} deleted. Extraction results were kept.` });
+      await onDocumentsChanged();
+    } catch (error: unknown) {
+      setNotice({ kind: "error", message: error instanceof Error ? error.message : "The document could not be deleted." });
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   async function handleUpload(input: UploadInput) {
@@ -193,7 +224,10 @@ export function DocumentsPage({
             <select
               id="document-status-filter"
               value={status}
-              onChange={(event) => setStatus(event.target.value as DocumentStatus | "")}
+              onChange={(event) => {
+                setStatus(event.target.value as DocumentStatus | "");
+                setPage(1);
+              }}
             >
               <option value="">All statuses</option>
               {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -206,7 +240,7 @@ export function DocumentsPage({
               type="search"
               value={search}
               placeholder="File name"
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => { setSearch(event.target.value); setPage(1); }}
             />
           </div>
           <p className="registry-filters-hint">
@@ -220,7 +254,7 @@ export function DocumentsPage({
           onDocumentsChanged={onDocumentsChanged}
         />
         <DocumentList
-          documents={visible}
+          documents={pageDocuments}
           totalCount={documents.length}
           filtered={Boolean(status || search.trim())}
           loading={loading}
@@ -231,7 +265,18 @@ export function DocumentsPage({
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAll}
+          onDelete={(document) => void handleDelete(document)}
+          deletingId={deletingId}
         />
+        {!loading && visible.length ? (
+          <Pagination
+            page={Math.min(page, pageCount)}
+            pageCount={pageCount}
+            itemCount={visible.length}
+            itemLabel="documents"
+            onPageChange={setPage}
+          />
+        ) : null}
       </div>
     </section>
   );

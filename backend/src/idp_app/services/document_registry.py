@@ -54,6 +54,8 @@ class DocumentRegistry(Protocol):
 
     def get(self, document_id: str) -> DocumentRecord | None: ...
 
+    def delete(self, document_id: str) -> None: ...
+
     def update_status(
         self,
         document_id: str,
@@ -107,7 +109,7 @@ class SQLiteDocumentRegistry:
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT * FROM documents WHERE content_sha256 = ? LIMIT 1",
+                "SELECT * FROM documents WHERE content_sha256 = ? AND status <> 'DELETED' LIMIT 1",
                 (content_sha256,),
             ).fetchone()
         return _sqlite_row_to_document(row) if row else None
@@ -117,11 +119,22 @@ class SQLiteDocumentRegistry:
         placeholders = ", ".join("?" for _ in DOCUMENT_COLUMNS)
         try:
             with self._connect() as connection:
-                connection.execute(
-                    f"INSERT INTO documents ({', '.join(DOCUMENT_COLUMNS)}) "
-                    f"VALUES ({placeholders})",
-                    values,
-                )
+                existing = connection.execute(
+                    "SELECT status FROM documents WHERE document_id = ? LIMIT 1",
+                    (document.document_id,),
+                ).fetchone()
+                if existing and existing["status"] == "DELETED":
+                    assignments = ", ".join(f"{name} = ?" for name in DOCUMENT_COLUMNS[1:])
+                    connection.execute(
+                        f"UPDATE documents SET {assignments} WHERE document_id = ?",
+                        (*values[1:], document.document_id),
+                    )
+                else:
+                    connection.execute(
+                        f"INSERT INTO documents ({', '.join(DOCUMENT_COLUMNS)}) "
+                        f"VALUES ({placeholders})",
+                        values,
+                    )
         except sqlite3.IntegrityError as error:
             duplicate = self.find_by_hash(document.content_sha256)
             if duplicate is not None:
@@ -132,11 +145,12 @@ class SQLiteDocumentRegistry:
         with self._connect() as connection:
             if case_id is None:
                 rows = connection.execute(
-                    "SELECT * FROM documents ORDER BY uploaded_at DESC, document_id DESC"
+                    "SELECT * FROM documents WHERE status <> 'DELETED' "
+                    "ORDER BY uploaded_at DESC, document_id DESC"
                 ).fetchall()
             else:
                 rows = connection.execute(
-                    "SELECT * FROM documents WHERE case_id = ? "
+                    "SELECT * FROM documents WHERE case_id = ? AND status <> 'DELETED' "
                     "ORDER BY uploaded_at DESC, document_id DESC",
                     (case_id,),
                 ).fetchall()
@@ -146,7 +160,8 @@ class SQLiteDocumentRegistry:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT DISTINCT case_id FROM documents "
-                "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' ORDER BY case_id"
+                "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' "
+                "AND status <> 'DELETED' ORDER BY case_id"
             ).fetchall()
         return [str(row["case_id"]) for row in rows]
 
@@ -157,6 +172,16 @@ class SQLiteDocumentRegistry:
                 (document_id,),
             ).fetchone()
         return _sqlite_row_to_document(row) if row else None
+
+    def delete(self, document_id: str) -> None:
+        with self._connect() as connection:
+            result = connection.execute(
+                "UPDATE documents SET status = 'DELETED', updated_at = ? "
+                "WHERE document_id = ? AND status <> 'DELETED'",
+                (datetime.now(UTC).isoformat(), document_id),
+            )
+            if result.rowcount == 0:
+                raise KeyError(document_id)
 
     def update_status(
         self,
@@ -231,7 +256,7 @@ class DatabricksDocumentRegistry:
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None:
         rows = self.execute_sql(
             f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
-            "WHERE content_sha256 = :content_sha256 "
+            "WHERE content_sha256 = :content_sha256 AND status <> 'DELETED' "
             "ORDER BY uploaded_at DESC, document_id DESC LIMIT 1",
             {"content_sha256": content_sha256},
         )
@@ -255,7 +280,17 @@ class DatabricksDocumentRegistry:
         statement = (
             f"MERGE INTO {self._table} AS target USING (SELECT {source_fields}) AS source "
             "ON target.content_sha256 = source.content_sha256 "
-            f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})"
+            "WHEN MATCHED AND target.status = 'DELETED' THEN UPDATE SET "
+            + ", ".join(
+                f"target.{name} = "
+                + (
+                    "NULL"
+                    if name in {"selected_schema_id", "selected_schema_version"}
+                    else f"source.{name}"
+                )
+                for name in DOCUMENT_COLUMNS[1:]
+            )
+            + f" WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})"
         )
         values = dict(zip(DOCUMENT_COLUMNS, _document_values(document), strict=True))
         self.execute_sql(statement, {name: values[name] for name in parameter_names})
@@ -267,10 +302,13 @@ class DatabricksDocumentRegistry:
             raise DuplicateDocumentError(registered)
 
     def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
-        statement = f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
+        statement = (
+            f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
+            "WHERE status <> 'DELETED' "
+        )
         values: dict[str, object] = {}
         if case_id is not None:
-            statement += "WHERE case_id = :case_id "
+            statement += "AND case_id = :case_id "
             values["case_id"] = case_id
         rows = self.execute_sql(
             statement + "ORDER BY uploaded_at DESC, document_id DESC LIMIT 500",
@@ -281,7 +319,8 @@ class DatabricksDocumentRegistry:
     def list_case_ids(self) -> list[str]:
         rows = self.execute_sql(
             f"SELECT DISTINCT case_id FROM {self._table} "
-            "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' ORDER BY case_id LIMIT 500"
+            "WHERE case_id IS NOT NULL AND TRIM(case_id) <> '' "
+            "AND status <> 'DELETED' ORDER BY case_id LIMIT 500"
         )
         return [str(row[0]) for row in rows]
 
@@ -292,6 +331,16 @@ class DatabricksDocumentRegistry:
             {"document_id": document_id},
         )
         return _databricks_row_to_document(rows[0]) if rows else None
+
+    def delete(self, document_id: str) -> None:
+        existing = self.get(document_id)
+        if existing is None or existing.status == "DELETED":
+            raise KeyError(document_id)
+        self.execute_sql(
+            f"UPDATE {self._table} SET status = 'DELETED', updated_at = CURRENT_TIMESTAMP() "
+            "WHERE document_id = :document_id AND status <> 'DELETED'",
+            {"document_id": document_id},
+        )
 
     def update_status(
         self,

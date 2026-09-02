@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { prefetchExtractionReview } from "../lib/extractionReviewPrefetch";
+import { Pagination } from "../components/Pagination";
 import type { ExtractionRunPage, ExtractionRunSummary } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
@@ -21,6 +22,7 @@ export function ResultsPage() {
   const [search, setSearch] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [duplicateWarning, setDuplicateWarning] = useState<{
@@ -39,6 +41,7 @@ export function ResultsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
+    setPage(1);
     setLoading(true);
     setError(null);
     fetch(`/api/extractions?${requestQuery}`, { signal: controller.signal })
@@ -78,6 +81,8 @@ export function ResultsPage() {
   );
 
   const visible = rows;
+  const pageCount = Math.max(1, Math.ceil(visible.length / 10));
+  const pageRows = visible.slice((page - 1) * 10, page * 10);
   const visibleIds = useMemo(
     () => new Set(visible.map((row) => row.extraction_run_id)),
     [visible],
@@ -98,9 +103,9 @@ export function ResultsPage() {
 
   function toggleAll() {
     setSelectedIds((current) => {
-      const allSelected = visible.length > 0 && visible.every((row) => current.has(row.extraction_run_id));
+      const allSelected = pageRows.length > 0 && pageRows.every((row) => current.has(row.extraction_run_id));
       const next = new Set(current);
-      for (const row of visible) {
+      for (const row of pageRows) {
         if (allSelected) next.delete(row.extraction_run_id);
         else next.add(row.extraction_run_id);
       }
@@ -171,6 +176,7 @@ export function ResultsPage() {
       const page = (await response.json()) as ExtractionRunPage;
       setRows((current) => [...current, ...page.items]);
       setNextCursor(page.next_cursor);
+      setPage((current) => current + 1);
     } catch {
       setError("More extraction runs could not be loaded.");
     } finally {
@@ -303,7 +309,7 @@ export function ResultsPage() {
                   <input
                     type="checkbox"
                     aria-label="Select all visible runs"
-                    checked={visible.length > 0 && visible.every((row) => selectedIds.has(row.extraction_run_id))}
+                    checked={pageRows.length > 0 && pageRows.every((row) => selectedIds.has(row.extraction_run_id))}
                     onChange={toggleAll}
                   />
                 </th>
@@ -314,7 +320,7 @@ export function ResultsPage() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((row) => (
+              {pageRows.map((row) => (
                 <tr key={row.extraction_run_id}>
                   <td>
                     <input
@@ -350,11 +356,17 @@ export function ResultsPage() {
           </table>
         </div>
       ) : null}
-      {!loading && !error && nextCursor ? (
-        <div className="results-page-limit">
-          <span>Showing 50 matching runs.</span>
-          <button type="button" onClick={() => void loadMore()}>Load more</button>
-        </div>
+      {!error && visible.length ? (
+        <Pagination
+          page={Math.min(page, pageCount)}
+          pageCount={pageCount}
+          itemCount={visible.length}
+          itemLabel="runs"
+          onPageChange={setPage}
+          hasMore={Boolean(nextCursor)}
+          onLoadNext={() => void loadMore()}
+          loading={loading}
+        />
       ) : null}
     </section>
   );

@@ -46,6 +46,26 @@ afterEach(() => {
 });
 
 describe("ResultsPage", () => {
+  it("paginates extraction runs in groups of ten", async () => {
+    const manyRows = Array.from({ length: 12 }, (_, index) => ({
+      ...rows[0],
+      extraction_run_id: `run-${index + 1}`,
+      document_id: `doc-${index + 1}`,
+      document_name: `invoice-${index + 1}.pdf`,
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ items: manyRows, next_cursor: null }),
+    })));
+
+    render(<MemoryRouter><ResultsPage /></MemoryRouter>);
+
+    expect(await screen.findAllByRole("link", { name: /invoice-\d+\.pdf/ })).toHaveLength(10);
+    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
+    expect(screen.getAllByRole("link", { name: /invoice-\d+\.pdf/ })).toHaveLength(2);
+    expect(screen.getByText("11–12 of 12 runs")).toBeInTheDocument();
+  });
+
   it("lists extraction runs, links to the detail page, and defaults to latest-only", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = new URL(input.toString(), "http://idp.test");

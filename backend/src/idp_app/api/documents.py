@@ -104,3 +104,16 @@ async def get_document(
 ) -> DocumentResponse:
     document = await service.get_document(document_id)
     return DocumentResponse.model_validate(document)
+
+
+@documents_router.delete(
+    "/{document_id}",
+    status_code=204,
+    responses={404: {"model": ErrorResponse}, 502: {"model": ErrorResponse}},
+)
+async def delete_document(
+    document_id: str,
+    service: Annotated[DocumentService, Depends(get_document_service)],
+) -> Response:
+    await service.delete_document(document_id)
+    return Response(status_code=204)

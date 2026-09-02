@@ -1,4 +1,4 @@
-import { FileText, RefreshCw } from "lucide-react";
+import { FileText, RefreshCw, Trash2 } from "lucide-react";
 
 import type { DocumentRecord } from "../types";
 
@@ -12,6 +12,8 @@ type DocumentListProps = {
   selectedIds?: Set<string>;
   onToggleSelect?: (documentId: string) => void;
   onToggleAll?: () => void;
+  onDelete?: (document: DocumentRecord) => void;
+  deletingId?: string | null;
   /** Documents registered before filtering, so the count can say what is being withheld. */
   totalCount?: number;
   /** Whether a filter, rather than an empty registry, is what leaves the list short. */
@@ -38,6 +40,8 @@ export function DocumentList({
   selectedIds,
   onToggleSelect,
   onToggleAll,
+  onDelete,
+  deletingId,
   totalCount,
   filtered = false,
 }: DocumentListProps) {
@@ -99,6 +103,7 @@ export function DocumentList({
                   </th>
                 ) : null}
                 <th>Document</th><th>Case</th><th>Status</th><th>Uploaded</th><th>Size</th>
+                {onDelete ? <th><span className="visually-hidden">Actions</span></th> : null}
               </tr>
             </thead>
             <tbody>
@@ -137,6 +142,20 @@ export function DocumentList({
                   </td>
                   <td>{formatter.format(new Date(document.uploaded_at))}</td>
                   <td>{formatBytes(document.file_size)}</td>
+                  {onDelete ? (
+                    <td className="row-actions">
+                      <button
+                        className="delete-document-button"
+                        type="button"
+                        aria-label={`Delete ${document.file_name}`}
+                        title={`Delete ${document.file_name}`}
+                        disabled={deletingId === document.document_id}
+                        onClick={() => onDelete(document)}
+                      >
+                        <Trash2 size={15} aria-hidden="true" />
+                      </button>
+                    </td>
+                  ) : null}
                 </tr>
               ))}
             </tbody>
