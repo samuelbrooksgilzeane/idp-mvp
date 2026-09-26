@@ -1,4 +1,5 @@
 import hashlib
+from collections.abc import Iterator
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -7,6 +8,8 @@ from databricks.sdk.errors import ResourceAlreadyExists
 
 
 class DocumentStorage(Protocol):
+    def list_source_paths(self) -> Iterator[str]: ...
+
     def store(self, object_name: str, contents: BinaryIO) -> str: ...
 
     def verify_existing(self, object_name: str, content_hash: str, size: int) -> str: ...
@@ -17,6 +20,12 @@ class DocumentStorage(Protocol):
 class LocalVolumeStorage:
     def __init__(self, root: Path) -> None:
         self._incoming = root / "source_volume" / "incoming"
+
+    def list_source_paths(self) -> Iterator[str]:
+        if self._incoming.exists():
+            for path in self._incoming.iterdir():
+                if path.is_file():
+                    yield path.as_posix()
 
     def store(self, object_name: str, contents: BinaryIO) -> str:
         if Path(object_name).name != object_name:
@@ -54,6 +63,11 @@ class DatabricksVolumeStorage:
     ) -> None:
         self._client = client
         self._incoming = f"/Volumes/{catalog}/{project_schema}/{source_volume_name}/incoming"
+
+    def list_source_paths(self) -> Iterator[str]:
+        for entry in self._client.files.list_directory_contents(self._incoming, page_size=100):
+            if not entry.is_directory and entry.path:
+                yield entry.path
 
     def store(self, object_name: str, contents: BinaryIO) -> str:
         if Path(object_name).name != object_name:

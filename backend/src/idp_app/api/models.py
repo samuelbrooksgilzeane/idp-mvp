@@ -544,3 +544,16 @@ class CreatedUploadBatch(UploadBatchSummary):
 class UploadItemPage(BaseModel):
     items: list[UploadItemResponse]
     next_cursor: str | None
+
+
+class UploadTransportFailure(BaseModel):
+    code: Literal[
+        "HTTP_413",
+        "HTTP_401",
+        "HTTP_403",
+        "HTTP_429",
+        "HTTP_502",
+        "HTTP_503",
+        "HTTP_504",
+        "UPLOAD_REQUEST_FAILED",
+    ]

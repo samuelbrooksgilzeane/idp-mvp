@@ -130,6 +130,30 @@ class UploadBatchService:
             )
         return updated
 
+    def record_transport_failure(
+        self, batch_id: str, client_file_id: str, requester: str, code: str
+    ) -> dict[str, Any]:
+        self.authorize(batch_id, requester)
+        item = self.repository.item(batch_id, client_file_id)
+        if item is None:
+            raise DocumentServiceError("ITEM_NOT_FOUND", "Upload item not found.", 404)
+        # A gateway response cannot cancel a server request that may still be committing.
+        if item["state"] != "QUEUED":
+            return item
+        if code == "HTTP_413":
+            message = "The PDF is too large for the server or app gateway."
+        elif code in {"HTTP_401", "HTTP_403"}:
+            message = "Sign in again before retrying this file."
+        else:
+            message = "The upload connection failed. Retry this file."
+        return self.transition(
+            item,
+            state="FAILED",
+            error_code=code,
+            error_message=message,
+            retryable=code not in {"HTTP_413", "HTTP_401", "HTTP_403"},
+        )
+
     async def upload(
         self, batch_id: str, client_file_id: str, requester: str, upload: UploadFile
     ) -> DocumentRecord:

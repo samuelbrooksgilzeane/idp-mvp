@@ -173,3 +173,63 @@ def test_databricks_creation_bulk_writes_and_claim_uses_revision():
         {"state": "UPLOADING", "revision": 1, "transition_id": "winner"},
     )
     assert "AND revision = CAST(:revision AS INT)" in sql.execute_sql.call_args.args[0]
+
+
+def test_gateway_failure_is_durable_but_cannot_overwrite_success(client: TestClient):
+    batch = create(client).json()
+    url = f"/api/upload-batches/{batch['batch_id']}/items/file-0"
+    response = client.post(url + "/transport-failure", json={"code": "HTTP_413"})
+    assert response.status_code == 200
+    assert client.get(url).json()["error_code"] == "HTTP_413"
+    assert client.get(url).json()["retryable"] is False
+    assert upload(client, batch["batch_id"]).status_code == 201
+    response = client.post(url + "/transport-failure", json={"code": "HTTP_503"})
+    assert response.json()["state"] == "REGISTERED"
+
+
+def test_committed_registration_repairs_missing_item_outcome_without_reupload(client: TestClient):
+    batch = create(client).json()
+    assert upload(client, batch["batch_id"]).status_code == 201
+    repository = client.app.state.upload_batch_service.repository
+    item = repository.item(batch["batch_id"], "file-0")
+    item["state"] = "UPLOADING"
+    item["lease_expires_at"] = "2099-01-01T00:00:00+00:00"
+    assert repository.compare_and_set(item, {**item, "revision": item["revision"] + 1})
+    client.app.state.document_service._storage.store = MagicMock(
+        side_effect=AssertionError("must reuse registry")
+    )
+    assert upload(client, batch["batch_id"]).status_code == 201
+    assert repository.item(batch["batch_id"], "file-0")["state"] == "ALREADY_REGISTERED"
+
+
+def test_source_reconciliation_reports_ambiguity_without_deleting(
+    client: TestClient, tmp_path: Path
+):
+    batch = create(client).json()
+    document = upload(client, batch["batch_id"]).json()["documents"][0]
+    source_dir = tmp_path / "source_volume" / "incoming"
+    (source_dir / f"{document['document_id']}.pdf").unlink()
+    orphan = source_dir / "orphan.pdf"
+    orphan.write_bytes(PDF)
+    findings = client.app.state.document_service.reconcile_sources()
+    assert {row["kind"] for row in findings} == {"MISSING_SOURCE", "UNREGISTERED_SOURCE"}
+    assert orphan.exists()
+    assert client.get(f"/api/documents/{document['document_id']}").status_code == 200
+
+
+def test_upload_limits_follow_deployment_configuration(tmp_path: Path):
+    with TestClient(
+        create_app(
+            Settings(
+                _env_file=None,
+                local_data_dir=tmp_path,
+                max_upload_batch_files=12,
+                max_upload_bytes=1024,
+            )
+        )
+    ) as client:
+        assert client.get("/api/upload-batches/limits").json() == {
+            "max_files": 12,
+            "max_file_bytes": 1024,
+        }
+        assert create(client, count=13).status_code == 422

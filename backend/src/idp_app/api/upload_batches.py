@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from idp_app.api.dependencies import get_authenticated_user, get_upload_batch_service
 from idp_app.api.models import (
@@ -8,6 +8,8 @@ from idp_app.api.models import (
     CreateUploadBatchRequest,
     UploadBatchSummary,
     UploadItemPage,
+    UploadItemResponse,
+    UploadTransportFailure,
 )
 from idp_app.services.upload_batches import UploadBatchService
 
@@ -29,6 +31,16 @@ def create_upload_batch(
     return CreatedUploadBatch.model_validate(result)
 
 
+@upload_batches_router.get("/limits")
+def get_upload_limits(request: Request, user: User) -> dict[str, int]:
+    del user
+    settings = request.app.state.settings
+    return {
+        "max_files": min(1000, settings.max_upload_batch_files),
+        "max_file_bytes": settings.max_upload_bytes,
+    }
+
+
 @upload_batches_router.get("/{batch_id}", response_model=UploadBatchSummary)
 def get_upload_batch(batch_id: str, service: Service, user: User) -> UploadBatchSummary:
     return UploadBatchSummary.model_validate(service.summary(batch_id, user))
@@ -43,3 +55,27 @@ def get_upload_items(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> UploadItemPage:
     return UploadItemPage.model_validate(service.page(batch_id, user, cursor, limit))
+
+
+@upload_batches_router.get("/{batch_id}/items/{client_file_id}", response_model=UploadItemResponse)
+def get_upload_item(
+    batch_id: str, client_file_id: str, service: Service, user: User
+) -> UploadItemResponse:
+    from idp_app.services.documents import DocumentServiceError
+
+    service.authorize(batch_id, user)
+    item = service.repository.item(batch_id, client_file_id)
+    if item is None:
+        raise DocumentServiceError("ITEM_NOT_FOUND", "Upload item not found.", 404)
+    return UploadItemResponse.model_validate(item)
+
+
+@upload_batches_router.post(
+    "/{batch_id}/items/{client_file_id}/transport-failure", response_model=UploadItemResponse
+)
+def record_transport_failure(
+    batch_id: str, client_file_id: str, body: UploadTransportFailure, service: Service, user: User
+) -> UploadItemResponse:
+    return UploadItemResponse.model_validate(
+        service.record_transport_failure(batch_id, client_file_id, user, body.code)
+    )

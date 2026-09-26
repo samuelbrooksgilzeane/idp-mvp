@@ -159,6 +159,12 @@ class DocumentService:
             ) from error
         return document
 
+    def reconcile_sources(self, max_objects: int = 10000) -> list[dict[str, str]]:
+        """Read-only snapshot audit. In-flight uploads can appear as ambiguous orphans."""
+        from idp_app.services.source_reconciliation import reconcile_sources
+
+        return reconcile_sources(self._registry, self._storage.list_source_paths(), max_objects)
+
     async def find_registered_content(self, content_hash: str) -> DocumentRecord | None:
         return await run_in_threadpool(self._registry.find_by_hash, content_hash)
 
