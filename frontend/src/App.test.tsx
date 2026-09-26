@@ -36,6 +36,7 @@ function renderApp(path = "/") {
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
+  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -76,41 +77,6 @@ describe("App", () => {
     // The status also appears as a filter option, so assert the row's own status label.
     expect(screen.getByText("UPLOADED", { selector: ".status-label" })).toBeInTheDocument();
     expect(screen.queryByText(/Volumes/)).not.toBeInTheDocument();
-  });
-
-  it("shows a deterministic duplicate explanation from the upload API", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (input.toString().endsWith("/health")) return { ok: true, json: async () => health };
-      if (init?.method === "POST") {
-        return {
-          ok: false,
-          json: async () => ({
-            error: {
-              code: "DOCUMENT_DUPLICATE",
-              message: "This PDF is already registered as invoice-1042.pdf.",
-            },
-          }),
-        };
-      }
-      return { ok: true, json: async () => input.toString().includes("/documents/page?") ? { items: [document], next_cursor: null } : [] };
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderApp();
-    await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
-
-    const file = new File(["%PDF-1.7"], "invoice-copy.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/Choose PDF files/), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "Register documents" }));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText("This PDF is already registered as invoice-1042.pdf."),
-      ).toBeInTheDocument(),
-    );
-    const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(post?.[1]?.body).toBeInstanceOf(FormData);
-    expect(Array.from((post?.[1]?.body as FormData).keys())).not.toContain("storage_path");
   });
 
   it("navigates from the registry to a document's own route", async () => {

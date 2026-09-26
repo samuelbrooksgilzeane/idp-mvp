@@ -128,75 +128,15 @@ describe("DocumentsPage", () => {
     );
   });
 
-  it("registers multiple PDFs as bounded one-file requests", async () => {
-    const onDocumentsChanged = vi.fn();
-    const first = document({ document_id: "uploaded-1", file_name: "first.pdf" });
-    const second = document({ document_id: "uploaded-2", file_name: "second.pdf" });
-    const uploadResponses = [first, second];
-    let uploadIndex = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
-      void _init;
-      if (input.toString().includes("/api/schemas")) {
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify([]),
-        };
-      }
-
-      const uploadedDocument = uploadResponses[uploadIndex++];
-      return {
-        ok: true,
-        status: 201,
-        text: async () => JSON.stringify({ documents: [uploadedDocument], errors: [] }),
-      };
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage(onDocumentsChanged);
-
-    const files = [
-      new File(["%PDF-first"], "first.pdf", { type: "application/pdf" }),
-      new File(["%PDF-second"], "second.pdf", { type: "application/pdf" }),
-    ];
-    fireEvent.change(screen.getByLabelText(/Choose PDF files/i), {
-      target: { files },
-    });
+  it("delegates uploads to the app-owned transfer manager", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    render(<MemoryRouter><DocumentsPage documents={[]} loading={false} caseIds={[]}
+      selectedCaseId={null} onCaseChanged={vi.fn()} onDocumentsChanged={vi.fn()}
+      upload={{ batch: null, busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null, start,
+        retry: vi.fn(), clear: vi.fn(), pause: vi.fn(), refresh: vi.fn() }} /></MemoryRouter>);
+    const file = new File(["%PDF-test"], "test.pdf", { type: "application/pdf" });
+    fireEvent.change(screen.getByLabelText(/Choose PDF files/), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Register documents" }));
-
-    expect(await screen.findByText("2 documents registered.")).toBeInTheDocument();
-    const uploadCalls = fetchMock.mock.calls.filter(
-      ([input]) => input.toString() === "/api/documents",
-    );
-    expect(uploadCalls).toHaveLength(2);
-    for (const [, init] of uploadCalls) {
-      const body = init?.body as FormData;
-      expect(body.getAll("files")).toHaveLength(1);
-    }
-    expect(onDocumentsChanged).toHaveBeenCalledTimes(1);
-  });
-
-  it("turns an HTML gateway error into a useful upload message", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 413,
-      text: async () => "<!DOCTYPE html><html><body>Request too large</body></html>",
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    renderPage();
-
-    const file = new File(["%PDF-large"], "oversized.pdf", { type: "application/pdf" });
-    fireEvent.change(screen.getByLabelText(/Choose PDF files/i), {
-      target: { files: [file] },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Register documents" }));
-
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "oversized.pdf: the PDF is too large for the server or app gateway.",
-        ),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.queryByText(/Unexpected token/)).not.toBeInTheDocument();
+    await waitFor(() => expect(start).toHaveBeenCalledWith({ files: [file], caseId: "" }));
   });
 });

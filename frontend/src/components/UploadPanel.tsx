@@ -5,11 +5,14 @@ export type UploadInput = { files: File[]; caseId: string };
 
 type UploadPanelProps = {
   uploading: boolean;
+  resuming?: boolean;
+  maxFiles?: number;
+  maxFileBytes?: number | null;
   notice: { kind: "success" | "error"; message: string } | null;
   onUpload: (input: UploadInput) => Promise<void>;
 };
 
-export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
+export function UploadPanel({ uploading, notice, onUpload, resuming = false, maxFiles = 1000, maxFileBytes = null }: UploadPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [caseId, setCaseId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,6 +35,7 @@ export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
         <label className="field-label" htmlFor="case-id">Case ID <span>Optional</span></label>
         <input
           id="case-id"
+          disabled={resuming || uploading}
           maxLength={200}
           onChange={(event) => setCaseId(event.target.value)}
           placeholder="e.g. CASE-1042"
@@ -39,8 +43,8 @@ export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
         />
 
         <p className="upload-hint">
-          A document is parsed once. Choose which extraction schema to apply afterwards, on
-          the documents page.
+          Choose an extraction template after preparing your documents. Select up to {maxFiles.toLocaleString()} PDFs
+          per upload batch. Files transfer three at a time.
         </p>
 
         <label className="file-picker" htmlFor="pdf-files">
@@ -48,8 +52,8 @@ export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
           <strong>{files.length ? `${files.length} selected` : "Choose PDF files"}</strong>
           <span>
             {files.length
-              ? files.map((file) => file.name).join(", ")
-              : "PDF only, up to 25 MB each"}
+              ? files.slice(0, 3).map((file) => file.name).join(", ") + (files.length > 3 ? ` and ${files.length - 3} more` : "")
+              : maxFileBytes ? `PDF only, up to ${(maxFileBytes / 1024 / 1024).toLocaleString()} MiB each` : "PDF only; the server enforces its configured size limit"}
           </span>
         </label>
         <input
@@ -62,12 +66,13 @@ export function UploadPanel({ uploading, notice, onUpload }: UploadPanelProps) {
           onChange={(event) => setFiles(Array.from(event.target.files ?? []))}
         />
 
-        <button className="primary-action" disabled={!files.length || uploading} type="submit">
+        <button className="primary-action" disabled={!files.length || files.length > maxFiles || uploading} type="submit">
           {uploading
             ? <LoaderCircle className="spin" size={17} aria-hidden="true" />
             : <Upload size={17} aria-hidden="true" />}
-          {uploading ? "Registering" : "Register documents"}
+          {uploading ? "Uploading" : resuming ? "Reselect and continue" : "Register documents"}
         </button>
+        {files.length > maxFiles ? <p role="alert">Select at most {maxFiles.toLocaleString()} PDFs.</p> : null}
         {notice
           ? <p className={`notice notice-${notice.kind}`} role="status">{notice.message}</p>
           : null}

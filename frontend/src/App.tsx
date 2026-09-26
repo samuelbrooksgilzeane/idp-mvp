@@ -7,6 +7,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { ResultDetailPage } from "./pages/ResultDetailPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import { SchemaPage } from "./pages/SchemaPage";
+import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useDocumentPage } from "./hooks/useDocumentPage";
 import type { HealthResponse } from "./types";
 
@@ -82,6 +83,8 @@ export function App() {
     await loadCaseIds();
   }, [isRegistryRoute, loadCaseIds, refreshRegistry]);
 
+  const upload = useUploadBatch(() => { void refreshDocuments(); });
+
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/health", { signal: controller.signal })
@@ -138,6 +141,7 @@ export function App() {
             element={
               <DocumentsPage
                 key={appName}
+                upload={upload}
                 documents={registry.documents}
                 loading={registry.loading}
                 caseIds={caseIds}
