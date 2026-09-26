@@ -231,5 +231,6 @@ def test_upload_limits_follow_deployment_configuration(tmp_path: Path):
         assert client.get("/api/upload-batches/limits").json() == {
             "max_files": 12,
             "max_file_bytes": 1024,
+            "automatic_preparation": False,
         }
         assert create(client, count=13).status_code == 422

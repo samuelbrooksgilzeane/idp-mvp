@@ -39,6 +39,7 @@ class DocumentResponse(BaseModel):
     content_sha256: str
     status: Literal[
         "UPLOADED",
+        "PARSE_QUEUED",
         "PARSING",
         "PARSED",
         "PARSE_FAILED",
@@ -85,7 +86,7 @@ class ParseRunResponse(BaseModel):
     parse_run_id: str
     document_id: str
     parser_version: Literal["2.0"]
-    status: Literal["RUNNING", "SUCCESS", "FAILED"]
+    status: Literal["QUEUED", "RUNNING", "SUCCESS", "FAILED"]
     page_count: int | None
     parse_error: dict[str, object] | list[object] | None
     requested_by: str

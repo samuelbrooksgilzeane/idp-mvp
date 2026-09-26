@@ -120,15 +120,13 @@ async def extract_batch_status(
     )
 
 
-def _status(
-    kind: str, job_run_id: int, members: list[tuple[str, str, str]]
-) -> BatchStatusResponse:
+def _status(kind: str, job_run_id: int, members: list[tuple[str, str, str]]) -> BatchStatusResponse:
     statuses = [status for _, _, status in members]
     return BatchStatusResponse(
         kind=kind,  # type: ignore[arg-type]
         job_run_id=job_run_id,
         total=len(members),
-        running=sum(1 for status in statuses if status == "RUNNING"),
+        running=sum(1 for status in statuses if status in {"QUEUED", "RUNNING"}),
         succeeded=sum(1 for status in statuses if status in SUCCEEDED),
         failed=sum(1 for status in statuses if status == "FAILED"),
         members=[

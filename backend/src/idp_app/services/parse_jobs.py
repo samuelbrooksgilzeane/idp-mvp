@@ -9,7 +9,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Protocol, cast
 
-import pymupdf
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import jobs
 
@@ -136,10 +135,19 @@ class DatabricksParseJobRunner:
         ]
         wait = self._client.jobs.run_now(
             self._job_id,
-            idempotency_token=batch_idempotency_token(
-                request.parse_run_id for request in requests
-            ),
+            idempotency_token=batch_idempotency_token(request.parse_run_id for request in requests),
             job_parameters={"inputs": encode_inputs(inputs)},
+        )
+        run = cast(jobs.Run, wait.response)
+        if run.run_id is None:
+            raise RuntimeError("Databricks Jobs trigger did not return a run identifier")
+        return run.run_id
+
+    def trigger_manifest(self, dispatch_id: str) -> int:
+        wait = self._client.jobs.run_now(
+            self._job_id,
+            idempotency_token=f"parse-{dispatch_id}",
+            job_parameters={"dispatch_id": dispatch_id},
         )
         run = cast(jobs.Run, wait.response)
         if run.run_id is None:
@@ -172,6 +180,8 @@ def _parse_pdf(
     image_root: Path,
     parse_run_id: str,
 ) -> tuple[dict[str, Any], str, int]:
+    import pymupdf
+
     image_root.mkdir(parents=True, exist_ok=True)
     pages: list[dict[str, Any]] = []
     elements: list[dict[str, Any]] = []

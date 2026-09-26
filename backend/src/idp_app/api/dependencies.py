@@ -1,4 +1,11 @@
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
+
+from idp_app.services.document_models import DocumentRecord
+from idp_app.services.document_registry import DocumentRegistry
+from idp_app.services.parse_runs import ParseRunRepository
+from idp_app.services.preparation import PreparationService
+from idp_app.services.work_batches import WorkRepository
 
 if TYPE_CHECKING:
     from idp_app.services.batch_repository import BatchRepository
@@ -75,7 +82,9 @@ def build_document_service(settings: Settings) -> DocumentService:
     if settings.mode is IdpMode.MOCK:
         storage = LocalVolumeStorage(settings.local_data_dir)
         registry = SQLiteDocumentRegistry(settings.local_data_dir / "registry.sqlite3")
-        return DocumentService(storage, registry, settings.max_upload_bytes)
+        return DocumentService(
+            storage, registry, settings.max_upload_bytes, _registration_callback(settings, registry)
+        )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
     project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
@@ -108,6 +117,7 @@ def build_document_service(settings: Settings) -> DocumentService:
         databricks_storage,
         databricks_registry,
         settings.max_upload_bytes,
+        _registration_callback(settings, databricks_registry),
     )
 
 
@@ -128,7 +138,13 @@ def build_parsing_service(settings: Settings) -> ParsingService:
         mock_documents = SQLiteDocumentRegistry(database_path)
         mock_parse_runs = SQLiteParseRunRepository(database_path)
         mock_jobs = MockParseJobRunner(mock_parse_runs, mock_documents)
-        return ParsingService(settings, mock_documents, mock_parse_runs, mock_jobs)
+        return ParsingService(
+            settings,
+            mock_documents,
+            mock_parse_runs,
+            mock_jobs,
+            _preparation(settings, mock_documents, mock_parse_runs),
+        )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
     project_schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
@@ -164,6 +180,7 @@ def build_parsing_service(settings: Settings) -> ParsingService:
         databricks_documents,
         databricks_parse_runs,
         databricks_jobs,
+        _preparation(settings, databricks_documents, databricks_parse_runs),
     )
 
 
@@ -562,3 +579,44 @@ def get_upload_batch_service(request: Request) -> "UploadBatchService":
     )
     request.app.state.upload_batch_service = service
     return service
+
+
+def _preparation(
+    settings: Settings, documents: DocumentRegistry, runs: ParseRunRepository
+) -> PreparationService | None:
+    if not settings.auto_prepare_enabled:
+        return None
+    from idp_app.services.work_batches import DatabricksWorkRepository, SQLiteWorkRepository
+    from idp_app.services.work_wakeup import wake_dispatcher
+
+    repository: WorkRepository
+    if isinstance(documents, DatabricksDocumentRegistry):
+        repository = DatabricksWorkRepository(
+            documents, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
+        )
+    else:
+        repository = SQLiteWorkRepository(settings.local_data_dir / "registry.sqlite3")
+    job_id = settings.dispatch_job_id
+    return PreparationService(
+        settings, documents, runs, repository, (lambda: wake_dispatcher(job_id)) if job_id else None
+    )
+
+
+def _registration_callback(
+    settings: Settings, documents: DocumentRegistry
+) -> Callable[[DocumentRecord], object] | None:
+    if not settings.auto_prepare_enabled:
+        return None
+    runs: ParseRunRepository
+    if isinstance(documents, DatabricksDocumentRegistry):
+        runs = DatabricksParseRunRepository(
+            documents,
+            _required(settings.catalog, "catalog"),
+            _required(settings.project_schema, "schema"),
+            _required(settings.table_prefix, "prefix"),
+        )
+    else:
+        runs = SQLiteParseRunRepository(settings.local_data_dir / "registry.sqlite3")
+    preparation = _preparation(settings, documents, runs)
+    assert preparation is not None
+    return lambda document: preparation.request(document.document_id, document.uploaded_by)

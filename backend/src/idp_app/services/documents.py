@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -43,10 +44,12 @@ class DocumentService:
         storage: DocumentStorage,
         registry: DocumentRegistry,
         max_upload_bytes: int,
+        on_registered: Callable[[DocumentRecord], object] | None = None,
     ) -> None:
         self._storage = storage
         self._registry = registry
         self._max_upload_bytes = max_upload_bytes
+        self._on_registered = on_registered
 
     async def upload(
         self,
@@ -157,6 +160,17 @@ class DocumentService:
                 "The PDF was stored, but its registry record could not be committed.",
                 502,
             ) from error
+        if self._on_registered is not None:
+            try:
+                await run_in_threadpool(self._on_registered, document)
+                refreshed = await run_in_threadpool(self._registry.get, document.document_id)
+                if refreshed is not None:
+                    document = refreshed
+            except Exception:
+                # Registration is already durable. The dispatcher reconciles UPLOADED gaps.
+                logging.getLogger(__name__).warning(
+                    "Parse intent needs registration reconciliation"
+                )
         return document
 
     def reconcile_sources(self, max_objects: int = 10000) -> list[dict[str, str]]:

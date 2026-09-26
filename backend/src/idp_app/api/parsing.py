@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from idp_app.api.dependencies import get_authenticated_user, get_parsing_service
 from idp_app.api.models import ErrorResponse, ParseRunResponse
@@ -20,8 +20,9 @@ async def parse_document(
     document_id: str,
     service: Annotated[ParsingService, Depends(get_parsing_service)],
     requested_by: Annotated[str, Depends(get_authenticated_user)],
+    reparse: Annotated[bool, Query()] = False,
 ) -> ParseRunResponse:
-    return _response(await service.start(document_id, requested_by))
+    return _response(await service.start(document_id, requested_by, reparse=reparse))
 
 
 @parsing_router.get(
@@ -50,3 +51,16 @@ async def get_parse_run(
 
 def _response(run: ParseRunRecord) -> ParseRunResponse:
     return ParseRunResponse.model_validate(run, from_attributes=True)
+
+
+@parsing_router.get("/preparation")
+async def preparation_status(
+    service: Annotated[ParsingService, Depends(get_parsing_service)],
+    requested_by: Annotated[str, Depends(get_authenticated_user)],
+) -> dict[str, object]:
+    from starlette.concurrency import run_in_threadpool
+
+    del requested_by
+    if service.preparation is None:
+        return {"enabled": False, "counts": {}, "oldest_queued_at": None}
+    return {"enabled": True, **await run_in_threadpool(service.preparation.work.summary)}

@@ -3,7 +3,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Self
 
-from pydantic import PositiveInt, field_validator, model_validator
+from pydantic import Field, PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     warehouse_id: str | None = None
     parse_job_id: PositiveInt | None = None
     extraction_job_id: PositiveInt | None = None
+    dispatch_job_id: PositiveInt | None = None
+    auto_prepare_enabled: bool = False
+    parse_dispatch_size: int = Field(default=100, ge=1, le=100)
+    parse_max_attempts: int = Field(default=3, ge=1, le=5)
+    parse_claim_seconds: int = Field(default=7200, ge=300, le=86400)
     validation_endpoint: str | None = None
     app_name: str = "IDP MVP"
     local_data_dir: Path = Path(".local/idp")
@@ -82,9 +87,9 @@ class Settings(BaseSettings):
             "IDP_EXTRACTION_JOB_ID": self.extraction_job_id,
             "IDP_VALIDATION_ENDPOINT": self.validation_endpoint,
         }
+        if self.auto_prepare_enabled:
+            required["IDP_DISPATCH_JOB_ID"] = self.dispatch_job_id
         missing = [name for name, value in required.items() if not value]
         if missing:
-            raise ValueError(
-                "IDP_MODE=databricks requires configuration: " + ", ".join(missing)
-            )
+            raise ValueError("IDP_MODE=databricks requires configuration: " + ", ".join(missing))
         return self

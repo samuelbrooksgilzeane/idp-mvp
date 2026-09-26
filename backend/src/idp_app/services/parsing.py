@@ -17,6 +17,7 @@ from idp_app.services.parse_jobs import (
     ParseJobState,
 )
 from idp_app.services.parse_runs import ParseRunRepository
+from idp_app.services.preparation import PreparationService
 
 PARSER_VERSION = "2.0"
 ELIGIBLE_DOCUMENT_STATES = {
@@ -37,13 +38,21 @@ class ParsingService:
         documents: DocumentRegistry,
         parse_runs: ParseRunRepository,
         jobs: ParseJobRunner,
+        preparation: PreparationService | None = None,
     ) -> None:
         self._settings = settings
         self._documents = documents
         self._parse_runs = parse_runs
         self._jobs = jobs
+        self.preparation = preparation
 
-    async def start(self, document_id: str, requested_by: str) -> ParseRunRecord:
+    async def start(
+        self, document_id: str, requested_by: str, *, reparse: bool = False
+    ) -> ParseRunRecord:
+        if self.preparation:
+            return await run_in_threadpool(
+                self.preparation.request, document_id, requested_by, retry=True, reparse=reparse
+            )
         prepared = await self._prepare(document_id, requested_by)
         await self._submit([prepared])
         created = await run_in_threadpool(self._parse_runs.get, prepared[0].parse_run_id)
@@ -59,6 +68,15 @@ class ParsingService:
         A document that fails its own preconditions is reported against that document and does
         not prevent the rest of the batch from running.
         """
+        if self.preparation:
+            queued: list[ParseRunRecord] = []
+            skipped: list[BatchFailure] = []
+            for identity in dict.fromkeys(document_ids):
+                try:
+                    queued.append(await self.start(identity, requested_by))
+                except DocumentServiceError as error:
+                    skipped.append(BatchFailure(identity, error.code, error.message))
+            return queued, skipped
         prepared: list[tuple[ParseRunRecord, ParseJobRequest]] = []
         failures: list[BatchFailure] = []
         for document_id in dict.fromkeys(document_ids):
@@ -170,7 +188,7 @@ class ParsingService:
         run = await run_in_threadpool(self._parse_runs.get, parse_run_id)
         if run is None:
             raise DocumentServiceError("RUN_NOT_FOUND", "Parse run not found.", 404)
-        if run.status == "RUNNING" and run.job_run_id is not None:
+        if self.preparation is None and run.status == "RUNNING" and run.job_run_id is not None:
             poll = await run_in_threadpool(self._jobs.poll, run.job_run_id)
             if poll.state is ParseJobState.FAILED:
                 await self._fail_running_job(run, poll.message)
@@ -198,7 +216,7 @@ class ParsingService:
         runs = await run_in_threadpool(self._parse_runs.list_for_job_run, job_run_id)
         if not runs:
             raise DocumentServiceError("BATCH_NOT_FOUND", "Batch not found.", 404)
-        if any(run.status == "RUNNING" for run in runs):
+        if self.preparation is None and any(run.status == "RUNNING" for run in runs):
             poll = await run_in_threadpool(self._jobs.poll, job_run_id)
             if poll.state is not ParseJobState.RUNNING:
                 for run in runs:

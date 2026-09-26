@@ -32,12 +32,13 @@ def create_upload_batch(
 
 
 @upload_batches_router.get("/limits")
-def get_upload_limits(request: Request, user: User) -> dict[str, int]:
+def get_upload_limits(request: Request, user: User) -> dict[str, int | bool]:
     del user
     settings = request.app.state.settings
     return {
         "max_files": min(1000, settings.max_upload_batch_files),
         "max_file_bytes": settings.max_upload_bytes,
+        "automatic_preparation": settings.auto_prepare_enabled,
     }
 
 

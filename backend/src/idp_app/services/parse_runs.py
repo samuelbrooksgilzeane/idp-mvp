@@ -30,6 +30,8 @@ PARSE_RUN_COLUMNS = (
 class ParseRunRepository(Protocol):
     def create(self, run: ParseRunRecord) -> None: ...
 
+    def activate(self, parse_run_id: str) -> None: ...
+
     def assign_job_run(self, parse_run_id: str, job_run_id: int) -> None: ...
 
     def complete(
@@ -100,16 +102,23 @@ class SQLiteParseRunRepository:
         placeholders = ", ".join("?" for _ in PARSE_RUN_COLUMNS)
         with self._connect() as connection:
             connection.execute(
-                f"INSERT INTO parse_runs ({', '.join(PARSE_RUN_COLUMNS)}) "
+                f"INSERT OR IGNORE INTO parse_runs ({', '.join(PARSE_RUN_COLUMNS)}) "
                 f"VALUES ({placeholders})",
                 values,
+            )
+
+    def activate(self, parse_run_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE parse_runs SET status = 'RUNNING' "
+                "WHERE parse_run_id = ? AND status = 'QUEUED'",
+                (parse_run_id,),
             )
 
     def assign_job_run(self, parse_run_id: str, job_run_id: int) -> None:
         with self._connect() as connection:
             cursor = connection.execute(
-                "UPDATE parse_runs SET job_run_id = ? "
-                "WHERE parse_run_id = ? AND status = 'RUNNING'",
+                "UPDATE parse_runs SET job_run_id = ? WHERE parse_run_id = ?",
                 (job_run_id, parse_run_id),
             )
             if cursor.rowcount != 1:
@@ -151,7 +160,7 @@ class SQLiteParseRunRepository:
                 """
                 UPDATE parse_runs
                 SET parse_error = ?, status = 'FAILED', completed_at = ?
-                WHERE parse_run_id = ? AND status = 'RUNNING'
+                WHERE parse_run_id = ? AND status IN ('QUEUED', 'RUNNING')
                 """,
                 (
                     json.dumps(parse_error, separators=(",", ":")),
@@ -210,12 +219,13 @@ class DatabricksParseRunRepository:
 
     def create(self, run: ParseRunRecord) -> None:
         self._sql.execute_sql(
-            f"INSERT INTO {self._table} "
+            f"MERGE INTO {self._table} t USING (SELECT :parse_run_id AS parse_run_id) s "
+            "ON t.parse_run_id = s.parse_run_id WHEN NOT MATCHED THEN INSERT "
             "(parse_run_id, document_id, content_sha256, parser_version, "
             "parsed, document_text, page_count, page_image_root, parse_error, status, "
             "requested_by, job_run_id, started_at, completed_at) VALUES "
             "(:parse_run_id, :document_id, :content_sha256, :parser_version, NULL, NULL, NULL, "
-            ":page_image_root, NULL, 'RUNNING', :requested_by, NULL, "
+            ":page_image_root, NULL, :status, :requested_by, NULL, "
             "CAST(:started_at AS TIMESTAMP), NULL)",
             {
                 "parse_run_id": run.parse_run_id,
@@ -225,13 +235,21 @@ class DatabricksParseRunRepository:
                 "page_image_root": run.page_image_root,
                 "requested_by": run.requested_by,
                 "started_at": run.started_at,
+                "status": run.status,
             },
+        )
+
+    def activate(self, parse_run_id: str) -> None:
+        self._sql.execute_sql(
+            f"UPDATE {self._table} SET status = 'RUNNING' "
+            "WHERE parse_run_id = :id AND status = 'QUEUED'",
+            {"id": parse_run_id},
         )
 
     def assign_job_run(self, parse_run_id: str, job_run_id: int) -> None:
         self._sql.execute_sql(
             f"UPDATE {self._table} SET job_run_id = CAST(:job_run_id AS BIGINT) "
-            "WHERE parse_run_id = :parse_run_id AND status = 'RUNNING'",
+            "WHERE parse_run_id = :parse_run_id",
             {"parse_run_id": parse_run_id, "job_run_id": job_run_id},
         )
 
@@ -263,7 +281,7 @@ class DatabricksParseRunRepository:
         self._sql.execute_sql(
             f"UPDATE {self._table} SET parse_error = PARSE_JSON(:parse_error), "
             "status = 'FAILED', completed_at = CURRENT_TIMESTAMP() "
-            "WHERE parse_run_id = :parse_run_id AND status = 'RUNNING'",
+            "WHERE parse_run_id = :parse_run_id AND status IN ('QUEUED', 'RUNNING')",
             {
                 "parse_run_id": parse_run_id,
                 "parse_error": json.dumps(parse_error, separators=(",", ":")),
@@ -279,8 +297,7 @@ class DatabricksParseRunRepository:
 
     def list_for_document(self, document_id: str) -> list[ParseRunRecord]:
         rows = self._sql.execute_sql(
-            self._select_sql()
-            + " WHERE document_id = :document_id "
+            self._select_sql() + " WHERE document_id = :document_id "
             "ORDER BY started_at DESC, parse_run_id DESC LIMIT 100",
             {"document_id": document_id},
         )
@@ -296,8 +313,7 @@ class DatabricksParseRunRepository:
 
     def latest_successful(self, document_id: str) -> ParseRunRecord | None:
         rows = self._sql.execute_sql(
-            self._select_sql()
-            + " WHERE document_id = :document_id AND status = 'SUCCESS' "
+            self._select_sql() + " WHERE document_id = :document_id AND status = 'SUCCESS' "
             "ORDER BY completed_at DESC, parse_run_id DESC LIMIT 1",
             {"document_id": document_id},
         )
@@ -346,9 +362,7 @@ def _sqlite_row_to_parse_run(row: sqlite3.Row) -> ParseRunRecord:
         job_run_id=cast(int | None, row["job_run_id"]),
         started_at=datetime.fromisoformat(cast(str, row["started_at"])),
         completed_at=(
-            datetime.fromisoformat(cast(str, row["completed_at"]))
-            if row["completed_at"]
-            else None
+            datetime.fromisoformat(cast(str, row["completed_at"])) if row["completed_at"] else None
         ),
     )
 
@@ -369,9 +383,7 @@ def _databricks_row_to_parse_run(row: list[str]) -> ParseRunRecord:
         requested_by=values["requested_by"],
         job_run_id=int(values["job_run_id"]) if values["job_run_id"] else None,
         started_at=_parse_timestamp(values["started_at"]),
-        completed_at=(
-            _parse_timestamp(values["completed_at"]) if values["completed_at"] else None
-        ),
+        completed_at=(_parse_timestamp(values["completed_at"]) if values["completed_at"] else None),
     )
 
 
