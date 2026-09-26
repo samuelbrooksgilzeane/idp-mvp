@@ -215,3 +215,84 @@ configuration validation passed. All work was local: no Databricks calls, PDF lo
 AI calls, migration, deployment or workspace capacity claim. The previously documented
 full-bundle validator issue and workspace verification gates are unchanged. Existing
 untracked `frontend/dist/` and `output/` remain untouched.
+
+## Bulk extraction integration — 26 September 2026
+
+The durable extraction path is now wired end to end in source on `feat/bulk-extraction`.
+It supersedes the infrastructure-only limitation in the previous checkpoint.
+
+- `f1ae574`: shared stage-isolated dispatcher, extraction claim/worker adapter, retained
+  result projection recovery, bounded retries, owner-scoped request/status/member/retry
+  routes, and explicit local mock drain command.
+- `ae71dca`: extractor manifest loader and ID-only task, coordinator wiring for both
+  stages, default-off activation settings and focused configuration checks.
+- The following UI checkpoint adds a persistent batch pointer and pending submission
+  identity, 50-member pages, failed-member retry, hidden-tab pause and terminal stop.
+  Legacy batch polling also backs off to five seconds and cleans up on navigation.
+
+### Behavior and recovery
+
+`POST /api/extraction-batches` accepts at most 1,000 UUID selections, persists a request
+identity and immutable template version/hash, and returns 202 before document validation.
+The coordinator resolves at most 100 documents per step, then publishes bounded work
+items. All member inputs are resolved before that request becomes dispatchable. It runs
+one active dispatch per stage, with no duplicate document within an extraction dispatch.
+The API does not execute inference or poll Jobs on progress reads.
+
+The loader checks work kind, manifest membership and task-value size. The worker consumes
+one live claim and verifies document/hash, pinned successful parse, requester, template
+version/hash and reconstructed template content. A later parse does not replace the
+pinned input. Projection uses retained output; incomplete projection rows for that
+unfinished run are rebuilt before terminal success. Successful immutable runs are not
+cleared. The Job identity needs narrowly scoped MODIFY rights on its projection tables
+for this recovery, in addition to existing read/write requirements.
+
+Task failures remain nonterminal in work progress until the central reconciler decides
+whether to retry. Infrastructure failures get at most three attempts with backoff and
+new immutable run IDs; running Jobs are never reclaimed solely on lease expiry. A raw
+result saved before a crash is projected without repeating inference. As before, an
+inference response lost before durable retention can still lead to another call.
+
+Explicit retry creates an idempotent child request containing only failed members.
+Members with valid saved inputs retain their original parse and template pins; failures
+that never resolved a parse undergo validation again. Successful members and previous
+attempts remain intact. A deliberate new extraction selection resolves current inputs.
+
+The browser stores its current batch ID and any unconfirmed submission identity. Refresh
+restores owner-authorized status, not automatic resubmission. “Retry submission” replays
+the saved identity after an ambiguous response. Member status pages are bounded to 50;
+polling pauses in hidden tabs and stops at terminal state. Dismissing progress does not
+cancel work. Batch history remains durable even when the browser pointer is replaced.
+
+### Activation and deferred checks
+
+`IDP_BULK_EXTRACTION_ENABLED` / bundle `bulk_extraction_enabled` defaults to false.
+It is independent of automatic preparation. When enabled, the Documents page routes
+bulk selections through the durable API. Existing legacy APIs remain compatible and
+retain their 200-document limit; they are not the 1,000-member path. Drain legacy runs
+before enabling this coordinator. Legacy and manifest execution share each stage's
+max-one Job and concurrency ceiling.
+
+Apply the latest additive work-batch migration (including `work_batches`), review table
+and dispatcher grants, verify the bundle/runtime in the workspace, then deliberately
+enable processing and unpause hourly recovery. No grants, migrations, schedules or
+feature flags were activated during implementation. No extra app resource binding was
+added. The known full-bundle `sync.include` validator failure remains deferred.
+
+For an explicitly enabled local mock app, run
+`backend/.venv/bin/python scripts/drain_local_extractions.py` after submitting work.
+It drains saved requests for up to one hour, uses one mock task at a time, and refuses
+Databricks mode. Local execution is not launched by GET status requests. This command
+was not run against an existing user dataset during implementation.
+
+Validation: 79 focused backend tests and 17 frontend tests passed, including bounded
+metadata-only 1,000-member validation, submission ambiguity, live-Job lease safety,
+retained-result recovery, retry budgets, failed-only retry, owner checks, browser
+refresh, hidden polling and terminal stop. Focused Ruff/mypy, TypeScript, ESLint, six
+configuration validators, runtime syntax and production build passed. These results
+are local/mocked evidence, not proof of Delta races, gateway behavior, deployed identity
+or AI throughput. No workspace calls or AI inference ran. Existing untracked
+`frontend/dist/` and `output/` were preserved; no branch was merged or pushed.
+
+Next work package: durable export requests/artifacts and bounded workbook generation.
+Navigation/viewer improvements, Genie and user-operated release measurements remain.
