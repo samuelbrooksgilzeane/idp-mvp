@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     parse_job_id: PositiveInt | None = None
     extraction_job_id: PositiveInt | None = None
     dispatch_job_id: PositiveInt | None = None
+    bulk_export_enabled: bool = False
+    export_job_id: PositiveInt | None = None
+    export_retention_hours: int = Field(default=24, ge=1, le=168)
     auto_prepare_enabled: bool = False
     bulk_extraction_enabled: bool = False
     parse_dispatch_size: int = Field(default=100, ge=1, le=100)
@@ -90,6 +93,8 @@ class Settings(BaseSettings):
         }
         if self.auto_prepare_enabled or self.bulk_extraction_enabled:
             required["IDP_DISPATCH_JOB_ID"] = self.dispatch_job_id
+        if self.bulk_export_enabled:
+            required["IDP_EXPORT_JOB_ID"] = self.export_job_id
         missing = [name for name, value in required.items() if not value]
         if missing:
             raise ValueError("IDP_MODE=databricks requires configuration: " + ", ".join(missing))

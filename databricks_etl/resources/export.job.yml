@@ -1,0 +1,44 @@
+resources:
+  jobs:
+    results_exporter:
+      name: ${var.app_name}-${bundle.target}-results-exporter
+      description: Serialized disk-backed exports of retained results; no AI inference.
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      parameters:
+      - name: export_id
+        default: ''
+      tasks:
+      - task_key: export_results
+        spark_python_task:
+          python_file: ../src/export_results.py
+          parameters:
+          - --export-id
+          - '{{job.parameters.export_id}}'
+          - --catalog
+          - ${var.catalog}
+          - --project-schema
+          - ${var.project_schema}
+          - --table-prefix
+          - ${var.table_prefix}
+          - --source-volume-name
+          - ${var.source_volume_name}
+          - --artifacts-volume-name
+          - ${var.artifacts_volume_name}
+          - --warehouse-id
+          - ${var.warehouse_id}
+        timeout_seconds: 3600
+        max_retries: 1
+        min_retry_interval_millis: 60000
+        environment_key: default
+      environments:
+      - environment_key: default
+        spec:
+          environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0
+          - fastapi==0.116.1
+          - pydantic-settings==2.10.1
+          - openpyxl==3.1.5
+          - python-multipart==0.0.32

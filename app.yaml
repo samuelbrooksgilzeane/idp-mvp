@@ -36,6 +36,8 @@ command:
   - "8000"
 env:
   # Enable after applying queue migrations and configuring the dispatcher Job ID.
+  - name: IDP_BULK_EXPORT_ENABLED
+    value: "false"
   - name: IDP_BULK_EXTRACTION_ENABLED
     value: "false"
   - name: IDP_AUTO_PREPARE_ENABLED

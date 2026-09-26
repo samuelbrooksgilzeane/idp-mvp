@@ -136,6 +136,10 @@ resources:
           - --port
           - "8000"
         env:
+          - name: IDP_BULK_EXPORT_ENABLED
+            value: ${var.bulk_export_enabled}
+          - name: IDP_EXPORT_JOB_ID
+            value: ${resources.jobs.results_exporter.id}
           - name: IDP_BULK_EXTRACTION_ENABLED
             value: ${var.bulk_extraction_enabled}
           - name: IDP_AUTO_PREPARE_ENABLED

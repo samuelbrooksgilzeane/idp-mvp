@@ -40,6 +40,7 @@ def get_upload_limits(request: Request, user: User) -> dict[str, int | bool]:
         "max_file_bytes": settings.max_upload_bytes,
         "automatic_preparation": settings.auto_prepare_enabled,
         "bulk_extraction": settings.bulk_extraction_enabled,
+        "bulk_export": settings.bulk_export_enabled,
     }
 
 

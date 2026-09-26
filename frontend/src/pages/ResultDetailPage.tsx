@@ -1,3 +1,5 @@
+import { useExportRequest } from "../hooks/useExportRequest";
+import { ExportStatus } from "../components/ExportStatus";
 import { ArrowLeft, ChevronDown, Download, LoaderCircle, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -10,6 +12,12 @@ import type { ExtractionReview } from "../types";
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function ResultDetailPage() {
+  const [bulkExport, setBulkExport] = useState(false);
+  const exportTask = useExportRequest(window.location.origin);
+  useEffect(() => {
+    void fetch("/api/upload-batches/limits").then(r => r.json())
+      .then(value => setBulkExport(value.bulk_export === true)).catch(() => undefined);
+  }, []);
   const { runId = "" } = useParams();
   const navigate = useNavigate();
   const [review, setReview] = useState<ExtractionReview | null>(null);
@@ -73,6 +81,7 @@ export function ResultDetailPage() {
   }
 
   async function handleExport() {
+    if (bulkExport) { await exportTask.start([runId]); return; }
     setExporting(true);
     setNotice(null);
     try {
@@ -145,6 +154,7 @@ export function ResultDetailPage() {
         </div>
       </div>
 
+      <ExportStatus task={exportTask} />
       {notice ? <p className="notice notice-error">{notice}</p> : null}
 
       <details className="run-details-drawer">

@@ -105,10 +105,10 @@ describe("ResultDetailPage", () => {
     expect(await screen.findByText("invoice-a.pdf")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "invoice · v4" })).toBeInTheDocument();
     expect(screen.getByText("114")).toBeInTheDocument();
-    expect(fetch).toHaveBeenCalledWith(
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
       `/api/documents/${documentId}/pages?parse_run_id=parse-1`,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
-    );
+    ));
 
     fireEvent.click(screen.getByText("Run details"));
     expect(screen.getByText(runId)).toBeInTheDocument();

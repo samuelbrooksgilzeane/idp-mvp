@@ -1,3 +1,5 @@
+import { useExportRequest } from "../hooks/useExportRequest";
+import { ExportStatus } from "../components/ExportStatus";
 import { Download, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -9,6 +11,12 @@ import type { ExtractionRunPage, ExtractionRunSummary } from "../types";
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function ResultsPage() {
+  const [bulkExport, setBulkExport] = useState(false);
+  const exportTask = useExportRequest(window.location.origin);
+  useEffect(() => {
+    void fetch("/api/upload-batches/limits").then(r => r.json())
+      .then(value => setBulkExport(value.bulk_export === true)).catch(() => undefined);
+  }, []);
   const [rows, setRows] = useState<ExtractionRunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +137,7 @@ export function ResultsPage() {
   }
 
   async function runExport(runIds: string[], format: "xlsx" | "csv" = "xlsx") {
+    if (bulkExport) { await exportTask.start(runIds, format); return; }
     setExporting(true);
     setExportError(null);
     try {
@@ -255,6 +264,7 @@ export function ResultsPage() {
         </div>
       </div>
 
+      <ExportStatus task={exportTask} />
       {exportError ? <p className="notice notice-error">{exportError}</p> : null}
 
       {duplicateWarning ? (

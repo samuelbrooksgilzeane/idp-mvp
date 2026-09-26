@@ -9,6 +9,9 @@ sync:
     - ..
 
 variables:
+  bulk_export_enabled:
+    description: Enable only after export tables and Job permissions are verified.
+    default: "false"
   bulk_extraction_enabled:
     description: Enable durable extraction after migration and workspace verification.
     default: "false"

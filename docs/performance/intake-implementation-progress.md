@@ -296,3 +296,27 @@ or AI throughput. No workspace calls or AI inference ran. Existing untracked
 
 Next work package: durable export requests/artifacts and bounded workbook generation.
 Navigation/viewer improvements, Genie and user-operated release measurements remain.
+
+## Stage 4 — durable export checkpoint
+
+Branch `feat/export-capacity` adds a shared disk-spooled writer for the existing small export
+route and the new durable request worker. Headers are discovered before rows are written;
+workbooks use write-only sheets, explicit text cells, collision-safe names, relational keys,
+row splitting and an export manifest. CSV and mixed-schema archives copy files/entries from disk.
+Source reads are paged at 25 retained results. The temporary spool has a configurable byte budget.
+
+New owner-scoped request/status/download routes persist pinned selections and idempotency keys;
+separate export_members are repaired from the immutable request after interrupted initialization.
+The browser retains ambiguous submissions for explicit replay and downloads artifacts through
+normal links. The dedicated export Job queues requests with one concurrent worker and one retry.
+Interrupted RUNNING exports regenerate from pinned inputs; artifacts publish before success metadata.
+Expiry is enforced on every status/download, with worker-side deletion when an expired request is run.
+There is no scheduled artifact cleanup: an operator must remove expired retained files separately.
+
+Activation remains deferred: apply `migrate_export_requests.sql`, grant the existing app identity
+narrow table/artifact access and CAN_MANAGE_RUN on the export Job, then enable
+`bulk_export_enabled`. No extra app resource binding was added. No migration or Job was executed.
+Local verification: 22 backend tests and 8 frontend tests passed, including a synthetic 1,000-member
+restart/paged-read test (40 reads), writer limits, replay and authorization. TypeScript and ESLint
+passed. Workspace downloads, runtime packaging, memory/CPU benchmarking and the 100,000-child-row
+capacity evidence remain release verification work; no uploaded documents or AI functions were used.
