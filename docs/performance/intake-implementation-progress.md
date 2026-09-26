@@ -115,3 +115,63 @@ execute the plan's live or paid scale-test gates automatically.
 Existing untracked `frontend/dist/` and `output/` were preserved. No migration,
 deployment, remote push or merge was performed. No clustering/index changes were
 made without measurements.
+
+## Automatic preparation checkpoint — 26 September 2026
+
+Branch `feat/automatic-preparation` is stacked on `feat/intake-capacity`; neither
+branch has been pushed or merged. Implementation checkpoints:
+
+- `194c0ac`: durable parse intents, compare-and-swap claims, serialized dispatch,
+  idempotent submission, bounded retry and registration reconciliation.
+- `0cb29f5`: manifest loader, parser/dispatcher Job wiring, retained-result recovery,
+  combined inference concurrency guard and immutable extraction parse validation.
+- `020b8e8`: waiting/processing/readiness labels, background page refresh and advanced
+  manual preparation controls. Queued requests no longer appear ineligible.
+
+Automatic preparation is disabled by default. The new recovery schedule is paused.
+No migration, deployment, grant, workspace SQL request, Job execution, PDF upload or
+AI inference was performed. Local tests used synthetic metadata and mocked Jobs.
+
+Before enabling in the workspace:
+
+1. Apply the expanded additive `databricks_etl/sql/migrate_work_batches.sql`, including
+   `work_items` and `work_dispatches` as well as upload tables. An earlier execution
+   of the upload-only migration does not create these additional tables.
+2. Review narrow table privileges for the app/Job identities and grant the app
+   permission to run the dispatcher Job. The existing app resource bindings already
+   use the repository's 20-resource budget; these additions do not add bindings or
+   automatically grant broad schema access. The dispatcher ID environment value
+   alone does not grant permission.
+3. Verify bundle/runtime compatibility and drain any legacy parsing runs before
+   enabling the new queue. The pre-existing missing frontend `sync.include` validator
+   issue remains unresolved and must be checked before deployment.
+4. Configure `auto_prepare_enabled=true` and unpause recovery deliberately after
+   user-controlled smoke verification. `IDP_DISPATCH_JOB_ID` references the deployed
+   dispatcher. Default parser/extractor concurrency is one each, combined budget two;
+   dispatches contain at most 100 IDs. These are ceilings, not measured Free Edition
+   capacity or throughput guarantees.
+
+The dispatcher wakes on registration (coalesced), with scheduled reconciliation as
+fallback. It persists submission identity before calling Jobs, polls active runs,
+and does not reclaim tasks merely because their lease expired while a Job is still
+active. Each retry gets an immutable parse-run ID. Retained successful output is
+recovered without inference; an interrupted inference with no persisted result can
+still be repeated, so this is not an exactly-once billing guarantee. The finite
+coordinator exits after idle grace or its runtime bound.
+
+Serverless environments use version 3, consistent with the current
+[ai_parse_document requirements](https://docs.databricks.com/aws/en/sql/language-manual/functions/ai_parse_document).
+The notebook loader emits bounded ID-only task values, keeping full metadata in the
+repository. Legacy input mode is retained but cannot be combined with manifest mode.
+
+Validation: 41 focused backend tests passed (queue/recovery, runtime guards, parsing,
+batches and extraction); 16 focused frontend tests passed. Ruff on changed runtime
+files, TypeScript, ESLint, frontend production build, Python syntax and six focused
+configuration validators passed. The pinned-parse regression accepts an older
+successful parse after a newer success exists and rejects source/document/status
+mismatches. Full bundle validation and deployed identity/Delta/Job behavior remain
+unverified. Existing untracked `frontend/dist/` and `output/` remain untouched.
+
+Next implementation package is durable bulk extraction: persisted requests and
+progress, bounded metadata resolution, extractor manifests and explicit retries.
+Exports, navigation/viewer optimizations and Genie remain subsequent packages.
