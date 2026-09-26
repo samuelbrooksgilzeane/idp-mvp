@@ -2,46 +2,55 @@ resources:
   jobs:
     document_extractor:
       name: ${var.app_name}-${bundle.target}-document-extractor
-      description: Extracts registered documents using an immutable schema and parse attempt.
-      max_concurrent_runs: 4
+      description: Extracts registered documents using an immutable schema and parse
+        attempt.
+      max_concurrent_runs: 1
       parameters:
-        - name: catalog
-          default: ${var.catalog}
-        - name: project_schema
-          default: ${var.project_schema}
-        - name: table_prefix
-          default: ${var.table_prefix}
-        - name: inputs
-          default: "[]"
+      - name: catalog
+        default: ${var.catalog}
+      - name: project_schema
+        default: ${var.project_schema}
+      - name: table_prefix
+        default: ${var.table_prefix}
+      - name: inputs
+        default: '[]'
       tasks:
-        - task_key: extract_document_batch
-          for_each_task:
-            inputs: "{{job.parameters.inputs}}"
-            # Concurrency must be explicit: the default of 1 processes a batch sequentially.
-            concurrency: ${var.batch_concurrency}
-            task:
-              task_key: extract_registered_document
-              spark_python_task:
-                python_file: ../src/extract_document.py
-                parameters:
-                  - --catalog
-                  - "{{job.parameters.catalog}}"
-                  - --project-schema
-                  - "{{job.parameters.project_schema}}"
-                  - --table-prefix
-                  - "{{job.parameters.table_prefix}}"
-                  - --document-id
-                  - "{{input.document_id}}"
-                  - --extraction-run-id
-                  - "{{input.extraction_run_id}}"
-                  - --schema-id
-                  - "{{input.schema_id}}"
-                  - --schema-version
-                  - "{{input.schema_version}}"
-                  - --requested-by
-                  - "{{input.requested_by}}"
-              environment_key: default
+      - task_key: extract_document_batch
+        for_each_task:
+          inputs: '{{job.parameters.inputs}}'
+          concurrency: ${var.extraction_concurrency}
+          task:
+            task_key: extract_registered_document
+            spark_python_task:
+              python_file: ../src/extract_document.py
+              parameters:
+              - --catalog
+              - '{{job.parameters.catalog}}'
+              - --project-schema
+              - '{{job.parameters.project_schema}}'
+              - --table-prefix
+              - '{{job.parameters.table_prefix}}'
+              - --document-id
+              - '{{input.document_id}}'
+              - --extraction-run-id
+              - '{{input.extraction_run_id}}'
+              - --schema-id
+              - '{{input.schema_id}}'
+              - --schema-version
+              - '{{input.schema_version}}'
+              - --requested-by
+              - '{{input.requested_by}}'
+              - --parse-concurrency
+              - ${var.parse_concurrency}
+              - --extraction-concurrency
+              - ${var.extraction_concurrency}
+              - --combined-budget
+              - ${var.combined_inference_concurrency}
+            environment_key: default
+            max_retries: 0
       environments:
-        - environment_key: default
-          spec:
-            environment_version: "2"
+      - environment_key: default
+        spec:
+          environment_version: '3'
+      queue:
+        enabled: false

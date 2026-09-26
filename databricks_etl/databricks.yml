@@ -9,6 +9,24 @@ sync:
     - ..
 
 variables:
+  auto_prepare_enabled:
+    description: Enable only after queue migrations and dispatcher permissions are applied
+    default: "false"
+  recovery_schedule_status:
+    description: PAUSED until automatic preparation is explicitly enabled
+    default: PAUSED
+  parse_concurrency:
+    description: Maximum parser tasks in the single active parser run
+    default: 1
+  extraction_concurrency:
+    description: Maximum extractor tasks in the single active extractor run
+    default: 1
+  combined_inference_concurrency:
+    description: Shared parser plus extractor admission ceiling
+    default: 2
+  parse_dispatch_size:
+    description: Work IDs per persisted parse manifest, maximum 100
+    default: 100
   catalog:
     description: Existing permitted Unity Catalog catalog
   project_schema:

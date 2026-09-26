@@ -35,6 +35,9 @@ command:
   - --port
   - "8000"
 env:
+  # Enable after applying queue migrations and configuring the dispatcher Job ID.
+  - name: IDP_AUTO_PREPARE_ENABLED
+    value: "false"
   - name: IDP_MODE
     value: databricks
   - name: IDP_CATALOG

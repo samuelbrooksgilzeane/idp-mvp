@@ -181,7 +181,10 @@ class WorkDispatcher:
                 )
 
     def _settle(self, item: WorkItem) -> None:
-        if item.state in {"SUCCEEDED", "QUEUED"}:
+        if item.state == "SUCCEEDED":
+            self.preparation.mark_document(item, "PARSED")
+            return
+        if item.state == "QUEUED":
             return
         run = self.preparation.runs.get(item.parse_run_id)
         if run is None:

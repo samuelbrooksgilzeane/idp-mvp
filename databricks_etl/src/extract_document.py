@@ -53,7 +53,12 @@ def parse_arguments() -> Parameters:
     parser.add_argument("--schema-id", required=True)
     parser.add_argument("--schema-version", required=True, type=int)
     parser.add_argument("--requested-by", required=True)
+    parser.add_argument("--parse-concurrency", type=int, default=1)
+    parser.add_argument("--extraction-concurrency", type=int, default=1)
+    parser.add_argument("--combined-budget", type=int, default=2)
     arguments = parser.parse_args()
+    from work_limits import validate_capacity
+    validate_capacity(arguments.parse_concurrency, arguments.extraction_concurrency, arguments.combined_budget)
     parameters = Parameters(
         catalog=arguments.catalog,
         project_schema=arguments.project_schema,
@@ -130,6 +135,22 @@ def _without_nulls(value: object) -> object:
     return value
 
 
+def require_pinned_parse(session: Any, parse_runs: str, parse_run_id: str,
+                         document_id: str, content_sha256: str) -> None:
+    pinned = session.sql(
+        f"""
+        SELECT parse_run_id FROM {parse_runs}
+        WHERE parse_run_id = :parse_run_id AND document_id = :document_id
+          AND content_sha256 = :content_sha256 AND status = 'SUCCESS'
+        LIMIT 1
+        """,
+        args={"parse_run_id": parse_run_id, "document_id": document_id,
+              "content_sha256": content_sha256},
+    ).first()
+    if pinned is None:
+        raise ValueError("The pinned successful parse does not match the registered source")
+
+
 def main() -> None:
     parameters = parse_arguments()
     documents = qualified(parameters, "documents")
@@ -198,7 +219,7 @@ def main() -> None:
 
         document = spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""
-            SELECT case_id, source_path, template_id
+            SELECT case_id, source_path, template_id, content_sha256
             FROM {documents}
             WHERE document_id = :document_id AND status = 'EXTRACTING'
             LIMIT 1
@@ -208,18 +229,8 @@ def main() -> None:
         if document is None:
             raise ValueError("The document is not in the extraction state")
 
-        latest_parse = spark.sql(  # type: ignore[name-defined]  # noqa: F821
-            f"""
-            SELECT parse_run_id
-            FROM {parse_runs}
-            WHERE document_id = :document_id AND status = 'SUCCESS'
-            ORDER BY completed_at DESC, parse_run_id DESC
-            LIMIT 1
-            """,
-            args={"document_id": parameters.document_id},
-        ).first()
-        if latest_parse is None or latest_parse["parse_run_id"] != run["parse_run_id"]:
-            raise ValueError("The extraction run does not reference the latest successful parse")
+        require_pinned_parse(spark, parse_runs, run["parse_run_id"],  # noqa: F821
+                             parameters.document_id, document["content_sha256"])
 
         result = spark.sql(  # type: ignore[name-defined]  # noqa: F821
             f"""

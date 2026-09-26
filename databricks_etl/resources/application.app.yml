@@ -136,6 +136,12 @@ resources:
           - --port
           - "8000"
         env:
+          - name: IDP_AUTO_PREPARE_ENABLED
+            value: ${var.auto_prepare_enabled}
+          - name: IDP_DISPATCH_JOB_ID
+            value: ${resources.jobs.work_dispatcher.id}
+          - name: IDP_PARSE_DISPATCH_SIZE
+            value: ${var.parse_dispatch_size}
           - name: IDP_MODE
             value: databricks
           - name: IDP_CATALOG

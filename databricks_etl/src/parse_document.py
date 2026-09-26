@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 UUID = re.compile(
@@ -23,6 +24,9 @@ class Parameters:
     parse_run_id: str
     source_path: str
     image_output_path: str
+    work_item_id: str | None = None
+    dispatch_id: str | None = None
+    warehouse_id: str | None = None
 
 
 def parse_arguments() -> Parameters:
@@ -32,10 +36,13 @@ def parse_arguments() -> Parameters:
     parser.add_argument("--table-prefix", required=True)
     parser.add_argument("--source-volume-name", required=True)
     parser.add_argument("--artifacts-volume-name", required=True)
-    parser.add_argument("--document-id", required=True)
-    parser.add_argument("--parse-run-id", required=True)
-    parser.add_argument("--source-path", required=True)
-    parser.add_argument("--image-output-path", required=True)
+    parser.add_argument("--document-id", default="")
+    parser.add_argument("--parse-run-id", default="")
+    parser.add_argument("--source-path", default="")
+    parser.add_argument("--image-output-path", default="")
+    parser.add_argument("--work-item-id")
+    parser.add_argument("--dispatch-id")
+    parser.add_argument("--warehouse-id")
     arguments = parser.parse_args()
     parameters = Parameters(
         catalog=arguments.catalog,
@@ -47,6 +54,9 @@ def parse_arguments() -> Parameters:
         parse_run_id=arguments.parse_run_id,
         source_path=arguments.source_path,
         image_output_path=arguments.image_output_path,
+        work_item_id=arguments.work_item_id,
+        dispatch_id=arguments.dispatch_id,
+        warehouse_id=arguments.warehouse_id,
     )
     validate(parameters)
     return parameters
@@ -61,7 +71,35 @@ def validate(parameters: Parameters) -> None:
         parameters.artifacts_volume_name,
     )
     if any(SIMPLE_IDENTIFIER.fullmatch(value) is None for value in identifiers):
-        raise ValueError("Databricks object configuration contains an invalid identifier")
+        raise ValueError(
+            "Databricks object configuration contains an invalid identifier"
+        )
+    if parameters.work_item_id or parameters.dispatch_id:
+        if (
+            not parameters.warehouse_id
+            or not parameters.work_item_id
+            or not parameters.dispatch_id
+        ):
+            raise ValueError(
+                "Manifest execution requires work-item-id, dispatch-id and warehouse-id"
+            )
+        if (
+            UUID.fullmatch(parameters.work_item_id) is None
+            or UUID.fullmatch(parameters.dispatch_id) is None
+        ):
+            raise ValueError("Work and dispatch identities must be UUIDs")
+        if any(
+            (
+                parameters.document_id,
+                parameters.parse_run_id,
+                parameters.source_path,
+                parameters.image_output_path,
+            )
+        ):
+            raise ValueError(
+                "Manifest tasks must resolve trusted inputs, not accept legacy paths"
+            )
+        return
     if UUID.fullmatch(parameters.document_id) is None:
         raise ValueError("document_id must be a UUID")
     if UUID.fullmatch(parameters.parse_run_id) is None:
@@ -76,12 +114,16 @@ def validate(parameters: Parameters) -> None:
         f"{parameters.artifacts_volume_name}/page_images/"
         f"{parameters.document_id}/{parameters.parse_run_id}/"
     )
-    if not parameters.source_path.startswith(source_root):
+    if not parameters.source_path.startswith(
+        source_root
+    ) or ".." in parameters.source_path.split("/"):
         raise ValueError("source_path is outside the configured incoming directory")
     if not parameters.source_path.lower().endswith(".pdf"):
         raise ValueError("source_path must identify a PDF")
     if parameters.image_output_path != image_root:
-        raise ValueError("image_output_path is outside the parse run artifact directory")
+        raise ValueError(
+            "image_output_path is outside the parse run artifact directory"
+        )
 
 
 def qualified(parameters: Parameters, suffix: str) -> str:
@@ -93,32 +135,82 @@ def qualified(parameters: Parameters, suffix: str) -> str:
 
 def main() -> None:
     parameters = parse_arguments()
+    from pyspark.sql import SparkSession
+
+    global spark
+    spark = SparkSession.builder.getOrCreate()
+    preparation = None
+    claimed = None
+    retained = None
+    if parameters.work_item_id:
+        from work_runtime import build_preparation
+        from idp_app.services.work_execution import (
+            begin_parse,
+            check_owner,
+            finish_parse,
+        )
+
+        preparation, _ = build_preparation(
+            parameters.catalog,
+            parameters.project_schema,
+            parameters.table_prefix,
+            parameters.source_volume_name,
+            parameters.artifacts_volume_name,
+            parameters.warehouse_id,
+        )
+        claimed = begin_parse(
+            preparation, parameters.dispatch_id, parameters.work_item_id
+        )
+        if claimed is None:
+            return
+        retained = claimed.run.parsed
+        parameters = replace(
+            parameters,
+            document_id=claimed.document.document_id,
+            parse_run_id=claimed.run.parse_run_id,
+            source_path=claimed.document.source_path,
+            image_output_path=claimed.run.page_image_root.rstrip("/") + "/",
+            work_item_id=None,
+            dispatch_id=None,
+        )
+        validate(parameters)
+
+    def checkpoint():
+        if preparation is not None and claimed is not None:
+            check_owner(preparation, claimed)
+
     documents = qualified(parameters, "documents")
     parse_runs = qualified(parameters, "parsed_documents")
 
+    result_persisted = retained is not None
     try:
-        parse_result = spark.sql(  # type: ignore[name-defined]  # Databricks injects SparkSession.
-            """
-            SELECT to_json(
-              ai_parse_document(
-                content,
-                map(
-                  'version', '2.0',
-                  'imageOutputPath', :image_output_path,
-                  'descriptionElementTypes', ''
-                )
-              )
-            ) AS parsed_json
-            FROM READ_FILES(:source_path, format => 'binaryFile')
-            """,
-            args={
-                "source_path": parameters.source_path,
-                "image_output_path": parameters.image_output_path,
-            },
-        ).first()
+        checkpoint()
+        if retained is not None:
+            parse_result = {"parsed_json": json.dumps(retained)}
+        else:
+            parse_result = spark.sql(  # type: ignore[name-defined]  # Databricks injects SparkSession.
+                """
+                SELECT to_json(
+                  ai_parse_document(
+                    content,
+                    map(
+                      'version', '2.0',
+                      'imageOutputPath', :image_output_path,
+                      'descriptionElementTypes', ''
+                    )
+                  )
+                ) AS parsed_json
+                FROM READ_FILES(:source_path, format => 'binaryFile')
+                """,
+                args={
+                    "source_path": parameters.source_path,
+                    "image_output_path": parameters.image_output_path,
+                },
+            ).first()
         if parse_result is None or parse_result["parsed_json"] is None:
             raise RuntimeError("ai_parse_document returned no result")
 
+        checkpoint()
         # Retain the complete parser contract before any derived fields are written.
         spark.sql(  # type: ignore[name-defined]
             f"""
@@ -131,6 +223,8 @@ def main() -> None:
                 "parsed_json": parse_result["parsed_json"],
             },
         )
+
+        result_persisted = True
 
         spark.sql(  # type: ignore[name-defined]
             f"""
@@ -181,7 +275,28 @@ def main() -> None:
                 "parse_run_id": parameters.parse_run_id,
             },
         )
-    except Exception:
+        if preparation is not None and claimed is not None:
+            finish_parse(preparation, claimed)
+    except Exception as error:
+        checkpoint()
+        if result_persisted:
+            raise  # Dispatcher completes retained output without another inference call.
+        transient = any(
+            code in str(error).upper()
+            for code in (
+                "TEMPORARILY_UNAVAILABLE",
+                "RESOURCE_EXHAUSTED",
+                "TIMEOUT",
+                "HTTP 429",
+                "HTTP 503",
+            )
+        )
+        failure = json.dumps(
+            {
+                "code": "TRANSIENT_PARSE_ERROR" if transient else "PARSE_FAILED",
+                "error_message": "Document parsing failed in Databricks.",
+            }
+        )
         spark.sql(  # type: ignore[name-defined]
             f"""
             UPDATE {parse_runs}
@@ -191,7 +306,7 @@ def main() -> None:
             """,
             args={
                 "parse_run_id": parameters.parse_run_id,
-                "parse_error": '{"error_message":"Document parsing failed in Databricks."}',
+                "parse_error": failure,
             },
         )
         spark.sql(  # type: ignore[name-defined]

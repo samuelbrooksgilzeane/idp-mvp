@@ -17,6 +17,12 @@ TRUSTED_VARIABLES = {
     "evaluation_experiment",
     "app_name",
     "batch_concurrency",
+    "auto_prepare_enabled",
+    "recovery_schedule_status",
+    "parse_concurrency",
+    "extraction_concurrency",
+    "combined_inference_concurrency",
+    "parse_dispatch_size",
 }
 EXPECTED_BOOTSTRAP_PARAMETERS = {
     "catalog": "${var.catalog}",
@@ -331,7 +337,12 @@ def validate_data_bootstrap() -> None:
             )
 
 
-def reviewed_batch_task(tasks: object, python_file: str, label: str) -> None:
+def reviewed_batch_task(
+    tasks: object,
+    python_file: str,
+    label: str,
+    concurrency: str = "${var.extraction_concurrency}",
+) -> None:
     """A batch job runs exactly one reviewed task per document, in parallel.
 
     for_each defaults to a concurrency of 1, which would process a batch sequentially, so the
@@ -346,7 +357,7 @@ def reviewed_batch_task(tasks: object, python_file: str, label: str) -> None:
         raise ValueError(
             f"{label} must take its documents from the trusted inputs parameter"
         )
-    if for_each.get("concurrency") != "${var.batch_concurrency}":
+    if for_each.get("concurrency") != concurrency:
         raise ValueError(
             f"{label} must set concurrency from the trusted deployment variable"
         )
@@ -363,8 +374,33 @@ def validate_parsing_job() -> None:
     parsing = jobs.get("document_parser")
     if not isinstance(parsing, dict):
         raise ValueError("Bundle must define the document_parser job")
+    tasks = parsing.get("tasks", [])
+    if len(tasks) != 3 or tasks[0].get("task_key") != "load_work_manifest":
+        raise ValueError("Parser must load the durable manifest before document tasks")
+    if (
+        tasks[0].get("notebook_task", {}).get("notebook_path")
+        != "../src/load_work_manifest.py"
+    ):
+        raise ValueError("Parser must use the reviewed manifest loader notebook")
+    if (
+        tasks[1].get("for_each_task", {}).get("inputs")
+        != "{{tasks.load_work_manifest.values.work_item_ids}}"
+    ):
+        raise ValueError("Parser must consume IDs from the persisted dispatch manifest")
+    if (
+        tasks[1].get("for_each_task", {}).get("concurrency")
+        != "${var.parse_concurrency}"
+    ):
+        raise ValueError("Parser must use its separate concurrency budget")
+    if parsing.get("max_concurrent_runs") != 1:
+        raise ValueError("Parser stage must admit only one active run")
+    if parsing.get("environments", [])[0]["spec"]["environment_version"] != "3":
+        raise ValueError("Parser requires the reviewed serverless environment 3")
     reviewed_batch_task(
-        parsing.get("tasks"), "../src/parse_document.py", "Document parser"
+        [tasks[2]],
+        "../src/parse_document.py",
+        "Legacy parser",
+        "${var.parse_concurrency}",
     )
 
     source = (ROOT / "databricks_etl" / "src" / "parse_document.py").read_text(
@@ -393,6 +429,10 @@ def validate_extraction_job() -> None:
     reviewed_batch_task(
         extraction.get("tasks"), "../src/extract_document.py", "Document extractor"
     )
+    if extraction.get("max_concurrent_runs") != 1:
+        raise ValueError("Extractor stage must admit only one active run")
+    if extraction.get("environments", [])[0]["spec"]["environment_version"] != "3":
+        raise ValueError("Extractor must use the reviewed serverless environment 3")
     source = (ROOT / "databricks_etl" / "src" / "extract_document.py").read_text(
         encoding="utf-8"
     )
@@ -403,7 +443,8 @@ def validate_extraction_job() -> None:
         "'enableCitations', 'true'",
         "'enableConfidenceScores', 'true'",
         "SET ai_result = PARSE_JSON(:result_json)",
-        "ORDER BY completed_at DESC, parse_run_id DESC",
+        "require_pinned_parse",
+        "AND content_sha256 = :content_sha256",
     )
     if any(value not in source for value in required):
         raise ValueError(
@@ -413,6 +454,35 @@ def validate_extraction_job() -> None:
     for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
         if forbidden in f" {normalized} ":
             raise ValueError(f"Extraction task contains forbidden SQL: {forbidden}")
+
+
+def validate_dispatch_job() -> None:
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "dispatch.job.yml")
+    job = resource["resources"]["jobs"]["work_dispatcher"]
+    if (
+        job.get("max_concurrent_runs") != 1
+        or job.get("queue", {}).get("enabled") is not False
+    ):
+        raise ValueError(
+            "The dispatcher must serialize work without queued wake-up runs"
+        )
+    if job.get("schedule", {}).get("pause_status") != "${var.recovery_schedule_status}":
+        raise ValueError(
+            "The recovery schedule must have an explicit activation setting"
+        )
+    bundle = load_yaml(ROOT / "databricks_etl" / "databricks.yml")
+    variables = bundle["variables"]
+    if (
+        variables["auto_prepare_enabled"]["default"] != "false"
+        or variables["recovery_schedule_status"]["default"] != "PAUSED"
+    ):
+        raise ValueError(
+            "Automatic processing must remain off until deployment activation"
+        )
+    if int(variables["parse_concurrency"]["default"]) + int(
+        variables["extraction_concurrency"]["default"]
+    ) > int(variables["combined_inference_concurrency"]["default"]):
+        raise ValueError("Default stage concurrency exceeds the combined budget")
 
 
 def validate_application_resource() -> None:
@@ -473,6 +543,7 @@ def main() -> None:
     validate_bundle_config()
     validate_data_bootstrap()
     validate_parsing_job()
+    validate_dispatch_job()
     validate_extraction_job()
     validate_application_resource()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
