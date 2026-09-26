@@ -2,10 +2,9 @@ import { useNavigate } from "react-router-dom";
 
 import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
-import { Pagination } from "../components/Pagination";
 import { UploadPanel, type UploadInput } from "../components/UploadPanel";
 import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
-import type { ApiError, DocumentRecord, DocumentStatus, Notice } from "../types";
+import type { ApiError, DocumentRecord, Notice } from "../types";
 import { useEffect, useMemo, useState } from "react";
 
 type UploadFailure = {
@@ -23,6 +22,17 @@ type DocumentsPageProps = {
   selectedCaseId: string | null;
   onCaseChanged: (caseId: string | null) => void;
   onDocumentsChanged: () => Promise<void> | void;
+  status?: string;
+  search?: string;
+  onStatusChanged?: (status: string) => void;
+  onSearchChanged?: (search: string) => void;
+  pageError?: string | null;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  onReset?: () => void;
+  selectionScope?: string;
 };
 
 export function DocumentsPage({
@@ -32,55 +42,43 @@ export function DocumentsPage({
   selectedCaseId,
   onCaseChanged,
   onDocumentsChanged,
+  status = "", search = "", onStatusChanged, onSearchChanged,
+  pageError, hasPrevious, hasNext, onPrevious, onNext, onReset,
+  selectionScope = "project",
 }: DocumentsPageProps) {
   const navigate = useNavigate();
   const [uploading, setUploading] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [page, setPage] = useState(1);
+  const selectionKey = `idp:document-selection:${selectionScope}`;
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    try {
+      const saved: unknown = JSON.parse(sessionStorage.getItem(selectionKey) ?? "[]");
+      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string").slice(0, 1000) : []);
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    try { sessionStorage.setItem(selectionKey, JSON.stringify([...selectedIds])); } catch { /* Storage may be unavailable. */ }
+  }, [selectedIds, selectionKey]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const [status, setStatus] = useState<DocumentStatus | "">("");
-  const [search, setSearch] = useState("");
-
-  // Offer only the statuses the case actually contains, plus whichever one is selected, so
-  // the control never lists a state the registry cannot show or silently drops its own value.
-  const statuses = useMemo(() => {
-    const present = new Set(documents.map((item) => item.status));
-    if (status) present.add(status);
-    return [...present].sort();
-  }, [documents, status]);
-
-  const visible = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return documents.filter(
-      (item) =>
-        (!status || item.status === status) &&
-        (!term || item.file_name.toLowerCase().includes(term)),
-    );
-  }, [documents, status, search]);
-  const visibleIds = useMemo(
-    () => new Set(visible.map((item) => item.document_id)),
-    [visible],
-  );
-  const pageCount = Math.max(1, Math.ceil(visible.length / 10));
-  const pageDocuments = visible.slice((page - 1) * 10, page * 10);
-
+  const [searchInput, setSearchInput] = useState(search);
+  useEffect(() => { setSearchInput(search); }, [search]);
   useEffect(() => {
-    setPage((current) => Math.min(current, pageCount));
-  }, [pageCount]);
-  // A batch only ever acts on documents the filters leave visible, so a hidden document
-  // can never be swept into a run the user cannot see.
-  const selection = useMemo(
-    () => [...selectedIds].filter((id) => visibleIds.has(id)),
-    [selectedIds, visibleIds],
-  );
+    if (searchInput === search) return;
+    const timeout = window.setTimeout(() => onSearchChanged?.(searchInput), 250);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput, search, onSearchChanged]);
+  // These are domain states, not facets inferred from the current page.
+  const statuses = ["UPLOADED", "PARSING", "PARSED", "PARSE_FAILED", "EXTRACTING",
+    "EXTRACTED", "EXTRACT_FAILED", "VALIDATING", "VALIDATED_PASS", "REVIEW_REQUIRED"];
+  const selection = useMemo(() => [...selectedIds], [selectedIds]);
+  const pageDocuments = documents;
 
   function toggleSelect(documentId: string) {
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(documentId)) next.delete(documentId);
-      else next.add(documentId);
+      else if (next.size < 1000) next.add(documentId);
       return next;
     });
   }
@@ -92,16 +90,14 @@ export function DocumentsPage({
       const next = new Set(current);
       for (const item of pageDocuments) {
         if (allSelected) next.delete(item.document_id);
-        else next.add(item.document_id);
+        else if (next.size < 1000) next.add(item.document_id);
       }
       return next;
     });
   }
 
   function changeCase(caseId: string | null) {
-    setSelectedIds(new Set());
     onCaseChanged(caseId);
-    setPage(1);
   }
 
   async function handleDelete(document: DocumentRecord) {
@@ -224,10 +220,7 @@ export function DocumentsPage({
             <select
               id="document-status-filter"
               value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as DocumentStatus | "");
-                setPage(1);
-              }}
+              onChange={(event) => onStatusChanged?.(event.target.value)}
             >
               <option value="">All statuses</option>
               {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -238,14 +231,14 @@ export function DocumentsPage({
             <input
               id="document-name-filter"
               type="search"
-              value={search}
+              value={searchInput}
               placeholder="File name"
-              onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+              onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
           <p className="registry-filters-hint">
-            The case scopes the registry; status and search narrow what is listed. A batch
-            only ever runs the documents left visible here.
+            Filters change the list. Your explicit selection stays selected across pages and
+            filters (up to 1,000 documents). Clear it before starting a different selection.
           </p>
         </div>
         <BatchActions
@@ -255,7 +248,6 @@ export function DocumentsPage({
         />
         <DocumentList
           documents={pageDocuments}
-          totalCount={documents.length}
           filtered={Boolean(status || search.trim())}
           loading={loading}
           selectedDocumentId={null}
@@ -268,15 +260,12 @@ export function DocumentsPage({
           onDelete={(document) => void handleDelete(document)}
           deletingId={deletingId}
         />
-        {!loading && visible.length ? (
-          <Pagination
-            page={Math.min(page, pageCount)}
-            pageCount={pageCount}
-            itemCount={visible.length}
-            itemLabel="documents"
-            onPageChange={setPage}
-          />
-        ) : null}
+        {pageError ? <p role="alert">{pageError} <button type="button" onClick={onReset}>Reset list</button></p> : null}
+        <nav aria-label="Document pages">
+          <button type="button" disabled={loading || !hasPrevious} onClick={onPrevious}>Previous page</button>
+          <button type="button" disabled={loading || !hasNext} onClick={onNext}>Next page</button>
+          <button type="button" disabled={loading} onClick={onReset}>First page</button>
+        </nav>
       </div>
     </section>
   );

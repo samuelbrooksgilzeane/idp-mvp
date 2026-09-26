@@ -7,7 +7,8 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 import { ResultDetailPage } from "./pages/ResultDetailPage";
 import { ResultsPage } from "./pages/ResultsPage";
 import { SchemaPage } from "./pages/SchemaPage";
-import type { DocumentRecord, HealthResponse } from "./types";
+import { useDocumentPage } from "./hooks/useDocumentPage";
+import type { HealthResponse } from "./types";
 
 export type {
   ApiError,
@@ -53,28 +54,12 @@ const HEADINGS: Record<string, { eyebrow: string; title: string; blurb: string }
 
 export function App() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
-  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
-  const [documentsLoading, setDocumentsLoading] = useState(true);
   const [caseIds, setCaseIds] = useState<string[]>([]);
-  const [documentCaseId, setDocumentCaseId] = useState<string | null>(null);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
 
-  const loadDocuments = useCallback(async (caseId: string | null, signal?: AbortSignal) => {
-    setDocumentsLoading(true);
-    try {
-      const query = caseId ? `?case_id=${encodeURIComponent(caseId)}` : "";
-      const response = await fetch(`/api/documents${query}`, { signal });
-      if (!response.ok) throw new Error("Documents request failed");
-      setDocuments((await response.json()) as DocumentRecord[]);
-    } catch (error: unknown) {
-      if (!(error instanceof DOMException && error.name === "AbortError")) {
-        setDocuments([]);
-      }
-    } finally {
-      if (!signal?.aborted) setDocumentsLoading(false);
-    }
-  }, []);
+  const registry = useDocumentPage(isRegistryRoute);
+  const refreshRegistry = registry.refresh;
 
   const loadCaseIds = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -93,8 +78,9 @@ export function App() {
 
   const refreshDocuments = useCallback(async () => {
     if (!isRegistryRoute) return;
-    await Promise.all([loadDocuments(documentCaseId), loadCaseIds()]);
-  }, [documentCaseId, isRegistryRoute, loadCaseIds, loadDocuments]);
+    refreshRegistry();
+    await loadCaseIds();
+  }, [isRegistryRoute, loadCaseIds, refreshRegistry]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -111,16 +97,6 @@ export function App() {
       });
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    if (!isRegistryRoute) {
-      setDocumentsLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    void loadDocuments(documentCaseId, controller.signal);
-    return () => controller.abort();
-  }, [documentCaseId, isRegistryRoute, loadDocuments]);
 
   useEffect(() => {
     if (!isRegistryRoute) return;
@@ -161,13 +137,23 @@ export function App() {
             path="/"
             element={
               <DocumentsPage
-                documents={documents}
-                loading={documentsLoading}
+                key={appName}
+                documents={registry.documents}
+                loading={registry.loading}
                 caseIds={caseIds}
-                selectedCaseId={documentCaseId}
-                onCaseChanged={(caseId) => {
-                  setDocumentCaseId(caseId);
-                }}
+                selectedCaseId={registry.caseId}
+                onCaseChanged={(caseId) => registry.changeFilter("case", caseId)}
+                status={registry.status}
+                search={registry.search}
+                onStatusChanged={(status) => registry.changeFilter("status", status)}
+                onSearchChanged={(search) => registry.changeFilter("search", search)}
+                pageError={registry.error}
+                hasPrevious={registry.previousCursor !== undefined}
+                hasNext={Boolean(registry.nextCursor)}
+                onPrevious={() => registry.changeCursor(registry.previousCursor ?? "")}
+                onNext={() => registry.changeCursor(registry.nextCursor ?? "")}
+                onReset={() => registry.changeCursor("")}
+                selectionScope={appName}
                 onDocumentsChanged={refreshDocuments}
               />
             }

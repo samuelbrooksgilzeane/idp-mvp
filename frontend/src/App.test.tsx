@@ -35,6 +35,7 @@ function renderApp(path = "/") {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -42,7 +43,7 @@ describe("App", () => {
   it("renders document intake with proxied health and an empty registry", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
       ok: true,
-      json: async () => (input.toString().endsWith("/health") ? health : []),
+      json: async () => (input.toString().endsWith("/health") ? health : input.toString().includes("/documents/page?") ? { items: [], next_cursor: null } : []),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -64,7 +65,7 @@ describe("App", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL) => ({
         ok: true,
-        json: async () => (input.toString().endsWith("/health") ? health : [document]),
+        json: async () => (input.toString().endsWith("/health") ? health : input.toString().includes("/documents/page?") ? { items: [document], next_cursor: null } : []),
       })),
     );
 
@@ -91,7 +92,7 @@ describe("App", () => {
           }),
         };
       }
-      return { ok: true, json: async () => [document] };
+      return { ok: true, json: async () => input.toString().includes("/documents/page?") ? { items: [document], next_cursor: null } : [] };
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -123,7 +124,7 @@ describe("App", () => {
         }
         if (url.endsWith("/parse-runs")) return { ok: true, json: async () => [] };
         if (url.endsWith("/pages")) return { ok: true, status: 200, json: async () => [] };
-        return { ok: true, json: async () => [document] };
+        return { ok: true, json: async () => input.toString().includes("/documents/page?") ? { items: [document], next_cursor: null } : [] };
       }),
     );
 
@@ -142,7 +143,7 @@ describe("App", () => {
   it("serves the schema contract from its own route", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => ({
       ok: true,
-      json: async () => (input.toString().endsWith("/health") ? health : []),
+      json: async () => (input.toString().endsWith("/health") ? health : input.toString().includes("/documents/page?") ? { items: [], next_cursor: null } : []),
     }));
     vi.stubGlobal(
       "fetch",
@@ -176,7 +177,7 @@ describe("App", () => {
     expect(await screen.findByText("No extraction runs")).toBeInTheDocument();
     const requested = fetchMock.mock.calls.map(([input]) => input.toString());
     expect(requested.some((url) => url.startsWith("/api/extractions?"))).toBe(true);
-    expect(requested).not.toContain("/api/documents");
+    expect(requested.some((url) => url.startsWith("/api/documents/page"))).toBe(false);
     expect(requested).not.toContain("/api/documents/cases");
   });
 });

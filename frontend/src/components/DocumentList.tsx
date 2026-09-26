@@ -98,7 +98,7 @@ export function DocumentList({
                       type="checkbox"
                       checked={allSelected}
                       onChange={onToggleAll}
-                      aria-label={allSelected ? "Clear selection" : "Select all documents"}
+                      aria-label={allSelected ? "Clear this page" : "Select this page"}
                     />
                   </th>
                 ) : null}

@@ -45,31 +45,20 @@ function renderPage(onDocumentsChanged = vi.fn()) {
 
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
 describe("DocumentsPage", () => {
-  it("paginates the registry in groups of ten", () => {
-    const manyDocuments = Array.from({ length: 12 }, (_, index) =>
-      document({ document_id: `doc-${index + 1}`, file_name: `document-${index + 1}.pdf` }),
-    );
-    const { container } = render(
-      <MemoryRouter>
-        <DocumentsPage
-          documents={manyDocuments}
-          loading={false}
-          caseIds={[]}
-          selectedCaseId={null}
-          onCaseChanged={vi.fn()}
-          onDocumentsChanged={vi.fn()}
-        />
-      </MemoryRouter>,
-    );
-
-    expect(container.querySelectorAll("button.document-link")).toHaveLength(10);
-    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
-    expect(container.querySelectorAll("button.document-link")).toHaveLength(2);
-    expect(screen.getByText("11–12 of 12 documents")).toBeInTheDocument();
+  it("renders one server page and requests the next page", () => {
+    const onNext = vi.fn();
+    render(<MemoryRouter><DocumentsPage documents={documents} loading={false}
+      caseIds={[]} selectedCaseId={null} onCaseChanged={vi.fn()}
+      onDocumentsChanged={vi.fn()} hasNext onNext={onNext} /></MemoryRouter>);
+    expect(screen.getAllByRole("button", { name: /alpha.*pdf|beta.*pdf/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(onNext).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Previous page" })).toBeDisabled();
   });
 
   it("deletes a confirmed document and refreshes the registry", async () => {
@@ -86,43 +75,33 @@ describe("DocumentsPage", () => {
     expect(onDocumentsChanged).toHaveBeenCalledTimes(1);
   });
 
-  it("narrows the registry by status and by file name", () => {
-    renderPage();
-    expect(screen.getByText("3 documents")).toBeInTheDocument();
-
+  it("sends status and debounced filename filters to the server owner", async () => {
+    const onSearchChanged = vi.fn();
+    const onStatusChanged = vi.fn();
+    render(<MemoryRouter><DocumentsPage documents={documents} loading={false}
+      caseIds={[]} selectedCaseId={null} onCaseChanged={vi.fn()}
+      onDocumentsChanged={vi.fn()} onSearchChanged={onSearchChanged}
+      onStatusChanged={onStatusChanged} /></MemoryRouter>);
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "PARSED" } });
-    expect(screen.getByText("2 of 3 documents")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "beta-invoice.pdf" })).not.toBeInTheDocument();
-
+    expect(onStatusChanged).toHaveBeenCalledWith("PARSED");
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "credit" } });
-    expect(screen.getByText("1 of 3 documents")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "alpha-credit-note.pdf" })).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "nothing here" } });
-    expect(screen.getByText("No matching documents")).toBeInTheDocument();
+    expect(onSearchChanged).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSearchChanged).toHaveBeenCalledWith("credit"));
+    expect(screen.getByRole("option", { name: "PARSE_FAILED" })).toBeInTheDocument();
   });
 
-  it("only offers the statuses the registry actually contains", () => {
-    renderPage();
-    const options = screen
-      .getAllByRole("option")
-      .map((option) => option.textContent)
-      .filter((label) => label !== "All cases" && label !== "CASE-A");
-    expect(options).toEqual(["All statuses", "EXTRACTED", "PARSED"]);
-  });
-
-  it("never batches a document the filter has hidden", () => {
-    renderPage();
-    fireEvent.click(screen.getByLabelText("Select all documents"));
+  it("preserves explicit selection across pages, filters and remounts", () => {
+    const props = { loading: false, caseIds: [], selectedCaseId: null,
+      onCaseChanged: vi.fn(), onDocumentsChanged: vi.fn() };
+    const view = render(<MemoryRouter><DocumentsPage {...props} documents={documents} /></MemoryRouter>);
+    fireEvent.click(screen.getByLabelText("Select this page"));
     expect(screen.getByText("3 selected")).toBeInTheDocument();
-
-    // Narrowing the view narrows the batch: the two hidden documents drop out of it.
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "credit" } });
-    expect(screen.getByText("1 selected")).toBeInTheDocument();
-
-    // Selecting all while filtered adds only what is visible.
-    fireEvent.change(screen.getByLabelText("Search"), { target: { value: "" } });
+    view.rerender(<MemoryRouter><DocumentsPage {...props} documents={[]} search="missing" /></MemoryRouter>);
     expect(screen.getByText("3 selected")).toBeInTheDocument();
+    view.unmount();
+    render(<MemoryRouter><DocumentsPage {...props} documents={documents} /></MemoryRouter>);
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select alpha-invoice.pdf")).toBeChecked();
   });
 
   it("warms a document's latest extraction review when its detail button is previewed", async () => {
