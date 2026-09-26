@@ -37,6 +37,8 @@ class ExtractionBatch:
     created_at: str
     state: str = "VALIDATING"
     resolved: list[dict[str, Any]] = field(default_factory=list)
+    retry_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    published: int = 0
     revision: int = 0
     transition_id: str = "initial"
 
@@ -44,7 +46,7 @@ class ExtractionBatch:
 class ExtractionBatchRepository(Protocol):
     def create(self, batch: ExtractionBatch) -> ExtractionBatch: ...
     def get(self, batch_id: str) -> ExtractionBatch | None: ...
-    def pending(self, limit: int) -> list[ExtractionBatch]: ...
+    def pending(self, limit: int, state: str = "VALIDATING") -> list[ExtractionBatch]: ...
     def update(self, old: ExtractionBatch, new: ExtractionBatch) -> bool: ...
 
 
@@ -77,12 +79,11 @@ class SQLiteExtractionBatchRepository:
             ).fetchone()
         return ExtractionBatch(**json.loads(row[0])) if row else None
 
-    def pending(self, limit: int) -> list[ExtractionBatch]:
+    def pending(self, limit: int, state: str = "VALIDATING") -> list[ExtractionBatch]:
         with self.connect() as connection:
             rows = connection.execute(
-                "SELECT payload FROM work_batches WHERE state = 'VALIDATING' "
-                "ORDER BY batch_id LIMIT ?",
-                (limit,),
+                "SELECT payload FROM work_batches WHERE state = ? ORDER BY batch_id LIMIT ?",
+                (state, limit),
             ).fetchall()
         return [ExtractionBatch(**json.loads(row[0])) for row in rows]
 
@@ -121,11 +122,11 @@ class DatabricksExtractionBatchRepository:
             raise RuntimeError("Duplicate extraction batch identity requires reconciliation")
         return ExtractionBatch(**json.loads(rows[0][0])) if rows else None
 
-    def pending(self, limit: int) -> list[ExtractionBatch]:
+    def pending(self, limit: int, state: str = "VALIDATING") -> list[ExtractionBatch]:
         rows = self.sql.execute_sql(
-            f"SELECT payload FROM {self.table} WHERE state = 'VALIDATING' "
+            f"SELECT payload FROM {self.table} WHERE state = :state "
             "ORDER BY batch_id LIMIT CAST(:limit AS INT)",
-            {"limit": limit},
+            {"limit": limit, "state": state},
         )
         return [ExtractionBatch(**json.loads(row[0])) for row in rows]
 
@@ -247,10 +248,12 @@ class ExtractionBatchService:
                 for identity in chunk
             ]
         else:
-            inputs, failures = resolve_extraction_inputs(self.documents, self.parses, schema, chunk)
-            by_id = {
+            fresh = [identity for identity in chunk if identity not in batch.retry_inputs]
+            inputs, failures = resolve_extraction_inputs(self.documents, self.parses, schema, fresh)
+            by_id: dict[str, dict[str, Any]] = {
                 item.document.document_id: {
                     "document_id": item.document.document_id,
+                    "file_name": item.document.file_name,
                     "content_sha256": item.document.content_sha256,
                     "parse_run_id": item.parse.parse_run_id,
                     "state": "QUEUED",
@@ -266,6 +269,18 @@ class ExtractionBatchService:
                         "error_message": failure.message,
                     }
                     for failure in failures
+                }
+            )
+            by_id.update(
+                {
+                    identity: {
+                        **batch.retry_inputs[identity],
+                        "state": "QUEUED",
+                        "error_code": None,
+                        "error_message": None,
+                    }
+                    for identity in chunk
+                    if identity in batch.retry_inputs
                 }
             )
             members = [by_id[identity] for identity in chunk]

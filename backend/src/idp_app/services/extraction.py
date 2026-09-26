@@ -228,12 +228,12 @@ class ExtractionService:
         runs = await run_in_threadpool(self._runs.list_for_job_run, job_run_id)
         if not runs:
             raise DocumentServiceError("BATCH_NOT_FOUND", "Batch not found.", 404)
-        if any(run.status == "RUNNING" for run in runs):
+        if any(run.status == "RUNNING" and not run.options.get("work_item_id") for run in runs):
             poll = await run_in_threadpool(self._jobs.poll, job_run_id)
             if poll.state is not ExtractionJobState.RUNNING:
                 for run in runs:
                     refreshed = await run_in_threadpool(self._runs.get, run.extraction_run_id)
-                    if refreshed and refreshed.status == "RUNNING":
+                    if refreshed and refreshed.status == "RUNNING" and not refreshed.options.get("work_item_id"):
                         await self._fail_running(
                             refreshed, poll.message or "Extraction job failed."
                         )
@@ -291,13 +291,15 @@ class ExtractionService:
         return run, fields, candidates
 
     async def _refresh(self, run: ExtractionRunRecord) -> None:
+        if run.options.get("work_item_id"):
+            return  # Manifest Jobs are reconciled centrally, never by browser reads.
         assert run.job_run_id is not None
         poll = await run_in_threadpool(self._jobs.poll, run.job_run_id)
         if poll.state is ExtractionJobState.FAILED:
             await self._fail_running(run, poll.message or "Extraction job failed.")
         elif poll.state is ExtractionJobState.SUCCEEDED:
             refreshed = await run_in_threadpool(self._runs.get, run.extraction_run_id)
-            if refreshed and refreshed.status == "RUNNING":
+            if refreshed and refreshed.status == "RUNNING" and not refreshed.options.get("work_item_id"):
                 await self._fail_running(
                     refreshed,
                     "Extraction job completed without committing a terminal result.",

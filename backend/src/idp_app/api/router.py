@@ -3,6 +3,7 @@ from fastapi import APIRouter, Request
 from idp_app.api.batches import batches_router
 from idp_app.api.documents import documents_router
 from idp_app.api.extraction import extraction_router
+from idp_app.api.extraction_batches import router as extraction_batches_router
 from idp_app.api.models import HealthResponse
 from idp_app.api.parsing import parsing_router
 from idp_app.api.results import results_router
@@ -17,6 +18,7 @@ api_router = APIRouter()
 api_router.include_router(documents_router)
 api_router.include_router(upload_batches_router)
 api_router.include_router(batches_router)
+api_router.include_router(extraction_batches_router)
 api_router.include_router(parsing_router)
 api_router.include_router(viewer_router)
 api_router.include_router(schemas_router)

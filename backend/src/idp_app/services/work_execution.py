@@ -22,11 +22,12 @@ def begin_parse(
     item = preparation.work.item(identity)
     if (
         dispatch is None
+        or dispatch.kind != "PARSE"
         or identity not in dispatch.work_item_ids
         or dispatch.state not in {"SUBMITTING", "ASSIGNING", "RUNNING"}
     ):
         raise ValueError("Task is not in an active dispatch")
-    if item is None or item.dispatch_id != dispatch_id:
+    if item is None or item.kind != "PARSE" or item.dispatch_id != dispatch_id:
         raise ValueError("Task does not own the queued work")
     run = preparation.ensure_run(item)
     if run.status == "SUCCESS":

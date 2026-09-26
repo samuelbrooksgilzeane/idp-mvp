@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     extraction_job_id: PositiveInt | None = None
     dispatch_job_id: PositiveInt | None = None
     auto_prepare_enabled: bool = False
+    bulk_extraction_enabled: bool = False
     parse_dispatch_size: int = Field(default=100, ge=1, le=100)
     parse_max_attempts: int = Field(default=3, ge=1, le=5)
     parse_claim_seconds: int = Field(default=7200, ge=300, le=86400)
@@ -87,7 +88,7 @@ class Settings(BaseSettings):
             "IDP_EXTRACTION_JOB_ID": self.extraction_job_id,
             "IDP_VALIDATION_ENDPOINT": self.validation_endpoint,
         }
-        if self.auto_prepare_enabled:
+        if self.auto_prepare_enabled or self.bulk_extraction_enabled:
             required["IDP_DISPATCH_JOB_ID"] = self.dispatch_job_id
         missing = [name for name, value in required.items() if not value]
         if missing:

@@ -8,7 +8,7 @@ from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.documents import DocumentServiceError
 from idp_app.services.job_batches import BatchFailure
 from idp_app.services.parse_runs import ParseRunRepository
-from idp_app.services.schema_models import SchemaRecord
+from idp_app.services.schema_models import SchemaManifest, SchemaRecord
 from idp_app.services.schema_registry import SchemaRepository
 
 ELIGIBLE_DOCUMENT_STATES = {
@@ -75,3 +75,20 @@ def resolve_extraction_inputs(
                 continue
             failures.append(BatchFailure(document_id=identity, code=code, message=message))
     return resolved, failures
+
+
+def verify_schema_content(schema: SchemaRecord) -> None:
+    manifest = SchemaManifest(
+        schema_id=schema.schema_id,
+        schema_version=schema.schema_version,
+        display_name=schema.display_name,
+        use_case=schema.use_case,
+        status=schema.status,
+        description=schema.description,
+        instructions=schema.instructions,
+        ai_extract_schema=schema.ai_extract_schema,
+        field_policies=schema.field_policies,
+        document_rules=schema.document_rules,
+    )
+    if manifest.schema_hash != schema.schema_hash:
+        raise ValueError("Pinned template hash does not match its content")

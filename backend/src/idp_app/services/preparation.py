@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from idp_app.core.config import IdpMode, Settings
@@ -30,6 +30,8 @@ def initial_work_id(document: DocumentRecord) -> str:
 
 
 class PreparationService:
+    kind = "PARSE"
+
     def __init__(
         self,
         settings: Settings,
@@ -190,3 +192,72 @@ class PreparationService:
                 break
             cursor = document_page_cursor(rows[99], None, "UPLOADED", "")
         return queued
+
+    def assign_job(self, item: WorkItem, job_run_id: int) -> None:
+        self.runs.assign_job_run(item.parse_run_id, job_run_id)
+
+    def settle(self, item: WorkItem, max_attempts: int) -> None:
+        if item.state == "SUCCEEDED":
+            self.mark_document(item, "PARSED")
+            return
+        if item.state == "QUEUED":
+            return
+        run = self.runs.get(item.parse_run_id)
+        if run is None:
+            raise RuntimeError("Parse run disappeared during recovery")
+        # Retained inference is sufficient to finish projection after a task crash.
+        if run.status in {"QUEUED", "RUNNING"} and run.parsed is not None:
+            errors = run.parsed.get("error_status", [])
+            if errors:
+                self.runs.fail(run.parse_run_id, errors)
+            else:
+                content = run.parsed.get("document", {})
+                self.runs.activate(run.parse_run_id)
+                self.runs.complete(
+                    run.parse_run_id,
+                    run.parsed,
+                    "\n\n".join(
+                        str(element.get("content") or "") for element in content.get("elements", [])
+                    ),
+                    len(content.get("pages", [])),
+                )
+            run = self.runs.get(item.parse_run_id)
+            assert run is not None
+        if run.status == "SUCCESS":
+            updated = changed(
+                item, state="SUCCEEDED", error_code=None, error_message=None, lease_expires_at=None
+            )
+            if self.work.update_item(item, updated):
+                self.mark_document(updated, "PARSED")
+            return
+        transient = run.status in {"QUEUED", "RUNNING"} or (
+            isinstance(run.parse_error, dict)
+            and run.parse_error.get("code") == "TRANSIENT_PARSE_ERROR"
+        )
+        if run.status in {"QUEUED", "RUNNING"}:
+            self.runs.fail(
+                run.parse_run_id,
+                {
+                    "code": "JOB_DID_NOT_COMMIT",
+                    "error_message": "The Job ended without committing a parse result.",
+                },
+            )
+        retry = transient and item.attempts < max_attempts
+        updated = changed(
+            item,
+            state="QUEUED" if retry else "FAILED",
+            parse_run_id=str(uuid4()) if retry else item.parse_run_id,
+            dispatch_id=None if retry else item.dispatch_id,
+            lease_expires_at=None,
+            next_eligible_at=(
+                datetime.now(UTC) + timedelta(seconds=30 * 2 ** max(0, item.attempts - 1))
+            ).isoformat(),
+            error_code="RETRY_PENDING" if retry else "PREPARATION_FAILED",
+            error_message="Preparation will retry."
+            if retry
+            else "Preparation failed. Review the document and retry.",
+        )
+        if self.work.update_item(item, updated):
+            self.mark_document(updated, "PARSE_QUEUED" if retry else "PARSE_FAILED")
+            if retry:
+                self.ensure_run(updated)

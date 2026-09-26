@@ -22,6 +22,12 @@ class WorkItem:
     parser_version: str
     parse_run_id: str
     requested_by: str
+    batch_id: str | None = None
+    ordinal: int = 0
+    extraction_run_id: str | None = None
+    schema_id: str | None = None
+    schema_version: int | None = None
+    schema_hash: str | None = None
     execution_owner: str | None = None
     state: str = "QUEUED"
     kind: str = "PARSE"
@@ -72,12 +78,14 @@ def changed(record: Record, **changes: Any) -> Record:
 class WorkRepository(Protocol):
     def put_item(self, item: WorkItem) -> WorkItem: ...
     def item(self, work_item_id: str) -> WorkItem | None: ...
-    def candidates(self, limit: int) -> list[WorkItem]: ...
+    def candidates(self, limit: int, kind: str = "PARSE") -> list[WorkItem]: ...
     def update_item(self, old: WorkItem, new: WorkItem) -> bool: ...
     def put_dispatch(self, dispatch: WorkDispatch) -> None: ...
     def dispatch(self, dispatch_id: str) -> WorkDispatch | None: ...
-    def active_dispatches(self) -> list[WorkDispatch]: ...
-    def summary(self) -> dict[str, Any]: ...
+    def active_dispatches(self, kind: str = "PARSE") -> list[WorkDispatch]: ...
+    def summary(self, kind: str = "PARSE") -> dict[str, Any]: ...
+    def batch_items(self, batch_id: str, after: int = -1, limit: int = 50) -> list[WorkItem]: ...
+    def batch_counts(self, batch_id: str) -> dict[str, int]: ...
     def update_dispatch(self, old: WorkDispatch, new: WorkDispatch) -> bool: ...
 
 
@@ -124,12 +132,13 @@ class SQLiteWorkRepository:
             ).fetchone()
         return WorkItem(**json.loads(row[0])) if row else None
 
-    def candidates(self, limit: int) -> list[WorkItem]:
+    def candidates(self, limit: int, kind: str = "PARSE") -> list[WorkItem]:
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT payload FROM work_items WHERE state = 'QUEUED' "
+                "AND json_extract(payload, '$.kind') = ? "
                 "AND next_eligible_at <= ? ORDER BY next_eligible_at, work_item_id LIMIT ?",
-                (now_iso(), limit),
+                (kind, now_iso(), limit),
             ).fetchall()
         return [WorkItem(**json.loads(row[0])) for row in rows]
 
@@ -168,25 +177,47 @@ class SQLiteWorkRepository:
             ).fetchone()
         return WorkDispatch(**json.loads(row[0])) if row else None
 
-    def active_dispatches(self) -> list[WorkDispatch]:
+    def active_dispatches(self, kind: str = "PARSE") -> list[WorkDispatch]:
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT payload FROM work_dispatches "
                 "WHERE state IN ('PREPARING', 'SUBMITTING', 'ASSIGNING', 'RUNNING') "
-                "ORDER BY dispatch_id LIMIT 2"
+                "AND json_extract(payload, '$.kind') = ? ORDER BY dispatch_id LIMIT 2",
+                (kind,),
             ).fetchall()
         return [WorkDispatch(**json.loads(row[0])) for row in rows]
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, kind: str = "PARSE") -> dict[str, Any]:
         with self.connect() as connection:
             rows = connection.execute(
                 "SELECT state, COUNT(*), "
-                "MIN(json_extract(payload, '$.created_at')) FROM work_items GROUP BY state"
+                "MIN(json_extract(payload, '$.created_at')) FROM work_items "
+                "WHERE json_extract(payload, '$.kind') = ? GROUP BY state",
+                (kind,),
             ).fetchall()
         return {
             "counts": {row[0]: row[1] for row in rows},
             "oldest_queued_at": next((row[2] for row in rows if row[0] == "QUEUED"), None),
         }
+
+    def batch_items(self, batch_id: str, after: int = -1, limit: int = 50) -> list[WorkItem]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM work_items WHERE json_extract(payload, '$.batch_id') = ? "
+                "AND json_extract(payload, '$.ordinal') > ? "
+                "ORDER BY json_extract(payload, '$.ordinal') LIMIT ?",
+                (batch_id, after, limit),
+            ).fetchall()
+        return [WorkItem(**json.loads(row[0])) for row in rows]
+
+    def batch_counts(self, batch_id: str) -> dict[str, int]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                "SELECT state, COUNT(*) FROM work_items "
+                "WHERE json_extract(payload, '$.batch_id') = ? GROUP BY state",
+                (batch_id,),
+            ).fetchall()
+        return dict(rows)
 
     def update_dispatch(self, old: WorkDispatch, new: WorkDispatch) -> bool:
         with self.connect() as connection:
@@ -230,12 +261,13 @@ class DatabricksWorkRepository:
             raise RuntimeError("Duplicate work identity requires reconciliation")
         return WorkItem(**json.loads(rows[0][0])) if rows else None
 
-    def candidates(self, limit: int) -> list[WorkItem]:
+    def candidates(self, limit: int, kind: str = "PARSE") -> list[WorkItem]:
         rows = self.sql.execute_sql(
             f"SELECT payload FROM {self.items_table} "
-            "WHERE state = 'QUEUED' AND next_eligible_at <= :now "
+            "WHERE state = 'QUEUED' AND get_json_object(payload, '$.kind') = :kind "
+            "AND next_eligible_at <= :now "
             "ORDER BY next_eligible_at, work_item_id LIMIT CAST(:limit AS INT)",
-            {"now": now_iso(), "limit": limit},
+            {"now": now_iso(), "limit": limit, "kind": kind},
         )
         return [WorkItem(**json.loads(row[0])) for row in rows]
 
@@ -277,23 +309,44 @@ class DatabricksWorkRepository:
             raise RuntimeError("Duplicate dispatch identity requires reconciliation")
         return WorkDispatch(**json.loads(rows[0][0])) if rows else None
 
-    def active_dispatches(self) -> list[WorkDispatch]:
+    def active_dispatches(self, kind: str = "PARSE") -> list[WorkDispatch]:
         rows = self.sql.execute_sql(
             f"SELECT payload FROM {self.dispatches_table} "
             "WHERE state IN ('PREPARING', 'SUBMITTING', 'ASSIGNING', 'RUNNING') "
-            "ORDER BY dispatch_id LIMIT 2"
+            "AND get_json_object(payload, '$.kind') = :kind ORDER BY dispatch_id LIMIT 2",
+            {"kind": kind},
         )
         return [WorkDispatch(**json.loads(row[0])) for row in rows]
 
-    def summary(self) -> dict[str, Any]:
+    def summary(self, kind: str = "PARSE") -> dict[str, Any]:
         rows = self.sql.execute_sql(
             f"SELECT state, COUNT(*), "
-            f"MIN(get_json_object(payload, '$.created_at')) FROM {self.items_table} GROUP BY state"
+            f"MIN(get_json_object(payload, '$.created_at')) FROM {self.items_table} "
+            "WHERE get_json_object(payload, '$.kind') = :kind GROUP BY state",
+            {"kind": kind},
         )
         return {
             "counts": {row[0]: int(row[1]) for row in rows},
             "oldest_queued_at": next((row[2] for row in rows if row[0] == "QUEUED"), None),
         }
+
+    def batch_items(self, batch_id: str, after: int = -1, limit: int = 50) -> list[WorkItem]:
+        rows = self.sql.execute_sql(
+            f"SELECT payload FROM {self.items_table} "
+            "WHERE get_json_object(payload, '$.batch_id') = :batch_id "
+            "AND CAST(get_json_object(payload, '$.ordinal') AS INT) > CAST(:after AS INT) "
+            "ORDER BY CAST(get_json_object(payload, '$.ordinal') AS INT) LIMIT CAST(:limit AS INT)",
+            {"batch_id": batch_id, "after": after, "limit": limit},
+        )
+        return [WorkItem(**json.loads(row[0])) for row in rows]
+
+    def batch_counts(self, batch_id: str) -> dict[str, int]:
+        rows = self.sql.execute_sql(
+            f"SELECT state, COUNT(*) FROM {self.items_table} "
+            "WHERE get_json_object(payload, '$.batch_id') = :batch_id GROUP BY state",
+            {"batch_id": batch_id},
+        )
+        return {row[0]: int(row[1]) for row in rows}
 
     def update_dispatch(self, old: WorkDispatch, new: WorkDispatch) -> bool:
         self.write(

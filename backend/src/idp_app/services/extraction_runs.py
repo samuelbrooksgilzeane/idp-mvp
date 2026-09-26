@@ -219,7 +219,7 @@ class SQLiteExtractionRunRepository:
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
         with self._connect() as connection:
             connection.execute(
-                f"INSERT INTO extraction_runs ({', '.join(RUN_COLUMNS)}) VALUES ({placeholders})",
+                f"INSERT OR IGNORE INTO extraction_runs ({', '.join(RUN_COLUMNS)}) VALUES ({placeholders})",
                 _run_values(run),
             )
 
@@ -227,7 +227,7 @@ class SQLiteExtractionRunRepository:
         with self._connect() as connection:
             cursor = connection.execute(
                 "UPDATE extraction_runs SET job_run_id = ? "
-                "WHERE extraction_run_id = ? AND status = 'RUNNING'",
+                "WHERE extraction_run_id = ?",
                 (job_run_id, extraction_run_id),
             )
             if cursor.rowcount != 1:
@@ -466,13 +466,16 @@ class DatabricksExtractionRunRepository:
 
     def create(self, run: ExtractionRunRecord) -> None:
         self._sql.execute_sql(
-            f"INSERT INTO {self._runs} (extraction_run_id, document_id, parse_run_id, schema_id, "
+            f"MERGE INTO {self._runs} t USING (SELECT :extraction_run_id AS extraction_run_id) s "
+            "ON t.extraction_run_id = s.extraction_run_id WHEN NOT MATCHED THEN "
+            "INSERT (extraction_run_id, document_id, parse_run_id, schema_id, "
             "schema_version, schema_hash, extractor_version, options, ai_result, error_message, "
             "status, requested_by, job_run_id, started_at, completed_at) VALUES "
             "(:extraction_run_id, :document_id, :parse_run_id, :schema_id, "
             "CAST(:schema_version AS INT), :schema_hash, :extractor_version, "
             "map('version', '2.1', 'mode', 'precision', 'enableCitations', 'true', "
-            "'enableConfidenceScores', 'true', 'idempotency_key', :idempotency_key), "
+            "'enableConfidenceScores', 'true', 'idempotency_key', :idempotency_key, "
+            "'work_item_id', :work_item_id), "
             "NULL, NULL, 'RUNNING', :requested_by, NULL, CAST(:started_at AS TIMESTAMP), NULL)",
             {
                 "extraction_run_id": run.extraction_run_id,
@@ -483,6 +486,7 @@ class DatabricksExtractionRunRepository:
                 "schema_hash": run.schema_hash,
                 "extractor_version": run.extractor_version,
                 "idempotency_key": run.options["idempotency_key"],
+                "work_item_id": run.options.get("work_item_id", ""),
                 "requested_by": run.requested_by,
                 "started_at": run.started_at,
             },
@@ -491,7 +495,7 @@ class DatabricksExtractionRunRepository:
     def assign_job_run(self, extraction_run_id: str, job_run_id: int) -> None:
         self._sql.execute_sql(
             f"UPDATE {self._runs} SET job_run_id = CAST(:job_run_id AS BIGINT) "
-            "WHERE extraction_run_id = :extraction_run_id AND status = 'RUNNING'",
+            "WHERE extraction_run_id = :extraction_run_id",
             {"extraction_run_id": extraction_run_id, "job_run_id": job_run_id},
         )
 
@@ -512,9 +516,20 @@ class DatabricksExtractionRunRepository:
         records: list[ExtractedRecordRow] | None = None,
         generic_fields: list[GenericFieldRow] | None = None,
     ) -> None:
+        current = self.get(extraction_run_id)
+        if current is not None and current.status == "EXTRACTED":
+            return
+        if current is None or current.status != "RUNNING" or current.ai_result is None:
+            raise RuntimeError("Extraction run is not eligible for projection")
+        for table in (self._fields, self._records, self._candidates, self._lines):
+            self._sql.execute_sql(
+                f"DELETE FROM {table} WHERE extraction_run_id = :id", {"id": extraction_run_id}
+            )
         for field in fields:
             self._sql.execute_sql(
-                f"INSERT INTO {self._fields} VALUES (:extraction_run_id, :document_id, "
+                f"INSERT INTO {self._fields} (extraction_run_id, document_id, field_path, field_type, "
+                "value, value_string, confidence_score, citation_ids, citations, extraction_error) "
+                "VALUES (:extraction_run_id, :document_id, "
                 ":field_path, :field_type, PARSE_JSON(:value), :value_string, "
                 "CAST(:confidence_score AS DOUBLE), from_json(:citation_ids, 'array<int>'), "
                 "PARSE_JSON(:citations), :extraction_error)",
