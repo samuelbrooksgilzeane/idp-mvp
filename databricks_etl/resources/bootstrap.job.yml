@@ -212,6 +212,17 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
+        - task_key: migrate_work_batches
+          depends_on:
+            - task_key: create_governed_objects
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_work_batches.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
       environments:
         - environment_key: default
           spec:

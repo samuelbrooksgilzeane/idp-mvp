@@ -2,7 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 
-from idp_app.api.dependencies import get_authenticated_user, get_document_service
+from idp_app.api.dependencies import (
+    get_authenticated_user,
+    get_document_service,
+    get_upload_batch_service,
+)
 from idp_app.api.models import (
     DocumentPageResponse,
     DocumentResponse,
@@ -35,6 +39,8 @@ async def upload_documents(
     files: Annotated[list[UploadFile], File(description="One or more PDF files")],
     service: Annotated[DocumentService, Depends(get_document_service)],
     uploaded_by: Annotated[str, Depends(get_authenticated_user)],
+    upload_batch_id: Annotated[str | None, Form(max_length=100)] = None,
+    client_file_id: Annotated[str | None, Form(max_length=100)] = None,
     case_id: Annotated[str | None, Form(max_length=200)] = None,
     template_id: Annotated[str, Form(max_length=100)] = "invoice_v1",
     use_case: Annotated[str, Form(max_length=100)] = "invoice",
@@ -48,6 +54,19 @@ async def upload_documents(
             f"At most {settings.max_upload_files} PDFs can be uploaded at once.",
             422,
         )
+
+    if upload_batch_id is not None or client_file_id is not None:
+        if not upload_batch_id or not client_file_id or len(files) != 1:
+            raise DocumentServiceError(
+                "BATCH_ITEM_REQUIRED",
+                "Batch uploads require one PDF, upload_batch_id and client_file_id.",
+                422,
+            )
+        batch_service = get_upload_batch_service(request)
+        document = await batch_service.upload(
+            upload_batch_id, client_file_id, uploaded_by, files[0]
+        )
+        return UploadBatchResponse(documents=[DocumentResponse.model_validate(document)], errors=[])
 
     metadata = UploadMetadata(
         case_id=case_id.strip() if case_id and case_id.strip() else None,

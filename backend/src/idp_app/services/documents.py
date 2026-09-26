@@ -1,5 +1,6 @@
 import hashlib
 import re
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from tempfile import SpooledTemporaryFile
@@ -52,6 +53,8 @@ class DocumentService:
         upload: UploadFile,
         metadata: UploadMetadata,
         uploaded_by: str,
+        *,
+        on_content: Callable[[str], Awaitable[None]] | None = None,
     ) -> DocumentRecord:
         safe_name = sanitize_pdf_filename(upload.filename)
         if upload.content_type != "application/pdf":
@@ -86,6 +89,8 @@ class DocumentService:
                 )
 
             content_sha256 = digest.hexdigest()
+            if on_content is not None:
+                await on_content(content_sha256)
             duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
             if duplicate is not None:
                 raise _duplicate_error(duplicate)
@@ -102,11 +107,20 @@ class DocumentService:
                 duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
                 if duplicate is not None:
                     raise _duplicate_error(duplicate) from error
-                raise DocumentServiceError(
-                    "FILE_STORAGE_FAILED",
-                    "The PDF could not be stored without overwriting an existing file.",
-                    502,
-                ) from error
+                # Recover only a byte-for-byte verified object; ambiguous or partial files stay put.
+                try:
+                    source_path = await run_in_threadpool(
+                        self._storage.verify_existing,
+                        object_name,
+                        content_sha256,
+                        size,
+                    )
+                except Exception as recovery_error:
+                    raise DocumentServiceError(
+                        "FILE_STORAGE_FAILED",
+                        "An existing source PDF could not be verified. It needs reconciliation.",
+                        502,
+                    ) from recovery_error
             except Exception as error:
                 raise DocumentServiceError(
                     "FILE_STORAGE_FAILED",
@@ -114,6 +128,8 @@ class DocumentService:
                     502,
                 ) from error
 
+        if on_content is not None:
+            await on_content(content_sha256)
         now = datetime.now(UTC)
         document = DocumentRecord(
             document_id=document_id,
@@ -142,6 +158,9 @@ class DocumentService:
                 502,
             ) from error
         return document
+
+    async def find_registered_content(self, content_hash: str) -> DocumentRecord | None:
+        return await run_in_threadpool(self._registry.find_by_hash, content_hash)
 
     async def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
         try:

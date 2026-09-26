@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     local_data_dir: Path = Path(".local/idp")
     max_upload_bytes: PositiveInt = 25 * 1024 * 1024
     max_upload_files: PositiveInt = 10
+    max_upload_batch_files: PositiveInt = 1000
+    max_upload_attempts: PositiveInt = 5
+    upload_claim_seconds: PositiveInt = 1800
 
     @field_validator(
         "catalog",

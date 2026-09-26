@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 TABLE_NAMES = (
     "documents",
+    "upload_batches",
+    "upload_items",
     "parsed_documents",
     "schema_registry",
     "extraction_runs",

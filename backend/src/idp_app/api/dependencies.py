@@ -1,4 +1,8 @@
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from idp_app.services.batch_repository import BatchRepository
+    from idp_app.services.upload_batches import UploadBatchService
 
 from databricks.sdk import WorkspaceClient
 from fastapi import Request
@@ -180,9 +184,7 @@ def build_viewer_service(settings: Settings) -> ViewerService:
         return ViewerService(
             SQLiteDocumentRegistry(database_path),
             SQLiteParseRunRepository(database_path),
-            LocalPageImageStorage(
-                settings.local_data_dir / "artifacts_volume" / "page_images"
-            ),
+            LocalPageImageStorage(settings.local_data_dir / "artifacts_volume" / "page_images"),
         )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
@@ -238,9 +240,7 @@ def get_schema_service(request: Request) -> SchemaService:
 
 def build_schema_service(settings: Settings) -> SchemaService:
     if settings.mode is IdpMode.MOCK:
-        repository = SQLiteSchemaRepository(
-            settings.local_data_dir / "registry.sqlite3"
-        )
+        repository = SQLiteSchemaRepository(settings.local_data_dir / "registry.sqlite3")
         for manifest in load_source_manifests():
             repository.register(manifest, "source-controlled-bootstrap")
         return SchemaService(repository)
@@ -416,9 +416,7 @@ def build_export_service(settings: Settings) -> ExportService:
         client, warehouse_id, catalog, project_schema, table_prefix
     )
     return ExportService(
-        DatabricksExportSourceRepository(
-            sql_client, catalog, project_schema, table_prefix
-        )
+        DatabricksExportSourceRepository(sql_client, catalog, project_schema, table_prefix)
     )
 
 
@@ -528,7 +526,39 @@ def build_reporting_service(settings: Settings) -> ReportingService:
         client, warehouse_id, catalog, project_schema, table_prefix
     )
     return ReportingService(
-        DatabricksReportingRepository(
-            sql_client, catalog, project_schema, table_prefix
-        )
+        DatabricksReportingRepository(sql_client, catalog, project_schema, table_prefix)
     )
+
+
+def get_upload_batch_service(request: Request) -> "UploadBatchService":
+    from idp_app.services.batch_repository import DatabricksBatchRepository, SQLiteBatchRepository
+    from idp_app.services.upload_batches import UploadBatchService
+
+    existing = getattr(request.app.state, "upload_batch_service", None)
+    if isinstance(existing, UploadBatchService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    repository: BatchRepository
+    if settings.mode is IdpMode.MOCK:
+        repository = SQLiteBatchRepository(settings.local_data_dir / "registry.sqlite3")
+    else:
+        catalog = _required(settings.catalog, "IDP_CATALOG")
+        schema = _required(settings.project_schema, "IDP_PROJECT_SCHEMA")
+        prefix = _required(settings.table_prefix, "IDP_TABLE_PREFIX")
+        sql = DatabricksDocumentRegistry(
+            WorkspaceClient(),
+            _required(settings.warehouse_id, "IDP_WAREHOUSE_ID"),
+            catalog,
+            schema,
+            prefix,
+        )
+        repository = DatabricksBatchRepository(sql, f"{catalog}.{schema}.{prefix}")
+    service = UploadBatchService(
+        repository,
+        get_document_service(request),
+        settings.max_upload_batch_files,
+        settings.max_upload_attempts,
+        settings.upload_claim_seconds,
+    )
+    request.app.state.upload_batch_service = service
+    return service

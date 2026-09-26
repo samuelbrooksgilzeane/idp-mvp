@@ -40,8 +40,6 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return data
 
 
-
-
 def app_yaml_env(config: dict[str, Any]) -> dict[str, str]:
     return {
         str(item["name"]): str(item.get("value"))
@@ -100,7 +98,9 @@ def validate_bundle_config() -> None:
     config = load_yaml(ROOT / "databricks_etl" / "databricks.yml")
     variables = config.get("variables")
     if not isinstance(variables, dict) or set(variables) != TRUSTED_VARIABLES:
-        raise ValueError("databricks.yml trusted variables do not match the technical contract")
+        raise ValueError(
+            "databricks.yml trusted variables do not match the technical contract"
+        )
 
     targets = config.get("targets")
     if not isinstance(targets, dict) or set(targets) != {"dev", "prod"}:
@@ -150,17 +150,38 @@ def validate_data_bootstrap() -> None:
         "migrate_generic_schema_registry",
         "migrate_generic_extraction_records",
         "migrate_generic_extraction_fields",
+        "migrate_work_batches",
     ]
-    if not isinstance(tasks, list) or [t.get("task_key") for t in tasks] != expected_tasks:
+    if (
+        not isinstance(tasks, list)
+        or [t.get("task_key") for t in tasks] != expected_tasks
+    ):
         raise ValueError(
             "Governed data bootstrap must contain the reviewed creation, migration, "
             "and schema-registration tasks in order"
         )
+    upload_migration = tasks[-1]
+    if (
+        upload_migration.get("sql_task", {}).get("file", {}).get("path")
+        != "../sql/migrate_work_batches.sql"
+    ):
+        raise ValueError("Upload batches require the reviewed additive migration")
+    if upload_migration.get("depends_on") != [{"task_key": "create_governed_objects"}]:
+        raise ValueError("Upload batch tables require the project schema")
+    if (
+        upload_migration.get("sql_task", {}).get("parameters")
+        != EXPECTED_PARSING_MIGRATION_PARAMETERS
+    ):
+        raise ValueError("Upload migration parameters must match the trusted contract")
     sql_task = tasks[0].get("sql_task", {})
     if sql_task.get("warehouse_id") != "${var.warehouse_id}":
-        raise ValueError("Governed data bootstrap must use the trusted warehouse variable")
+        raise ValueError(
+            "Governed data bootstrap must use the trusted warehouse variable"
+        )
     if sql_task.get("parameters") != EXPECTED_BOOTSTRAP_PARAMETERS:
-        raise ValueError("Governed data bootstrap parameters must match the trusted contract")
+        raise ValueError(
+            "Governed data bootstrap parameters must match the trusted contract"
+        )
 
     migration_task = tasks[1]
     migration_sql = migration_task.get("sql_task", {})
@@ -181,15 +202,22 @@ def validate_data_bootstrap() -> None:
         "../sql/migrate_extraction.sql"
     ):
         raise ValueError("Bootstrap must use the reviewed extraction migration")
-    if extraction_migration_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
-        raise ValueError("Extraction migration parameters must match the trusted contract")
+    if (
+        extraction_migration_sql.get("parameters")
+        != EXPECTED_PARSING_MIGRATION_PARAMETERS
+    ):
+        raise ValueError(
+            "Extraction migration parameters must match the trusted contract"
+        )
 
     repeated_invoice_task = tasks[3]
     repeated_invoice_sql = repeated_invoice_task.get("sql_task", {})
     if repeated_invoice_task.get("depends_on") != [
         {"task_key": "migrate_extraction_columns"}
     ]:
-        raise ValueError("Repeated-invoice migration must run after extraction migration")
+        raise ValueError(
+            "Repeated-invoice migration must run after extraction migration"
+        )
     if repeated_invoice_sql.get("file", {}).get("path") != (
         "../sql/migrate_repeated_invoices.sql"
     ):
@@ -218,7 +246,9 @@ def validate_data_bootstrap() -> None:
         "${workspace.file_path}/schemas/invoice_v1.json",
     ]
     if registration_python.get("parameters") != expected_registration_parameters:
-        raise ValueError("Schema registration parameters must match the trusted contract")
+        raise ValueError(
+            "Schema registration parameters must match the trusted contract"
+        )
 
     expected_additional_manifests = [
         (8, "register_sf2823_14", "register_production_schemas_v4", "sf2823_14.json"),
@@ -234,7 +264,9 @@ def validate_data_bootstrap() -> None:
         ]:
             raise ValueError(f"Schema registration task is out of order: {task_key}")
         if registration.get("python_file") != "../src/register_schemas.py":
-            raise ValueError(f"Schema registration must use the reviewed task: {task_key}")
+            raise ValueError(
+                f"Schema registration must use the reviewed task: {task_key}"
+            )
         if registration.get("parameters", [])[-1] != (
             f"${{workspace.file_path}}/schemas/{manifest_name}"
         ):
@@ -243,7 +275,9 @@ def validate_data_bootstrap() -> None:
     view_task = tasks[12]
     view_sql = view_task.get("sql_task", {})
     if view_task.get("depends_on") != [{"task_key": "register_of1017_g_79"}]:
-        raise ValueError("Governed views must be created after the schema registrations")
+        raise ValueError(
+            "Governed views must be created after the schema registrations"
+        )
     if view_sql.get("file", {}).get("path") != "../sql/create_views.sql":
         raise ValueError("Bootstrap must use the reviewed view definitions")
     if view_sql.get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS:
@@ -256,7 +290,9 @@ def validate_data_bootstrap() -> None:
     normalized = " ".join(sql.upper().split())
     for forbidden in ("CREATE CATALOG", " DROP ", " TRUNCATE "):
         if forbidden in f" {normalized} ":
-            raise ValueError(f"Data bootstrap contains destructive or forbidden SQL: {forbidden}")
+            raise ValueError(
+                f"Data bootstrap contains destructive or forbidden SQL: {forbidden}"
+            )
     if ".DEFAULT." in normalized:
         raise ValueError("Data bootstrap must not create objects in the default schema")
 
@@ -307,9 +343,13 @@ def reviewed_batch_task(tasks: object, python_file: str, label: str) -> None:
     if not isinstance(for_each, dict):
         raise ValueError(f"{label} must submit its documents through a for_each task")
     if for_each.get("inputs") != "{{job.parameters.inputs}}":
-        raise ValueError(f"{label} must take its documents from the trusted inputs parameter")
+        raise ValueError(
+            f"{label} must take its documents from the trusted inputs parameter"
+        )
     if for_each.get("concurrency") != "${var.batch_concurrency}":
-        raise ValueError(f"{label} must set concurrency from the trusted deployment variable")
+        raise ValueError(
+            f"{label} must set concurrency from the trusted deployment variable"
+        )
     nested = for_each.get("task", {})
     if nested.get("spark_python_task", {}).get("python_file") != python_file:
         raise ValueError(f"{label} must use the reviewed task source")
@@ -366,7 +406,9 @@ def validate_extraction_job() -> None:
         "ORDER BY completed_at DESC, parse_run_id DESC",
     )
     if any(value not in source for value in required):
-        raise ValueError("Extraction task does not retain the reviewed extraction contract")
+        raise ValueError(
+            "Extraction task does not retain the reviewed extraction contract"
+        )
     normalized = " ".join(source.upper().split())
     for forbidden in (" DROP ", " TRUNCATE ", " DELETE "):
         if forbidden in f" {normalized} ":
@@ -374,9 +416,7 @@ def validate_extraction_job() -> None:
 
 
 def validate_application_resource() -> None:
-    resource = load_yaml(
-        ROOT / "databricks_etl" / "resources" / "application.app.yml"
-    )
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "application.app.yml")
     apps = resource.get("resources", {}).get("apps", {})
     app = apps.get("idp_app")
     if not isinstance(app, dict):
@@ -387,7 +427,9 @@ def validate_application_resource() -> None:
     config = app.get("config", {})
     command = config.get("command")
     if not isinstance(command, list) or "idp_app.main:create_app" not in command:
-        raise ValueError("Databricks App must start the IDP FastAPI application factory")
+        raise ValueError(
+            "Databricks App must start the IDP FastAPI application factory"
+        )
     env = {
         item.get("name"): item
         for item in config.get("env", [])
@@ -405,9 +447,7 @@ def validate_application_resource() -> None:
     bindings = app.get("resources")
     if not isinstance(bindings, list):
         raise ValueError("Databricks App must declare least-privilege resources")
-    binding_names = {
-        item.get("name") for item in bindings if isinstance(item, dict)
-    }
+    binding_names = {item.get("name") for item in bindings if isinstance(item, dict)}
     required_bindings = {
         "sql-warehouse",
         "document-parser",

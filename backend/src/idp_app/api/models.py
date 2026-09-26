@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from idp_app.core.config import IdpMode
 from idp_app.services.schema_models import ExtractField
@@ -492,3 +492,55 @@ class BatchStatusResponse(BaseModel):
     succeeded: int
     failed: int
     members: list[BatchMemberResponse]
+
+
+class UploadFileManifest(BaseModel):
+    client_file_id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=255)
+    size: int = Field(ge=0)
+    last_modified: int | None = Field(default=None, ge=0)
+
+    @field_validator("name")
+    @classmethod
+    def filename_only(cls, value: str) -> str:
+        if "/" in value or "\\" in value or "\x00" in value:
+            raise ValueError("Provide a filename, not a local path")
+        return value
+
+
+class CreateUploadBatchRequest(BaseModel):
+    client_request_id: str = Field(min_length=1, max_length=100)
+    case_id: str | None = Field(default=None, max_length=200)
+    files: list[UploadFileManifest] = Field(min_length=1, max_length=1000)
+
+
+class UploadItemResponse(BaseModel):
+    client_file_id: str
+    name: str
+    size: int
+    last_modified: int | None = None
+    ordinal: int
+    state: Literal["QUEUED", "UPLOADING", "REGISTERED", "ALREADY_REGISTERED", "FAILED"]
+    document_id: str | None
+    attempts: int
+    error_code: str | None
+    error_message: str | None
+    retryable: bool
+    updated_at: datetime
+
+
+class UploadBatchSummary(BaseModel):
+    batch_id: str
+    case_id: str | None
+    created_at: datetime
+    file_count: int
+    counts: dict[str, int]
+
+
+class CreatedUploadBatch(UploadBatchSummary):
+    items: list[UploadItemResponse]
+
+
+class UploadItemPage(BaseModel):
+    items: list[UploadItemResponse]
+    next_cursor: str | None
