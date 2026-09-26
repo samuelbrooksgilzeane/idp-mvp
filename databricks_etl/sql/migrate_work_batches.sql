@@ -32,3 +32,12 @@ CREATE TABLE IF NOT EXISTS IDENTIFIER(
   revision INT NOT NULL, payload STRING NOT NULL
 )
 USING DELTA TBLPROPERTIES ('delta.isolationLevel' = 'Serializable');
+
+-- Durable user extraction requests; validation checkpoints pin inputs before dispatch.
+CREATE TABLE IF NOT EXISTS IDENTIFIER(
+  :catalog || '.' || :project_schema || '.' || :table_prefix || '_work_batches'
+) (
+  batch_id STRING NOT NULL, state STRING NOT NULL,
+  revision INT NOT NULL, payload STRING NOT NULL
+)
+USING DELTA TBLPROPERTIES ('delta.isolationLevel' = 'Serializable');
