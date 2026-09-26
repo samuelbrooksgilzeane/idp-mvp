@@ -136,6 +136,8 @@ resources:
           - --port
           - "8000"
         env:
+          - name: IDP_BULK_EXTRACTION_ENABLED
+            value: ${var.bulk_extraction_enabled}
           - name: IDP_AUTO_PREPARE_ENABLED
             value: ${var.auto_prepare_enabled}
           - name: IDP_DISPATCH_JOB_ID

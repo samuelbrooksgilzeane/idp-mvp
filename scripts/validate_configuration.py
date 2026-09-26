@@ -426,9 +426,25 @@ def validate_extraction_job() -> None:
     extraction = jobs.get("document_extractor")
     if not isinstance(extraction, dict):
         raise ValueError("Bundle must define the document_extractor job")
-    reviewed_batch_task(
-        extraction.get("tasks"), "../src/extract_document.py", "Document extractor"
-    )
+    tasks = extraction.get("tasks", [])
+    if len(tasks) != 3 or tasks[0].get("task_key") != "load_work_manifest":
+        raise ValueError("Extractor must load its durable manifest first")
+    if (
+        tasks[0].get("notebook_task", {}).get("base_parameters", {}).get("work_kind")
+        != "EXTRACT"
+    ):
+        raise ValueError("Extractor loader must isolate extraction manifests")
+    manifest = tasks[1].get("for_each_task", {})
+    if (
+        manifest.get("inputs") != "{{tasks.load_work_manifest.values.work_item_ids}}"
+        or manifest.get("concurrency") != "${var.extraction_concurrency}"
+        or manifest.get("task", {}).get("spark_python_task", {}).get("python_file")
+        != "../src/extract_work_item.py"
+    ):
+        raise ValueError(
+            "Extractor must consume bounded IDs using its separate concurrency budget"
+        )
+    reviewed_batch_task([tasks[2]], "../src/extract_document.py", "Legacy extractor")
     if extraction.get("max_concurrent_runs") != 1:
         raise ValueError("Extractor stage must admit only one active run")
     if extraction.get("environments", [])[0]["spec"]["environment_version"] != "3":
@@ -474,6 +490,7 @@ def validate_dispatch_job() -> None:
     variables = bundle["variables"]
     if (
         variables["auto_prepare_enabled"]["default"] != "false"
+        or variables["bulk_extraction_enabled"]["default"] != "false"
         or variables["recovery_schedule_status"]["default"] != "PAUSED"
     ):
         raise ValueError(

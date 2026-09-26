@@ -9,6 +9,9 @@ sync:
     - ..
 
 variables:
+  bulk_extraction_enabled:
+    description: Enable durable extraction after migration and workspace verification.
+    default: "false"
   auto_prepare_enabled:
     description: Enable only after queue migrations and dispatcher permissions are applied
     default: "false"

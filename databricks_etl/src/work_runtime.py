@@ -35,6 +35,7 @@ def build_preparation(
         extraction_job_id=1,
         validation_endpoint="unused",
         auto_prepare_enabled=False,
+        bulk_extraction_enabled=False,
     )
     client = WorkspaceClient()
     documents = DatabricksDocumentRegistry(
@@ -51,3 +52,10 @@ def build_preparation(
             documents, f"{catalog}.{project_schema}.{table_prefix}"
         ),
     ), client
+
+
+def build_extraction(**parameters):
+    from idp_app.services.extraction_queue_runtime import build_extraction_queue
+
+    preparation, client = build_preparation(**parameters)
+    return build_extraction_queue(preparation.settings), client

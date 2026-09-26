@@ -14,7 +14,63 @@ resources:
         default: ${var.table_prefix}
       - name: inputs
         default: '[]'
+      - name: dispatch_id
+        default: ''
+      - name: warehouse_id
+        default: ${var.warehouse_id}
+      - name: source_volume_name
+        default: ${var.source_volume_name}
+      - name: artifacts_volume_name
+        default: ${var.artifacts_volume_name}
       tasks:
+      - task_key: load_work_manifest
+        notebook_task:
+          notebook_path: ../src/load_work_manifest.py
+          base_parameters:
+            catalog: '{{job.parameters.catalog}}'
+            project_schema: '{{job.parameters.project_schema}}'
+            table_prefix: '{{job.parameters.table_prefix}}'
+            source_volume_name: '{{job.parameters.source_volume_name}}'
+            artifacts_volume_name: '{{job.parameters.artifacts_volume_name}}'
+            warehouse_id: '{{job.parameters.warehouse_id}}'
+            dispatch_id: '{{job.parameters.dispatch_id}}'
+            inputs: '{{job.parameters.inputs}}'
+            repository_root: ${workspace.file_path}
+            parse_concurrency: ${var.parse_concurrency}
+            extraction_concurrency: ${var.extraction_concurrency}
+            combined_budget: ${var.combined_inference_concurrency}
+            work_kind: EXTRACT
+        environment_key: default
+        max_retries: 0
+      - task_key: extract_manifest
+        depends_on:
+        - task_key: load_work_manifest
+        for_each_task:
+          inputs: '{{tasks.load_work_manifest.values.work_item_ids}}'
+          concurrency: ${var.extraction_concurrency}
+          task:
+            task_key: extract_work_item
+            spark_python_task:
+              python_file: ../src/extract_work_item.py
+              parameters:
+              - --catalog
+              - '{{job.parameters.catalog}}'
+              - --project-schema
+              - '{{job.parameters.project_schema}}'
+              - --table-prefix
+              - '{{job.parameters.table_prefix}}'
+              - --source-volume-name
+              - '{{job.parameters.source_volume_name}}'
+              - --artifacts-volume-name
+              - '{{job.parameters.artifacts_volume_name}}'
+              - --warehouse-id
+              - '{{job.parameters.warehouse_id}}'
+              - --dispatch-id
+              - '{{job.parameters.dispatch_id}}'
+              - --work-item-id
+              - '{{input}}'
+            environment_key: default
+            max_retries: 0
       - task_key: extract_document_batch
         for_each_task:
           inputs: '{{job.parameters.inputs}}'
@@ -48,9 +104,15 @@ resources:
               - ${var.combined_inference_concurrency}
             environment_key: default
             max_retries: 0
+        depends_on:
+        - task_key: load_work_manifest
       environments:
       - environment_key: default
         spec:
           environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0
+          - fastapi==0.116.1
+          - pydantic-settings==2.10.1
       queue:
         enabled: false

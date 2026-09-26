@@ -152,6 +152,9 @@ def require_pinned_parse(session: Any, parse_runs: str, parse_run_id: str,
 
 
 def main() -> None:
+    global spark
+    from pyspark.sql import SparkSession
+    spark = SparkSession.builder.getOrCreate()
     parameters = parse_arguments()
     documents = qualified(parameters, "documents")
     parse_runs = qualified(parameters, "parsed_documents")

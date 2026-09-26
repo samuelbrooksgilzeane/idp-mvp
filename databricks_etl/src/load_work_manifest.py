@@ -5,7 +5,7 @@ import sys
 
 repository_root = dbutils.widgets.get("repository_root")  # noqa: F821
 sys.path.insert(0, f"{repository_root}/databricks_etl/src")
-from work_runtime import build_preparation  # noqa: E402
+from work_runtime import build_preparation, build_extraction  # noqa: E402
 from idp_app.services.work_dispatch import manifest_ids  # noqa: E402
 
 from work_limits import validate_capacity  # noqa: E402
@@ -22,7 +22,11 @@ if dispatch_id and legacy:
     raise ValueError("Choose a dispatch manifest or legacy inputs, never both")
 ids = []
 if dispatch_id:
-    preparation, _ = build_preparation(
+    kind = dbutils.widgets.get("work_kind")  # noqa: F821
+    if kind not in {"PARSE", "EXTRACT"}:
+        raise ValueError("Unknown work kind")
+    build = build_preparation if kind == "PARSE" else build_extraction
+    preparation, _ = build(
         **{
             key: dbutils.widgets.get(key)  # noqa: F821
             for key in (
@@ -36,7 +40,7 @@ if dispatch_id:
         }
     )
     dispatch = preparation.work.dispatch(dispatch_id)
-    if dispatch is None:
+    if dispatch is None or dispatch.kind != kind:
         raise ValueError("Dispatch manifest not found")
     ids = manifest_ids(dispatch, preparation.work)
 dbutils.jobs.taskValues.set(key="work_item_ids", value=ids)  # noqa: F821

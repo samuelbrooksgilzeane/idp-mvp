@@ -38,6 +38,7 @@ resources:
             parse_concurrency: ${var.parse_concurrency}
             extraction_concurrency: ${var.extraction_concurrency}
             combined_budget: ${var.combined_inference_concurrency}
+            work_kind: PARSE
         environment_key: default
         max_retries: 0
       - task_key: parse_manifest

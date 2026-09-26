@@ -2,45 +2,49 @@ resources:
   jobs:
     work_dispatcher:
       name: ${var.app_name}-${bundle.target}-work-dispatcher
-      description: Finite serialized parse queue drain with hourly recovery; no inference in dispatcher.
+      description: Finite serialized parse and extraction drains with hourly recovery.
       max_concurrent_runs: 1
       queue:
         enabled: false
       schedule:
-        quartz_cron_expression: "0 0 * * * ?"
+        quartz_cron_expression: 0 0 * * * ?
         timezone_id: UTC
         pause_status: ${var.recovery_schedule_status}
       tasks:
-        - task_key: dispatch_work
-          spark_python_task:
-            python_file: ../src/dispatch_work.py
-            parameters:
-              - --enabled
-              - ${var.auto_prepare_enabled}
-              - --catalog
-              - ${var.catalog}
-              - --project-schema
-              - ${var.project_schema}
-              - --table-prefix
-              - ${var.table_prefix}
-              - --source-volume-name
-              - ${var.source_volume_name}
-              - --artifacts-volume-name
-              - ${var.artifacts_volume_name}
-              - --warehouse-id
-              - ${var.warehouse_id}
-              - --parser-job-id
-              - ${resources.jobs.document_parser.id}
-              - --dispatch-size
-              - ${var.parse_dispatch_size}
-          timeout_seconds: 3900
-          max_retries: 0
-          environment_key: default
+      - task_key: dispatch_work
+        spark_python_task:
+          python_file: ../src/dispatch_work.py
+          parameters:
+          - --enabled
+          - ${var.auto_prepare_enabled}
+          - --catalog
+          - ${var.catalog}
+          - --project-schema
+          - ${var.project_schema}
+          - --table-prefix
+          - ${var.table_prefix}
+          - --source-volume-name
+          - ${var.source_volume_name}
+          - --artifacts-volume-name
+          - ${var.artifacts_volume_name}
+          - --warehouse-id
+          - ${var.warehouse_id}
+          - --parser-job-id
+          - ${resources.jobs.document_parser.id}
+          - --dispatch-size
+          - ${var.parse_dispatch_size}
+          - --extraction-enabled
+          - ${var.bulk_extraction_enabled}
+          - --extractor-job-id
+          - ${resources.jobs.document_extractor.id}
+        timeout_seconds: 3900
+        max_retries: 0
+        environment_key: default
       environments:
-        - environment_key: default
-          spec:
-            environment_version: "3"
-            dependencies:
-              - databricks-sdk==0.133.0
-              - fastapi==0.116.1
-              - pydantic-settings==2.10.1
+      - environment_key: default
+        spec:
+          environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0
+          - fastapi==0.116.1
+          - pydantic-settings==2.10.1
