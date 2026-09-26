@@ -12,7 +12,12 @@ from typing import Any, Protocol, cast
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import jobs
 
-from idp_app.services.document_models import DocumentRecord, ExtractionRunRecord, ParseRunRecord
+from idp_app.services.document_models import (
+    DocumentRecord,
+    ExtractionRunRecord,
+    ParseRunRecord,
+    ParseRunReference,
+)
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.extraction_result import (
     build_invoice_candidates,
@@ -22,6 +27,7 @@ from idp_app.services.extraction_result import (
 )
 from idp_app.services.extraction_runs import ExtractionRunRepository
 from idp_app.services.job_batches import batch_idempotency_token, encode_inputs
+from idp_app.services.parse_runs import ParseRunRepository
 from idp_app.services.schema_models import ExtractField, SchemaRecord
 
 
@@ -29,7 +35,7 @@ from idp_app.services.schema_models import ExtractField, SchemaRecord
 class ExtractionJobRequest:
     run: ExtractionRunRecord
     document: DocumentRecord
-    parse_run: ParseRunRecord
+    parse_run: ParseRunRecord | ParseRunReference
     schema: SchemaRecord
 
 
@@ -58,7 +64,9 @@ class MockExtractionJobRunner:
         documents: DocumentRegistry,
         *,
         delay_seconds: float = 0.15,
+        parse_runs: ParseRunRepository | None = None,
     ) -> None:
+        self._parse_runs = parse_runs
         self._runs = runs
         self._documents = documents
         self._delay_seconds = delay_seconds
@@ -95,7 +103,18 @@ class MockExtractionJobRunner:
         if self._delay_seconds:
             time.sleep(self._delay_seconds)
         try:
-            ai_result = _mock_ai_extract(request.parse_run, request.schema)
+            parse = request.parse_run
+            if isinstance(parse, ParseRunReference):
+                loaded = self._parse_runs.get(parse.parse_run_id) if self._parse_runs else None
+                if (
+                    loaded is None
+                    or loaded.status != "SUCCESS"
+                    or loaded.document_id != request.document.document_id
+                    or loaded.content_sha256 != request.document.content_sha256
+                ):
+                    raise ValueError("Pinned parse does not match the registered source")
+                parse = loaded
+            ai_result = _mock_ai_extract(parse, request.schema)
             self._runs.retain_raw(request.run.extraction_run_id, ai_result)
             error_message = ai_result.get("error_message")
             if isinstance(error_message, str) and error_message:

@@ -13,6 +13,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.service import sql
 
 from idp_app.core.performance import record_sql_statement
+from idp_app.services.bulk_ids import id_chunks, id_parameters
 from idp_app.services.document_models import DocumentRecord
 
 DOCUMENT_COLUMNS = (
@@ -122,6 +123,8 @@ class DocumentRegistry(Protocol):
     def list_case_ids(self) -> list[str]: ...
 
     def get(self, document_id: str) -> DocumentRecord | None: ...
+
+    def get_many(self, document_ids: list[str]) -> dict[str, DocumentRecord]: ...
 
     def delete(self, document_id: str) -> None: ...
 
@@ -250,6 +253,19 @@ class SQLiteDocumentRegistry:
                 "AND status <> 'DELETED' ORDER BY case_id"
             ).fetchall()
         return [str(row["case_id"]) for row in rows]
+
+    def get_many(self, document_ids: list[str]) -> dict[str, DocumentRecord]:
+        documents = {}
+        for chunk in id_chunks(document_ids):
+            markers, values = id_parameters(chunk)
+            with self._connect() as connection:
+                rows = connection.execute(
+                    f"SELECT * FROM documents WHERE document_id IN ({markers})", values
+                ).fetchall()
+            for row in rows:
+                document = _sqlite_row_to_document(row)
+                documents[document.document_id] = document
+        return documents
 
     def get(self, document_id: str) -> DocumentRecord | None:
         with self._connect() as connection:
@@ -436,6 +452,22 @@ class DatabricksDocumentRegistry:
             "AND status <> 'DELETED' ORDER BY case_id LIMIT 500"
         )
         return [str(row[0]) for row in rows]
+
+    def get_many(self, document_ids: list[str]) -> dict[str, DocumentRecord]:
+        documents = {}
+        for chunk in id_chunks(document_ids):
+            markers, values = id_parameters(chunk)
+            rows = self.execute_sql(
+                f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
+                f"WHERE document_id IN ({markers})",
+                values,
+            )
+            for row in rows:
+                document = _databricks_row_to_document(row)
+                if document.document_id in documents:
+                    raise RuntimeError("Duplicate document identity requires reconciliation")
+                documents[document.document_id] = document
+        return documents
 
     def get(self, document_id: str) -> DocumentRecord | None:
         rows = self.execute_sql(

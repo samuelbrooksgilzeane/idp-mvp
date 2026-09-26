@@ -310,7 +310,7 @@ def build_extraction_service(settings: Settings) -> ExtractionService:
         for manifest in load_source_manifests():
             mock_schemas.register(manifest, "source-controlled-bootstrap")
         mock_runs = SQLiteExtractionRunRepository(database_path)
-        mock_jobs = MockExtractionJobRunner(mock_runs, mock_documents)
+        mock_jobs = MockExtractionJobRunner(mock_runs, mock_documents, parse_runs=mock_parse_runs)
         return ExtractionService(
             mock_documents, mock_parse_runs, mock_schemas, mock_runs, mock_jobs
         )

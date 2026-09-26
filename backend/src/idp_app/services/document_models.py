@@ -48,6 +48,14 @@ class ParseRunRecord:
 
 
 @dataclass(frozen=True)
+class ParseRunReference:
+    """Immutable extraction input without retained document text or element payloads."""
+    parse_run_id: str
+    document_id: str
+    content_sha256: str
+
+
+@dataclass(frozen=True)
 class ExtractionRunRecord:
     extraction_run_id: str
     document_id: str

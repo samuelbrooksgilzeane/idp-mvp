@@ -6,7 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from idp_app.services.document_models import ParseRunRecord
+from idp_app.services.bulk_ids import id_chunks, id_parameters
+from idp_app.services.document_models import ParseRunRecord, ParseRunReference
 from idp_app.services.document_registry import DatabricksDocumentRegistry
 
 PARSE_RUN_COLUMNS = (
@@ -55,6 +56,10 @@ class ParseRunRepository(Protocol):
     def list_for_job_run(self, job_run_id: int) -> list[ParseRunRecord]: ...
 
     def latest_successful(self, document_id: str) -> ParseRunRecord | None: ...
+
+    def latest_successful_references(
+        self, document_ids: list[str]
+    ) -> dict[str, ParseRunReference]: ...
 
 
 class SQLiteParseRunRepository:
@@ -196,6 +201,25 @@ class SQLiteParseRunRepository:
             ).fetchall()
         return [_sqlite_row_to_parse_run(row) for row in rows]
 
+    def latest_successful_references(self, document_ids: list[str]) -> dict[str, ParseRunReference]:
+        references = {}
+        for chunk in id_chunks(document_ids):
+            markers, values = id_parameters(chunk)
+            query = f"""
+                SELECT parse_run_id, document_id, content_sha256 FROM (
+                    SELECT parse_run_id, document_id, content_sha256,
+                           ROW_NUMBER() OVER (PARTITION BY document_id
+                               ORDER BY completed_at DESC, parse_run_id DESC) AS position
+                    FROM parse_runs WHERE status = 'SUCCESS' AND document_id IN ({markers})
+                ) latest WHERE position = 1
+            """
+            with self._connect() as connection:
+                rows = connection.execute(query, values).fetchall()
+            for row in rows:
+                reference = ParseRunReference(row[0], row[1], row[2])
+                references[reference.document_id] = reference
+        return references
+
     def latest_successful(self, document_id: str) -> ParseRunRecord | None:
         with self._connect() as connection:
             row = connection.execute(
@@ -310,6 +334,24 @@ class DatabricksParseRunRepository:
             {"job_run_id": job_run_id},
         )
         return [_databricks_row_to_parse_run(row) for row in rows]
+
+    def latest_successful_references(self, document_ids: list[str]) -> dict[str, ParseRunReference]:
+        references = {}
+        for chunk in id_chunks(document_ids):
+            markers, values = id_parameters(chunk)
+            query = f"""
+                SELECT parse_run_id, document_id, content_sha256 FROM (
+                    SELECT parse_run_id, document_id, content_sha256,
+                           ROW_NUMBER() OVER (PARTITION BY document_id
+                               ORDER BY completed_at DESC, parse_run_id DESC) AS position
+                    FROM {self._table} WHERE status = 'SUCCESS' AND document_id IN ({markers})
+                ) latest WHERE position = 1
+            """
+            rows = self._sql.execute_sql(query, values)
+            for row in rows:
+                reference = ParseRunReference(row[0], row[1], row[2])
+                references[reference.document_id] = reference
+        return references
 
     def latest_successful(self, document_id: str) -> ParseRunRecord | None:
         rows = self._sql.execute_sql(

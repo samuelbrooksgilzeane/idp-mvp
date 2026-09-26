@@ -12,6 +12,12 @@ from idp_app.services.document_models import (
 )
 from idp_app.services.document_registry import DocumentRegistry, InvalidDocumentStateError
 from idp_app.services.documents import DocumentServiceError
+from idp_app.services.extraction_inputs import (
+    ELIGIBLE_DOCUMENT_STATES,
+    ExtractionInputs,
+    published_schema,
+    resolve_extraction_inputs,
+)
 from idp_app.services.extraction_jobs import (
     ExtractionJobRequest,
     ExtractionJobRunner,
@@ -23,13 +29,6 @@ from idp_app.services.parse_runs import ParseRunRepository
 from idp_app.services.schema_registry import SchemaRepository
 
 EXTRACTOR_VERSION = "2.1"
-ELIGIBLE_DOCUMENT_STATES = {
-    "PARSED",
-    "EXTRACTED",
-    "EXTRACT_FAILED",
-    "VALIDATED_PASS",
-    "REVIEW_REQUIRED",
-}
 
 
 class ExtractionService:
@@ -73,16 +72,30 @@ class ExtractionService:
         A document that fails its own preconditions is reported against that document and does
         not prevent the rest of the batch from running.
         """
+        identities = list(dict.fromkeys(document_ids))
+        try:
+            schema = await run_in_threadpool(
+                published_schema, self._schemas, schema_id, schema_version
+            )
+        except DocumentServiceError as error:
+            return [], [
+                BatchFailure(document_id=identity, code=error.code, message=error.message)
+                for identity in identities
+            ]
+        inputs, failures = await run_in_threadpool(
+            resolve_extraction_inputs, self._documents, self._parse_runs, schema, identities
+        )
         prepared: list[tuple[ExtractionRunRecord, ExtractionJobRequest]] = []
-        failures: list[BatchFailure] = []
-        for document_id in dict.fromkeys(document_ids):
+        for resolved in inputs:
             try:
-                prepared.append(
-                    await self._prepare(document_id, schema_id, schema_version, requested_by)
-                )
+                prepared.append(await self._prepare_resolved(resolved, requested_by))
             except DocumentServiceError as error:
                 failures.append(
-                    BatchFailure(document_id=document_id, code=error.code, message=error.message)
+                    BatchFailure(
+                        document_id=resolved.document.document_id,
+                        code=error.code,
+                        message=error.message,
+                    )
                 )
         if not prepared:
             return [], failures
@@ -102,33 +115,25 @@ class ExtractionService:
         schema_version: int,
         requested_by: str,
     ) -> tuple[ExtractionRunRecord, ExtractionJobRequest]:
-        document = await run_in_threadpool(self._documents.get, document_id)
-        if document is None:
-            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
-        parse_run = await run_in_threadpool(self._parse_runs.latest_successful, document_id)
-        if parse_run is None:
+        schema = await run_in_threadpool(published_schema, self._schemas, schema_id, schema_version)
+        inputs, failures = await run_in_threadpool(
+            resolve_extraction_inputs, self._documents, self._parse_runs, schema, [document_id]
+        )
+        if failures:
+            failure = failures[0]
             raise DocumentServiceError(
-                "SUCCESSFUL_PARSE_REQUIRED",
-                "A successful parse is required before extraction.",
-                409,
+                failure.code,
+                failure.message,
+                404 if failure.code == "DOCUMENT_NOT_FOUND" else 409,
                 document_id=document_id,
             )
-        schema = await run_in_threadpool(self._schemas.get, schema_id, schema_version)
-        if schema is None:
-            raise DocumentServiceError("SCHEMA_NOT_FOUND", "Extraction schema not found.", 404)
-        # PRODUCTION is the governed-bootstrap status; PUBLISHED is its user-editable-schema
-        # equivalent. Either is immutable and may be extracted. A document is no longer tied
-        # to one use case at upload time: any published schema may be applied to any parsed
-        # document, so the same document can be extracted again with a different schema, and a
-        # schema authored for one purpose is not locked to documents uploaded under a matching
-        # tag.
-        if schema.status not in ("PRODUCTION", "PUBLISHED"):
-            raise DocumentServiceError(
-                "SCHEMA_NOT_PRODUCTION",
-                "Only a published (or production) schema can be extracted.",
-                409,
-            )
+        return await self._prepare_resolved(inputs[0], requested_by)
 
+    async def _prepare_resolved(
+        self, inputs: ExtractionInputs, requested_by: str
+    ) -> tuple[ExtractionRunRecord, ExtractionJobRequest]:
+        document, parse_run, schema = inputs.document, inputs.parse, inputs.schema
+        document_id = document.document_id
         extraction_run_id = str(uuid4())
         options = {
             "version": EXTRACTOR_VERSION,
@@ -264,9 +269,7 @@ class ExtractionService:
                 document_id=document_id,
             )
         fields = await run_in_threadpool(self._runs.list_fields, run.extraction_run_id)
-        candidates = await run_in_threadpool(
-            self._runs.list_candidates, run.extraction_run_id
-        )
+        candidates = await run_in_threadpool(self._runs.list_candidates, run.extraction_run_id)
         return run, fields, candidates
 
     async def result(
@@ -284,9 +287,7 @@ class ExtractionService:
                 document_id=document_id,
             )
         fields = await run_in_threadpool(self._runs.list_fields, run.extraction_run_id)
-        candidates = await run_in_threadpool(
-            self._runs.list_candidates, run.extraction_run_id
-        )
+        candidates = await run_in_threadpool(self._runs.list_candidates, run.extraction_run_id)
         return run, fields, candidates
 
     async def _refresh(self, run: ExtractionRunRecord) -> None:
@@ -321,6 +322,4 @@ def extraction_idempotency_key(
     schema_version: int,
     extractor_version: str,
 ) -> str:
-    return "+".join(
-        (document_id, parse_run_id, schema_id, str(schema_version), extractor_version)
-    )
+    return "+".join((document_id, parse_run_id, schema_id, str(schema_version), extractor_version))
