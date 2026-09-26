@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import zipfile
 from dataclasses import dataclass
 
 from starlette.concurrency import run_in_threadpool
@@ -11,9 +10,7 @@ from idp_app.services.documents import DocumentServiceError
 from idp_app.services.export_sources import ExportSource, ExportSourceRepository
 from idp_app.services.exports import (
     ExportTable,
-    build_csv_bundle,
     build_export_tables,
-    build_workbook,
 )
 from idp_app.services.extraction_result import walk_extraction
 from idp_app.services.schema_models import SchemaRecord
@@ -73,52 +70,57 @@ class ExportService:
     ) -> dict[tuple[str, int], list[_RunTables]]:
         groups: dict[tuple[str, int], list[_RunTables]] = {}
         for run, schema, tables in tables_by_run:
-            groups.setdefault((run.schema_id, run.schema_version), []).append(
-                (run, schema, tables)
-            )
+            groups.setdefault((run.schema_id, run.schema_version), []).append((run, schema, tables))
         return groups
 
-    async def export_workbook(self, run_ids: list[str]) -> ExportResult:
-        tables_by_run = await self._load_tables(run_ids)
-        groups = self._group_by_schema_version(tables_by_run)
+    async def _export(self, run_ids: list[str], format: str) -> ExportResult:
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from idp_app.services.export_writer import write_export
+
+        def generate() -> ExportResult:
+            with TemporaryDirectory(prefix="idp-small-export-") as directory:
+                destination = Path(directory) / "result"
+                multiple = write_export(self.iter_tables(run_ids), destination, format)
+                return ExportResult(io.BytesIO(destination.read_bytes()), multiple)
+
         try:
-            if len(groups) <= 1:
-                content = await run_in_threadpool(build_workbook, tables_by_run)
-                return ExportResult(content=content, is_multi_schema=False)
-            archive = io.BytesIO()
-            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
-                for (schema_id, schema_version), group in groups.items():
-                    workbook = await run_in_threadpool(build_workbook, group)
-                    zf.writestr(f"{schema_id}_v{schema_version}.xlsx", workbook.getvalue())
-            archive.seek(0)
-            return ExportResult(content=archive, is_multi_schema=True)
-        except Exception as error:
-            raise DocumentServiceError(
-                "EXPORT_FAILED", "The extraction export could not be generated.", 502
-            ) from error
+            return await run_in_threadpool(generate)
+        except ValueError as error:
+            raise DocumentServiceError("EXPORT_LIMIT", str(error), 422) from error
+
+    def iter_tables(self, run_ids: list[str]):
+        """One joined read per bounded page; release retained JSON after each page."""
+        requested = list(dict.fromkeys(run_ids))
+        for offset in range(0, len(requested), 25):
+            page = requested[offset : offset + 25]
+            sources = {
+                source.run.extraction_run_id: source for source in self._sources.get_many(page)
+            }
+            for run_id in page:
+                source = sources.pop(run_id, None)
+                if source is None:
+                    raise DocumentServiceError(
+                        "EXTRACTION_RUN_NOT_FOUND", "Extraction run not found.", 404
+                    )
+                if source.run.status != "EXTRACTED" or source.run.ai_result is None:
+                    raise DocumentServiceError(
+                        "EXTRACTION_RESULT_UNAVAILABLE",
+                        "Select completed successful extraction runs.",
+                        409,
+                    )
+                if source.run.schema_hash != source.schema.schema_hash:
+                    raise DocumentServiceError(
+                        "SCHEMA_MISMATCH", "The pinned schema has changed.", 409
+                    )
+                yield _build_source_tables([source])[0]
+
+    async def export_workbook(self, run_ids: list[str]) -> ExportResult:
+        return await self._export(run_ids, "xlsx")
 
     async def export_csv_bundle(self, run_ids: list[str]) -> ExportResult:
-        tables_by_run = await self._load_tables(run_ids)
-        groups = self._group_by_schema_version(tables_by_run)
-        try:
-            if len(groups) <= 1:
-                content = await run_in_threadpool(build_csv_bundle, tables_by_run)
-                return ExportResult(content=content, is_multi_schema=False)
-            archive = io.BytesIO()
-            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as outer:
-                for (schema_id, schema_version), group in groups.items():
-                    bundle = await run_in_threadpool(build_csv_bundle, group)
-                    with zipfile.ZipFile(bundle) as inner:
-                        for name in inner.namelist():
-                            outer.writestr(
-                                f"{schema_id}_v{schema_version}/{name}", inner.read(name)
-                            )
-            archive.seek(0)
-            return ExportResult(content=archive, is_multi_schema=True)
-        except Exception as error:
-            raise DocumentServiceError(
-                "EXPORT_FAILED", "The extraction export could not be generated.", 502
-            ) from error
+        return await self._export(run_ids, "csv")
 
 
 def _build_source_tables(sources: list[ExportSource]) -> list[_RunTables]:
