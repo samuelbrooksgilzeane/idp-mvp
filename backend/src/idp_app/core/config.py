@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     parse_job_id: PositiveInt | None = None
     extraction_job_id: PositiveInt | None = None
     dispatch_job_id: PositiveInt | None = None
+    viewer_projection_enabled: bool = False
     bulk_export_enabled: bool = False
     export_job_id: PositiveInt | None = None
     export_retention_hours: int = Field(default=24, ge=1, le=168)

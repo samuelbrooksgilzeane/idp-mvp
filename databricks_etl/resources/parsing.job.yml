@@ -52,6 +52,8 @@ resources:
             spark_python_task:
               python_file: ../src/parse_document.py
               parameters:
+              - --viewer-projection-enabled
+              - ${var.viewer_projection_enabled}
               - --catalog
               - '{{job.parameters.catalog}}'
               - --project-schema
@@ -79,6 +81,10 @@ resources:
             spark_python_task:
               python_file: ../src/parse_document.py
               parameters:
+              - --viewer-projection-enabled
+              - ${var.viewer_projection_enabled}
+              - --warehouse-id
+              - '{{job.parameters.warehouse_id}}'
               - --catalog
               - '{{job.parameters.catalog}}'
               - --project-schema

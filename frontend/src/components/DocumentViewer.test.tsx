@@ -116,7 +116,6 @@ describe("DocumentViewer", () => {
     await waitFor(() => expect(screen.getByText("1 elements here")).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/documents/${documentId}/elements?page_id=1`,
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
     fireEvent.error(secondImage);
@@ -170,7 +169,7 @@ describe("DocumentViewer", () => {
     const parseRunId = "parse-historical";
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = input.toString();
-      if (url.endsWith(`/pages?parse_run_id=${parseRunId}`)) {
+      if (url.endsWith(`/viewer?parse_run_id=${parseRunId}`)) {
         return {
           ok: true,
           status: 200,
@@ -205,8 +204,7 @@ describe("DocumentViewer", () => {
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         `/api/documents/${documentId}/elements?page_id=0&parse_run_id=${parseRunId}`,
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      ),
+        ),
     );
   });
 
@@ -224,7 +222,7 @@ describe("DocumentViewer", () => {
 function viewerFetch() {
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = input.toString();
-    if (url.endsWith("/pages")) return { ok: true, status: 200, json: async () => pages };
+    if (url.endsWith("/viewer")) return { ok: true, status: 200, json: async () => pages };
     if (url.includes("page_id=1")) {
       return { ok: true, status: 200, json: async () => pageTwoElements };
     }

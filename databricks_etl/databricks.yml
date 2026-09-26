@@ -9,6 +9,9 @@ sync:
     - ..
 
 variables:
+  viewer_projection_enabled:
+    description: Enable after applying viewer projection migration and narrow grants.
+    default: "false"
   bulk_export_enabled:
     description: Enable only after export tables and Job permissions are verified.
     default: "false"

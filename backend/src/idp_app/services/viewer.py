@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import mimetypes
+import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Protocol
@@ -104,36 +107,71 @@ class ViewerService:
         documents: DocumentRegistry,
         parse_runs: ParseRunRepository,
         images: PageImageStorage,
+        projections: Any = None,
     ) -> None:
         self._documents = documents
         self._parse_runs = parse_runs
         self._images = images
+        self._projections = projections
+        self._fallback: OrderedDict[str, tuple[float, int, Any]] = OrderedDict()
+
+    async def _page_data(self, run: ParseRunRecord, page_id: int | None = None):
+        if self._projections is not None:
+            manifest = await run_in_threadpool(self._projections.manifest, run.parse_run_id)
+            if manifest is not None:
+                if manifest["document_id"] != run.document_id:
+                    raise DocumentServiceError(
+                        "PROJECTION_INVALID", "Projection identity mismatch.", 409
+                    )
+                pages = [ParsedPage(**page) for page in manifest["pages"]]
+                elements = []
+                if page_id is not None:
+                    if page_id not in {p.page_id for p in pages}:
+                        raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
+                    raw = await run_in_threadpool(self._projections.page, run.parse_run_id, page_id)
+                    elements = [
+                        ParsedElement(**{**e, "boxes": [BoundingBox(**box) for box in e["boxes"]]})
+                        for e in raw
+                    ]
+                return pages, elements
+        from idp_app.services.viewer_projection import project
+
+        now = time.monotonic()
+        cached = self._fallback.pop(run.parse_run_id, None)
+        if cached is None or cached[0] < now:
+            retained = (
+                run
+                if run.parsed is not None
+                else await run_in_threadpool(self._parse_runs.get, run.parse_run_id)
+            )
+            if retained is None or retained.parsed is None:
+                raise DocumentServiceError(
+                    "PARSE_RUN_NOT_FOUND", "Retained parse unavailable.", 404
+                )
+            size = len(json.dumps(retained.parsed).encode())
+            data = await run_in_threadpool(project, retained)
+            cached = (now + 60, size, data)
+        if cached[1] <= 16_000_000:
+            self._fallback[run.parse_run_id] = cached
+            while (
+                len(self._fallback) > 4 or sum(v[1] for v in self._fallback.values()) > 16_000_000
+            ):
+                self._fallback.popitem(last=False)
+        pages, elements = cached[2]
+        if page_id is not None and page_id not in elements:
+            raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
+        return pages, elements.get(page_id, [])
+
+    async def metadata(self, document_id: str, parse_run_id: str | None = None):
+        run = await self._successful_run(document_id, parse_run_id)
+        pages, _ = await self._page_data(run)
+        return run.parse_run_id, pages
 
     async def list_pages(
         self, document_id: str, parse_run_id: str | None = None
     ) -> list[ParsedPage]:
-        run = await self._successful_run(document_id, parse_run_id)
-        pages = _parsed_pages(run.parsed)
-        elements = _parsed_elements(run.parsed)
-        return [
-            ParsedPage(
-                page_id=page_id,
-                page_number=index + 1,
-                element_count=sum(
-                    any(box.page_id == page_id for box in element.boxes)
-                    for element in elements
-                ),
-                element_types=sorted(
-                    {
-                        element.element_type
-                        for element in elements
-                        if any(box.page_id == page_id for box in element.boxes)
-                    }
-                ),
-                image_path=image_path,
-            )
-            for index, (page_id, image_path) in enumerate(pages)
-        ]
+        _, pages = await self.metadata(document_id, parse_run_id)
+        return pages
 
     async def list_elements(
         self,
@@ -143,49 +181,23 @@ class ViewerService:
         parse_run_id: str | None = None,
     ) -> list[ParsedElement]:
         run = await self._successful_run(document_id, parse_run_id)
-        pages = _parsed_pages(run.parsed)
-        if page_id not in {item[0] for item in pages}:
-            raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
-
-        requested_type = element_type.strip().lower() if element_type else None
-        result: list[ParsedElement] = []
-        for element in _parsed_elements(run.parsed):
-            if requested_type and element.element_type != requested_type:
-                continue
-            page_boxes = [box for box in element.boxes if box.page_id == page_id]
-            if not page_boxes:
-                continue
-            result.append(
-                ParsedElement(
-                    element_id=element.element_id,
-                    element_type=element.element_type,
-                    content=element.content,
-                    confidence=element.confidence,
-                    description=element.description,
-                    boxes=page_boxes,
-                )
-            )
-        return result
+        _, elements = await self._page_data(run, page_id)
+        requested = element_type.strip().lower() if element_type else None
+        return [e for e in elements if not requested or e.element_type == requested]
 
     async def open_page_image(
         self, document_id: str, page_id: int, parse_run_id: str | None = None
     ) -> PageImage:
         run = await self._successful_run(document_id, parse_run_id)
-        page = next(
-            (item for item in _parsed_pages(run.parsed) if item[0] == page_id),
-            None,
-        )
+        pages, _ = await self._page_data(run)
+        page = next((item for item in pages if item.page_id == page_id), None)
         if page is None:
             raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
 
-        image_path = page[1]
+        image_path = page.image_path
         root = PurePosixPath(run.page_image_root)
         candidate = PurePosixPath(image_path)
-        if (
-            ".." in candidate.parts
-            or candidate == root
-            or not candidate.is_relative_to(root)
-        ):
+        if ".." in candidate.parts or candidate == root or not candidate.is_relative_to(root):
             raise DocumentServiceError(
                 "PAGE_IMAGE_INVALID",
                 "The parsed page image reference is invalid.",
@@ -225,19 +237,27 @@ class ViewerService:
             )
         return run
 
-    async def _successful_run(
-        self, document_id: str, parse_run_id: str | None
-    ) -> ParseRunRecord:
+    async def _successful_run(self, document_id: str, parse_run_id: str | None) -> ParseRunRecord:
+        document = await run_in_threadpool(self._documents.get, document_id)
+        if document is None:
+            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         if parse_run_id is None:
-            return await self._latest_successful(document_id)
-        run = await run_in_threadpool(self._parse_runs.get, parse_run_id)
+            references = await run_in_threadpool(
+                self._parse_runs.latest_successful_references, [document_id]
+            )
+            reference = references.get(document_id)
+            if reference is None:
+                raise DocumentServiceError(
+                    "DOCUMENT_NOT_PARSED", "No successful parse is available.", 409
+                )
+            parse_run_id = reference.parse_run_id
+        reader = getattr(self._parse_runs, "metadata", self._parse_runs.get)
+        run = await run_in_threadpool(reader, parse_run_id)
         if run is None or run.document_id != document_id:
             raise DocumentServiceError("PARSE_RUN_NOT_FOUND", "Parse run not found.", 404)
-        if run.status != "SUCCESS" or run.parsed is None:
+        if run.status != "SUCCESS":
             raise DocumentServiceError(
-                "DOCUMENT_NOT_PARSED",
-                "The requested parse run is not available for inspection.",
-                409,
+                "DOCUMENT_NOT_PARSED", "The requested parse is unavailable.", 409
             )
         return run
 

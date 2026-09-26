@@ -196,12 +196,14 @@ def get_viewer_service(request: Request) -> ViewerService:
 
 
 def build_viewer_service(settings: Settings) -> ViewerService:
+    from idp_app.services.viewer_projection import ViewerProjection
     database_path = settings.local_data_dir / "registry.sqlite3"
     if settings.mode is IdpMode.MOCK:
         return ViewerService(
             SQLiteDocumentRegistry(database_path),
             SQLiteParseRunRepository(database_path),
             LocalPageImageStorage(settings.local_data_dir / "artifacts_volume" / "page_images"),
+            ViewerProjection(database_path) if settings.viewer_projection_enabled else None,
         )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
@@ -241,6 +243,8 @@ def build_viewer_service(settings: Settings) -> ViewerService:
             project_schema,
             artifacts_volume_name,
         ),
+        ViewerProjection(sql=documents, namespace=f"{catalog}.{project_schema}.{table_prefix}")
+        if settings.viewer_projection_enabled else None,
     )
 
 

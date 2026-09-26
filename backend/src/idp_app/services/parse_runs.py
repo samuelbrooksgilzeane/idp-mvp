@@ -49,6 +49,8 @@ class ParseRunRepository(Protocol):
         parse_error: dict[str, Any] | list[Any],
     ) -> None: ...
 
+    def metadata(self, parse_run_id: str) -> ParseRunRecord | None: ...
+
     def get(self, parse_run_id: str) -> ParseRunRecord | None: ...
 
     def list_for_document(self, document_id: str) -> list[ParseRunRecord]: ...
@@ -155,6 +157,20 @@ class SQLiteParseRunRepository:
             if cursor.rowcount != 1:
                 raise RuntimeError("Parse run is not eligible for completion")
 
+        # Projection failure must never turn a successful parse into another AI attempt.
+        try:
+            from idp_app.services.viewer_projection import ViewerProjection
+
+            run = self.get(parse_run_id)
+            if run is not None:
+                ViewerProjection(self._database_path).build(run)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Viewer projection needs a retained-parse rebuild"
+            )
+
     def fail(
         self,
         parse_run_id: str,
@@ -175,6 +191,17 @@ class SQLiteParseRunRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Parse run is not eligible for failure completion")
+
+    def metadata(self, parse_run_id: str) -> ParseRunRecord | None:
+        columns = ", ".join(
+            "NULL AS " + name if name in {"parsed", "document_text"} else name
+            for name in PARSE_RUN_COLUMNS
+        )
+        with self._connect() as connection:
+            row = connection.execute(
+                f"SELECT {columns} FROM parse_runs WHERE parse_run_id = ?", (parse_run_id,)
+            ).fetchone()
+        return _sqlite_row_to_parse_run(row) if row else None
 
     def get(self, parse_run_id: str) -> ParseRunRecord | None:
         with self._connect() as connection:
@@ -311,6 +338,16 @@ class DatabricksParseRunRepository:
                 "parse_error": json.dumps(parse_error, separators=(",", ":")),
             },
         )
+
+    def metadata(self, parse_run_id: str) -> ParseRunRecord | None:
+        rows = self._sql.execute_sql(
+            self._select_sql()
+            .replace("TO_JSON(parsed)", "NULL")
+            .replace("document_text", "CAST(NULL AS STRING)")
+            + " WHERE parse_run_id = :parse_run_id LIMIT 1",
+            {"parse_run_id": parse_run_id},
+        )
+        return _databricks_row_to_parse_run(rows[0]) if rows else None
 
     def get(self, parse_run_id: str) -> ParseRunRecord | None:
         rows = self._sql.execute_sql(

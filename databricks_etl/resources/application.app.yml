@@ -136,6 +136,8 @@ resources:
           - --port
           - "8000"
         env:
+          - name: IDP_VIEWER_PROJECTION_ENABLED
+            value: ${var.viewer_projection_enabled}
           - name: IDP_BULK_EXPORT_ENABLED
             value: ${var.bulk_export_enabled}
           - name: IDP_EXPORT_JOB_ID

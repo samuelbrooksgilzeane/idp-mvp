@@ -27,6 +27,7 @@ class Parameters:
     work_item_id: str | None = None
     dispatch_id: str | None = None
     warehouse_id: str | None = None
+    viewer_projection_enabled: str = "false"
 
 
 def parse_arguments() -> Parameters:
@@ -43,6 +44,7 @@ def parse_arguments() -> Parameters:
     parser.add_argument("--work-item-id")
     parser.add_argument("--dispatch-id")
     parser.add_argument("--warehouse-id")
+    parser.add_argument("--viewer-projection-enabled", default="false")
     arguments = parser.parse_args()
     parameters = Parameters(
         catalog=arguments.catalog,
@@ -57,6 +59,7 @@ def parse_arguments() -> Parameters:
         work_item_id=arguments.work_item_id,
         dispatch_id=arguments.dispatch_id,
         warehouse_id=arguments.warehouse_id,
+        viewer_projection_enabled=arguments.viewer_projection_enabled,
     )
     validate(parameters)
     return parameters
@@ -277,6 +280,22 @@ def main() -> None:
         )
         if preparation is not None and claimed is not None:
             finish_parse(preparation, claimed)
+        if parameters.viewer_projection_enabled.lower() == "true":
+            try:
+                from work_runtime import build_preparation
+                from idp_app.services.viewer_projection import ViewerProjection
+                projection_source, _ = build_preparation(
+                    catalog=parameters.catalog, project_schema=parameters.project_schema,
+                    table_prefix=parameters.table_prefix, source_volume_name=parameters.source_volume_name,
+                    artifacts_volume_name=parameters.artifacts_volume_name, warehouse_id=parameters.warehouse_id)
+                run = projection_source.runs.get(parameters.parse_run_id)
+                if run is not None and run.status == "SUCCESS":
+                    ViewerProjection(sql=projection_source.documents,
+                        namespace=f"{parameters.catalog}.{parameters.project_schema}.{parameters.table_prefix}").build(run)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception("Viewer projection requires retained-parse backfill")
+
     except Exception as error:
         checkpoint()
         if result_persisted:

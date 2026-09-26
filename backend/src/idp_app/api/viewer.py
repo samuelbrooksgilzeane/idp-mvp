@@ -22,10 +22,21 @@ async def list_pages(
     service: Annotated[ViewerService, Depends(get_viewer_service)],
     parse_run_id: Annotated[str | None, Query(max_length=100)] = None,
 ) -> list[PageResponse]:
-    return [
-        _page_response(document_id, page, parse_run_id)
-        for page in await service.list_pages(document_id, parse_run_id)
-    ]
+    resolved, pages = await service.metadata(document_id, parse_run_id)
+    return [_page_response(document_id, page, resolved) for page in pages]
+
+
+@viewer_router.get("/documents/{document_id}/viewer")
+async def viewer_metadata(
+    document_id: str,
+    service: Annotated[ViewerService, Depends(get_viewer_service)],
+    parse_run_id: Annotated[str | None, Query(max_length=100)] = None,
+):
+    resolved, pages = await service.metadata(document_id, parse_run_id)
+    return {
+        "parse_run_id": resolved,
+        "pages": [_page_response(document_id, page, resolved) for page in pages],
+    }
 
 
 @viewer_router.get(
@@ -67,15 +78,11 @@ async def list_elements(
 ) -> list[ElementResponse]:
     return [
         _element_response(element)
-        for element in await service.list_elements(
-            document_id, page_id, element_type, parse_run_id
-        )
+        for element in await service.list_elements(document_id, page_id, element_type, parse_run_id)
     ]
 
 
-def _page_response(
-    document_id: str, page: ParsedPage, parse_run_id: str | None
-) -> PageResponse:
+def _page_response(document_id: str, page: ParsedPage, parse_run_id: str | None) -> PageResponse:
     image_url = f"/api/documents/{document_id}/pages/{page.page_id}/image"
     if parse_run_id is not None:
         image_url += "?" + urlencode({"parse_run_id": parse_run_id})
@@ -96,8 +103,7 @@ def _element_response(element: ParsedElement) -> ElementResponse:
         confidence=element.confidence,
         description=element.description,
         boxes=[
-            BoundingBoxResponse.model_validate(box, from_attributes=True)
-            for box in element.boxes
+            BoundingBoxResponse.model_validate(box, from_attributes=True) for box in element.boxes
         ],
     )
 

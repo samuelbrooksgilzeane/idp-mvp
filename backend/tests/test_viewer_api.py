@@ -53,7 +53,7 @@ def test_page_metadata_elements_and_image_stream_are_document_scoped(
     tmp_path: Path,
 ) -> None:
     client, _ = _client(tmp_path)
-    document, _ = _upload_and_parse(client, _pdf_bytes(), "viewer-invoice.pdf")
+    document, run = _upload_and_parse(client, _pdf_bytes(), "viewer-invoice.pdf")
     document_id = document["document_id"]
 
     pages_response = client.get(f"/api/documents/{document_id}/pages")
@@ -66,15 +66,13 @@ def test_page_metadata_elements_and_image_stream_are_document_scoped(
             "page_number": 1,
             "element_count": 1,
             "element_types": ["text"],
-            "image_url": f"/api/documents/{document_id}/pages/0/image",
+            "image_url": f"/api/documents/{document_id}/pages/0/image?parse_run_id={run['parse_run_id']}",
         }
     ]
     assert "/Volumes/" not in pages_response.text
     assert str(tmp_path) not in pages_response.text
 
-    elements_response = client.get(
-        f"/api/documents/{document_id}/elements?page_id=0&type=text"
-    )
+    elements_response = client.get(f"/api/documents/{document_id}/elements?page_id=0&type=text")
     assert elements_response.status_code == 200
     elements = elements_response.json()
     assert len(elements) == 1
@@ -89,9 +87,7 @@ def test_page_metadata_elements_and_image_stream_are_document_scoped(
             "height": 46.0,
         }
     ]
-    assert client.get(
-        f"/api/documents/{document_id}/elements?page_id=0&type=table"
-    ).json() == []
+    assert client.get(f"/api/documents/{document_id}/elements?page_id=0&type=table").json() == []
 
     image_response = client.get(pages[0]["image_url"])
     assert image_response.status_code == 200
@@ -125,9 +121,7 @@ def test_unparsed_missing_page_and_missing_image_states(tmp_path: Path) -> None:
     assert retained is not None and retained.parsed is not None
     image_path = Path(retained.parsed["document"]["pages"][0]["image_uri"])
     image_path.unlink()
-    missing_image = client.get(
-        f"/api/documents/{document['document_id']}/pages/0/image"
-    )
+    missing_image = client.get(f"/api/documents/{document['document_id']}/pages/0/image")
     assert missing_image.status_code == 404
     assert missing_image.json()["error"]["code"] == "PAGE_IMAGE_MISSING"
 
@@ -163,9 +157,7 @@ def test_page_image_cannot_cross_parse_run_boundary(tmp_path: Path) -> None:
             (json.dumps(parsed), first_run["parse_run_id"]),
         )
 
-    response = client.get(
-        f"/api/documents/{first_document['document_id']}/pages/0/image"
-    )
+    response = client.get(f"/api/documents/{first_document['document_id']}/pages/0/image")
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "PAGE_IMAGE_INVALID"
 
@@ -212,9 +204,7 @@ def test_viewer_can_be_scoped_to_the_parse_run_used_by_an_extraction(
 
     assert latest_pages[0]["page_id"] == 0
     assert historical_pages[0]["page_id"] == 7
-    assert historical_pages[0]["image_url"].endswith(
-        f"?parse_run_id={first_run['parse_run_id']}"
-    )
+    assert historical_pages[0]["image_url"].endswith(f"?parse_run_id={first_run['parse_run_id']}")
     assert client.get(historical_pages[0]["image_url"]).status_code == 200
 
     foreign_document, foreign_run = _upload_and_parse(
@@ -232,9 +222,7 @@ def test_viewer_can_be_scoped_to_the_parse_run_used_by_an_extraction(
 
 def test_bounding_boxes_normalise_databricks_rectangles_and_mock_polygons() -> None:
     rectangle = normalise_box({"page_id": 0, "coord": [17, 850, 1425, 1310]})
-    polygon = normalise_box(
-        {"page_id": 2, "coord": [10, 20, 90, 20, 90, 70, 10, 70]}
-    )
+    polygon = normalise_box({"page_id": 2, "coord": [10, 20, 90, 20, 90, 70, 10, 70]})
 
     assert rectangle is not None
     assert (rectangle.x, rectangle.y, rectangle.width, rectangle.height) == (
@@ -250,4 +238,61 @@ def test_bounding_boxes_normalise_databricks_rectangles_and_mock_polygons() -> N
         20,
         80,
         50,
+    )
+
+
+def test_projection_reads_avoid_retained_parse_and_preserve_multi_page_boxes(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+    from idp_app.services.viewer_projection import ViewerProjection, project
+
+    client, settings = _client(tmp_path)
+    document, run = _upload_and_parse(client, _pdf_bytes(), "projection.pdf")
+    path = settings.local_data_dir / "registry.sqlite3"
+    repository = SQLiteParseRunRepository(path)
+    retained = repository.get(run["parse_run_id"])
+    assert retained is not None and retained.parsed is not None
+    parsed = retained.parsed
+    first = parsed["document"]["pages"][0]
+    parsed["document"]["pages"].append({**first, "id": 7})
+    element = parsed["document"]["elements"][0]
+    element["bbox"].append({**element["bbox"][0], "page_id": 7})
+    pages, elements = project(replace(retained, parsed=parsed))
+    assert [p.page_id for p in pages] == [0, 7]
+    assert elements[0][0].element_id == elements[7][0].element_id
+    assert all(box.page_id == 7 for box in elements[7][0].boxes)
+    projection = ViewerProjection(path)
+    assert projection.manifest(run["parse_run_id"]) is not None
+    settings.viewer_projection_enabled = True
+    if hasattr(client.app.state, "viewer_service"):
+        del client.app.state.viewer_service
+    metadata = client.get(f"/api/documents/{document['document_id']}/viewer").json()
+    assert metadata["parse_run_id"] == run["parse_run_id"]
+    viewer = client.app.state.viewer_service
+    viewer._parse_runs.get = lambda _: (_ for _ in ()).throw(AssertionError("No retained read"))
+    assert (
+        client.get(
+            f"/api/documents/{document['document_id']}/elements",
+            params={"page_id": 0, "parse_run_id": run["parse_run_id"]},
+        ).status_code
+        == 200
+    )
+
+
+def test_old_run_fallback_reads_retained_parse_once(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    document, run = _upload_and_parse(client, _pdf_bytes(), "fallback.pdf")
+    metadata = client.get(f"/api/documents/{document['document_id']}/viewer").json()
+    viewer = client.app.state.viewer_service
+    viewer._parse_runs.get = lambda _: (_ for _ in ()).throw(
+        AssertionError("Fallback should be cached")
+    )
+    assert metadata["parse_run_id"] == run["parse_run_id"]
+    assert (
+        client.get(
+            f"/api/documents/{document['document_id']}/elements",
+            params={"page_id": 0, "parse_run_id": run["parse_run_id"]},
+        ).status_code
+        == 200
     )

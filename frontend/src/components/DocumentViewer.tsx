@@ -1,3 +1,4 @@
+import { useViewerPage } from "../hooks/useViewerPage";
 import {
   ChevronLeft,
   ChevronRight,
@@ -50,6 +51,7 @@ export type ParsedElement = {
 };
 
 export type CitationTarget = {
+  parseRunId?: string;
   pageId: number;
   fieldLabel: string;
   boxes: CitationCoordinate[];
@@ -82,8 +84,7 @@ export function DocumentViewer({
   const [viewer, setViewer] = useState<ViewerState>({ kind: "idle" });
   const [pageIndex, setPageIndex] = useState(0);
   const [zoom, setZoom] = useState(100);
-  const [elements, setElements] = useState<ParsedElement[]>([]);
-  const [elementsLoading, setElementsLoading] = useState(false);
+  const [resolvedParseId, setResolvedParseId] = useState(parseRunId);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedElementId, setSelectedElementId] = useState<number | null>(null);
   const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
@@ -95,7 +96,6 @@ export function DocumentViewer({
     const controller = new AbortController();
     setPageIndex(0);
     setZoom(100);
-    setElements([]);
     setSelectedElementId(null);
     setNaturalSize({ width: 0, height: 0 });
     setRenderedSize({ width: 0, height: 0 });
@@ -110,8 +110,9 @@ export function DocumentViewer({
 
     setViewer({ kind: "loading" });
     const query = parseRunId ? `?parse_run_id=${encodeURIComponent(parseRunId)}` : "";
-    fetch(`/api/documents/${documentId}/pages${query}`, { signal: controller.signal })
+    fetch(`/api/documents/${documentId}/viewer${query}`, { signal: controller.signal })
       .then(async (response) => {
+        if (controller.signal.aborted) return;
         if (response.status === 409) {
           const payload = (await response.json()) as { error?: { message?: string } };
           setViewer({
@@ -122,9 +123,11 @@ export function DocumentViewer({
         }
         if (!response.ok) throw new Error("Page metadata request failed");
         const payload = (await response.json()) as unknown;
-        const pages = Array.isArray(payload)
-          ? payload.filter(isPageMetadata)
-          : [];
+        if (controller.signal.aborted) return;
+        const envelope = payload as { parse_run_id?: string; pages?: unknown[] };
+        setResolvedParseId(envelope.parse_run_id || parseRunId);
+        const raw = Array.isArray(payload) ? payload : envelope.pages;
+        const pages = Array.isArray(raw) ? raw.filter(isPageMetadata) : [];
         setViewer(
           pages.length
             ? { kind: "ready", pages }
@@ -132,7 +135,7 @@ export function DocumentViewer({
         );
       })
       .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
+        if (!controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
           setViewer({ kind: "error", message: "The parsed pages could not be loaded." });
         }
       });
@@ -141,37 +144,20 @@ export function DocumentViewer({
 
   const currentPage = viewer.kind === "ready" ? viewer.pages[pageIndex] : null;
 
+  const nextPage = viewer.kind === "ready" ? viewer.pages[pageIndex + 1] ?? null : null;
+  const { elements, loading: elementsLoading, error: elementsError } = useViewerPage(
+    documentId, resolvedParseId, currentPage, nextPage, imageState === "ready",
+  );
+  const imageKey = `${documentId}:${resolvedParseId}:${currentPage?.page_id}`;
+  const activeImage = useRef(imageKey);
+  activeImage.current = imageKey;
   useEffect(() => {
-    if (!currentPage) return;
-    const controller = new AbortController();
-    setElementsLoading(true);
-    setElements([]);
     setSelectedElementId(null);
     setImageState("loading");
     setNaturalSize({ width: 0, height: 0 });
     setRenderedSize({ width: 0, height: 0 });
-    setSelectedTypes(new Set(currentPage.element_types));
-    const parameters = new URLSearchParams({ page_id: String(currentPage.page_id) });
-    if (parseRunId) parameters.set("parse_run_id", parseRunId);
-    fetch(
-      `/api/documents/${documentId}/elements?${parameters.toString()}`,
-      { signal: controller.signal },
-    )
-      .then((response) => {
-        if (!response.ok) throw new Error("Element request failed");
-        return response.json() as Promise<ParsedElement[]>;
-      })
-      .then(setElements)
-      .catch((error: unknown) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setViewer({ kind: "error", message: "The page elements could not be loaded." });
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setElementsLoading(false);
-      });
-    return () => controller.abort();
-  }, [currentPage, documentId, parseRunId]);
+    setSelectedTypes(new Set(currentPage?.element_types || []));
+  }, [currentPage, imageKey]);
 
   useLayoutEffect(() => {
     const image = imageRef.current;
@@ -358,6 +344,7 @@ export function DocumentViewer({
             </div>
           ) : null}
 
+          {elementsError ? <p role="alert">{elementsError}</p> : null}
           <div className="viewer-workspace">
             <div className="page-viewport" aria-busy={imageState === "loading"}>
               {imageState === "loading" ? <div className="page-image-skeleton" /> : null}
@@ -374,10 +361,12 @@ export function DocumentViewer({
                 data-testid="page-sheet"
               >
                 <img
+                  key={imageKey}
                   ref={imageRef}
                   src={currentPage.image_url}
                   alt={`Rendered page ${currentPage.page_number}`}
                   onLoad={(event) => {
+                    if (activeImage.current !== imageKey) return;
                     const image = event.currentTarget;
                     setNaturalSize({
                       width: image.naturalWidth,
@@ -386,7 +375,7 @@ export function DocumentViewer({
                     setRenderedSize({ width: image.clientWidth, height: image.clientHeight });
                     setImageState("ready");
                   }}
-                  onError={() => setImageState("error")}
+                  onError={() => { if (activeImage.current === imageKey) setImageState("error"); }}
                 />
                 {imageState === "ready" ? (
                   <div className="element-overlay" aria-label="Detected page elements">
