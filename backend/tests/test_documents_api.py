@@ -128,11 +128,7 @@ def test_path_traversal_filename_is_sanitized_and_storage_path_is_server_owned(
     assert document["file_name"] == "client_invoice.pdf"
     stored_files = list((tmp_path / "local" / "source_volume" / "incoming").iterdir())
     assert stored_files == [
-        tmp_path
-        / "local"
-        / "source_volume"
-        / "incoming"
-        / f"{document['document_id']}.pdf"
+        tmp_path / "local" / "source_volume" / "incoming" / f"{document['document_id']}.pdf"
     ]
 
 
@@ -249,11 +245,7 @@ class InMemoryRegistry:
 
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None:
         return next(
-            (
-                document
-                for document in self.documents
-                if document.content_sha256 == content_sha256
-            ),
+            (document for document in self.documents if document.content_sha256 == content_sha256),
             None,
         )
 
@@ -265,11 +257,7 @@ class InMemoryRegistry:
 
     def get(self, document_id: str) -> DocumentRecord | None:
         return next(
-            (
-                document
-                for document in self.documents
-                if document.document_id == document_id
-            ),
+            (document for document in self.documents if document.document_id == document_id),
             None,
         )
 
@@ -278,3 +266,23 @@ class FailingRegistry(InMemoryRegistry):
     def add(self, document: DocumentRecord) -> None:
         del document
         raise RuntimeError("registry unavailable")
+
+
+def test_paginated_registry_contract_and_invalid_cursor(client: TestClient) -> None:
+    upload_file(client, filename="first.pdf")
+    upload_file(client, filename="second.pdf", content=PDF_TWO)
+    response = client.get("/api/documents/page", params={"limit": 1})
+    assert response.status_code == 200
+    first = response.json()
+    assert len(first["items"]) == 1
+    assert "source_path" not in first["items"][0]
+    second = client.get("/api/documents/page", params={"limit": 1, "cursor": first["next_cursor"]})
+    assert second.status_code == 200
+    assert second.json()["next_cursor"] is None
+    assert second.json()["items"][0]["document_id"] != first["items"][0]["document_id"]
+    assert client.get("/api/documents/page", params={"limit": 101}).status_code == 422
+    invalid = client.get(
+        "/api/documents/page", params={"cursor": first["next_cursor"], "search": "new"}
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["error"]["code"] == "INVALID_CURSOR"

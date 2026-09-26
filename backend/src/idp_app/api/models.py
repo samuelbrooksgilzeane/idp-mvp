@@ -54,6 +54,11 @@ class DocumentResponse(BaseModel):
     updated_at: datetime
 
 
+class DocumentPageResponse(BaseModel):
+    items: list[DocumentResponse]
+    next_cursor: str | None
+
+
 class UploadFailure(BaseModel):
     file_name: str
     code: str

@@ -99,9 +99,7 @@ class DocumentService:
                     cast(BinaryIO, staged),
                 )
             except FileExistsError as error:
-                duplicate = await run_in_threadpool(
-                    self._registry.find_by_hash, content_sha256
-                )
+                duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
                 if duplicate is not None:
                     raise _duplicate_error(duplicate) from error
                 raise DocumentServiceError(
@@ -157,6 +155,41 @@ class DocumentService:
                 502,
             ) from error
 
+    async def list_document_page(
+        self,
+        case_id: str | None,
+        status: str | None,
+        search: str,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[DocumentRecord], str | None]:
+        from idp_app.services.document_registry import document_page_cursor, document_page_query
+
+        try:
+            document_page_query(case_id, status, search, cursor)
+        except ValueError as error:
+            raise DocumentServiceError("INVALID_CURSOR", str(error), 422) from error
+        try:
+            rows = await run_in_threadpool(
+                self._registry.list_document_page,
+                case_id,
+                status,
+                search,
+                cursor,
+                limit,
+            )
+        except Exception as error:
+            raise DocumentServiceError(
+                "REGISTRY_READ_FAILED",
+                "Documents could not be loaded from the registry.",
+                502,
+            ) from error
+        items = rows[:limit]
+        next_cursor = (
+            document_page_cursor(items[-1], case_id, status, search) if len(rows) > limit else None
+        )
+        return items, next_cursor
+
     async def list_case_ids(self) -> list[str]:
         try:
             return await run_in_threadpool(self._registry.list_case_ids)
@@ -203,9 +236,7 @@ class DocumentService:
 
 def sanitize_pdf_filename(filename: str | None) -> str:
     if not filename:
-        raise DocumentServiceError(
-            "UNSUPPORTED_FILE_TYPE", "A PDF filename is required.", 415
-        )
+        raise DocumentServiceError("UNSUPPORTED_FILE_TYPE", "A PDF filename is required.", 415)
     normalized = filename.replace("\\", "/")
     basename = PurePosixPath(normalized).name
     sanitized = SAFE_FILE_CHARACTER.sub("_", basename).lstrip(".")

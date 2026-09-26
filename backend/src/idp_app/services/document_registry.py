@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 import sqlite3
 import time
 from datetime import UTC, datetime
@@ -30,6 +33,63 @@ DOCUMENT_COLUMNS = (
 )
 
 
+def document_page_query(
+    case_id: str | None,
+    status: str | None,
+    search: str,
+    cursor: str | None,
+    *,
+    timestamp_cast: bool = False,
+) -> tuple[str, dict[str, object]]:
+    """Build bounded keyset predicates; cursors are tied to their normalized filters."""
+    filters = [case_id, status, search]
+    clauses = ["status <> 'DELETED'"]
+    values: dict[str, object] = {}
+    for name, value in (("case_id", case_id), ("status", status)):
+        if value:
+            clauses.append(f"{name} = :{name}")
+            values[name] = value
+    if search:
+        # INSTR treats %, _ and backslashes as literal filename characters.
+        clauses.append("INSTR(LOWER(file_name), :search) > 0")
+        values["search"] = search
+    if cursor:
+        try:
+            if len(cursor) > 4096:
+                raise ValueError
+            data = json.loads(base64.b64decode(cursor, altchars=b"-_", validate=True))
+            if data["v"] != 1 or data["filters"] != filters:
+                raise ValueError
+            at, document_id = data["after"]
+            if not isinstance(at, str) or not isinstance(document_id, str) or not document_id:
+                raise ValueError
+            datetime.fromisoformat(at)
+        except (ValueError, KeyError, TypeError, binascii.Error) as error:
+            raise ValueError(
+                "Invalid document cursor; reset the list to its first page."
+            ) from error
+        marker = "CAST(:after_at AS TIMESTAMP)" if timestamp_cast else ":after_at"
+        clauses.append(
+            f"(uploaded_at < {marker} OR (uploaded_at = {marker} AND document_id < :after_id))"
+        )
+        values.update(after_at=at, after_id=document_id)
+    return " AND ".join(clauses), values
+
+
+def document_page_cursor(
+    document: DocumentRecord,
+    case_id: str | None,
+    status: str | None,
+    search: str,
+) -> str:
+    payload = {
+        "v": 1,
+        "filters": [case_id, status, search],
+        "after": [document.uploaded_at.isoformat(), document.document_id],
+    }
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
 class DuplicateDocumentError(Exception):
     def __init__(self, document: DocumentRecord) -> None:
         super().__init__(document.document_id)
@@ -49,6 +109,15 @@ class DocumentRegistry(Protocol):
     def add(self, document: DocumentRecord) -> None: ...
 
     def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]: ...
+
+    def list_document_page(
+        self,
+        case_id: str | None,
+        status: str | None,
+        search: str,
+        cursor: str | None,
+        limit: int,
+    ) -> list[DocumentRecord]: ...
 
     def list_case_ids(self) -> list[str]: ...
 
@@ -154,6 +223,23 @@ class SQLiteDocumentRegistry:
                     "ORDER BY uploaded_at DESC, document_id DESC",
                     (case_id,),
                 ).fetchall()
+        return [_sqlite_row_to_document(row) for row in rows]
+
+    def list_document_page(
+        self,
+        case_id: str | None,
+        status: str | None,
+        search: str,
+        cursor: str | None,
+        limit: int,
+    ) -> list[DocumentRecord]:
+        where, values = document_page_query(case_id, status, search, cursor)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM documents WHERE {where} "
+                "ORDER BY uploaded_at DESC, document_id DESC LIMIT :page_limit",
+                {**values, "page_limit": limit + 1},
+            ).fetchall()
         return [_sqlite_row_to_document(row) for row in rows]
 
     def list_case_ids(self) -> list[str]:
@@ -263,10 +349,15 @@ class DatabricksDocumentRegistry:
         return _databricks_row_to_document(rows[0]) if rows else None
 
     def add(self, document: DocumentRecord) -> None:
-        parameter_names = [name for name in DOCUMENT_COLUMNS if name not in {
-            "selected_schema_id",
-            "selected_schema_version",
-        }]
+        parameter_names = [
+            name
+            for name in DOCUMENT_COLUMNS
+            if name
+            not in {
+                "selected_schema_id",
+                "selected_schema_version",
+            }
+        ]
         source_fields = ", ".join(f":{name} AS {name}" for name in parameter_names)
         insert_columns = ", ".join(DOCUMENT_COLUMNS)
         insert_values = ", ".join(
@@ -303,8 +394,7 @@ class DatabricksDocumentRegistry:
 
     def list_documents(self, case_id: str | None = None) -> list[DocumentRecord]:
         statement = (
-            f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} "
-            "WHERE status <> 'DELETED' "
+            f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} WHERE status <> 'DELETED' "
         )
         values: dict[str, object] = {}
         if case_id is not None:
@@ -313,6 +403,29 @@ class DatabricksDocumentRegistry:
         rows = self.execute_sql(
             statement + "ORDER BY uploaded_at DESC, document_id DESC LIMIT 500",
             values,
+        )
+        return [_databricks_row_to_document(row) for row in rows]
+
+    def list_document_page(
+        self,
+        case_id: str | None,
+        status: str | None,
+        search: str,
+        cursor: str | None,
+        limit: int,
+    ) -> list[DocumentRecord]:
+        where, values = document_page_query(
+            case_id,
+            status,
+            search,
+            cursor,
+            timestamp_cast=True,
+        )
+        rows = self.execute_sql(
+            f"SELECT {', '.join(DOCUMENT_COLUMNS)} FROM {self._table} WHERE {where} "
+            "ORDER BY uploaded_at DESC, document_id DESC "
+            "LIMIT CAST(:page_limit AS INT)",
+            {**values, "page_limit": limit + 1},
         )
         return [_databricks_row_to_document(row) for row in rows]
 
@@ -517,9 +630,7 @@ def _databricks_row_to_document(row: list[str]) -> DocumentRecord:
         content_sha256=values["content_sha256"],
         selected_schema_id=values["selected_schema_id"] or None,
         selected_schema_version=(
-            int(values["selected_schema_version"])
-            if values["selected_schema_version"]
-            else None
+            int(values["selected_schema_version"]) if values["selected_schema_version"] else None
         ),
         status=values["status"],
         uploaded_by=values["uploaded_by"],

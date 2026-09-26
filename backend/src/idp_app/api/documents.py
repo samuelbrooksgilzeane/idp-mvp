@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, Up
 
 from idp_app.api.dependencies import get_authenticated_user, get_document_service
 from idp_app.api.models import (
+    DocumentPageResponse,
     DocumentResponse,
     ErrorResponse,
     UploadBatchResponse,
@@ -84,6 +85,28 @@ async def list_documents(
     selected_case = case_id.strip() if case_id and case_id.strip() else None
     documents = await service.list_documents(selected_case)
     return [DocumentResponse.model_validate(document) for document in documents]
+
+
+@documents_router.get("/page", response_model=DocumentPageResponse)
+async def list_document_page(
+    service: Annotated[DocumentService, Depends(get_document_service)],
+    case_id: Annotated[str | None, Query(max_length=200)] = None,
+    status: Annotated[str | None, Query(max_length=50)] = None,
+    search: Annotated[str, Query(max_length=255)] = "",
+    cursor: Annotated[str | None, Query(max_length=4096)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> DocumentPageResponse:
+    items, next_cursor = await service.list_document_page(
+        case_id.strip() or None if case_id else None,
+        status.strip() or None if status else None,
+        search.strip().lower(),
+        cursor,
+        limit,
+    )
+    return DocumentPageResponse(
+        items=[DocumentResponse.model_validate(item) for item in items],
+        next_cursor=next_cursor,
+    )
 
 
 @documents_router.get("/cases", response_model=list[str])
