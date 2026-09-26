@@ -175,3 +175,43 @@ unverified. Existing untracked `frontend/dist/` and `output/` remain untouched.
 Next implementation package is durable bulk extraction: persisted requests and
 progress, bounded metadata resolution, extractor manifests and explicit retries.
 Exports, navigation/viewer optimizations and Genie remain subsequent packages.
+
+## Bulk extraction foundations — 26 September 2026
+
+Branch `feat/bulk-extraction` is stacked on `feat/automatic-preparation`; no branch
+was merged or pushed. Two implementation checkpoints:
+
+- `13d47d0`: existing extraction submission now resolves the template once, and reads
+  documents/successful parse references in groups of at most 100. References exclude
+  retained text and parsed element payloads. Both SQLite and Databricks implementations
+  use bound parameters and deterministic latest-success ordering. Source-hash mismatches
+  are rejected before extraction. Local mock execution loads only its own pinned parse
+  when the task starts.
+- `ba8cb92`: durable extraction-request repository and service, with deterministic
+  project/requester/client-request identity, replay conflict detection, owner checks,
+  immutable template hash and at most 100 members resolved per validation checkpoint.
+  Compare-and-swap protects saved inputs from overlapping recovery attempts. Restarting
+  does not replace resolved parse IDs. Invalid members retain explicit failures.
+
+The second checkpoint is infrastructure, not an enabled end-to-end extraction queue.
+It intentionally has no public submission route until the dispatcher consumes READY
+requests. `READY` means validation finished, including any rejected members; it does
+not mean extraction succeeded. The existing extraction API still has its existing
+200-selection limit and direct Job submission. Do not advertise 1,000-item execution
+based on these metadata tests. Next work must connect request validation to work-item
+claims and extractor manifests, then add table-backed paginated progress/retry APIs
+and the browser's persistent batch pointer.
+
+The additive migration now also creates the prefixed `work_batches` table. It remains
+unapplied. Include its narrow app/Job grants in the later deployment review. Request
+headers store bounded selections and resolved metadata only, never PDF bytes or full
+parse bodies. Document readiness is evaluated when each asynchronous validation step
+runs; once saved, that member's parse identity remains pinned.
+
+Verification: 53 focused backend tests passed, including 1,000 synthetic metadata
+members resolved with 20 bounded reads, request replay/conflicts, restart, competing
+CAS updates, template changes and source-hash mismatch. Ruff, focused mypy and bootstrap
+configuration validation passed. All work was local: no Databricks calls, PDF load test,
+AI calls, migration, deployment or workspace capacity claim. The previously documented
+full-bundle validator issue and workspace verification gates are unchanged. Existing
+untracked `frontend/dist/` and `output/` remain untouched.
