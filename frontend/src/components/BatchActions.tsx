@@ -31,6 +31,7 @@ type ExtractableSchema = {
 };
 
 type BatchActionsProps = {
+  automaticPreparation?: boolean;
   selectedIds: string[];
   onClear: () => void;
   onDocumentsChanged: () => Promise<void> | void;
@@ -38,6 +39,7 @@ type BatchActionsProps = {
 
 export function BatchActions({
   selectedIds,
+  automaticPreparation = false,
   onClear,
   onDocumentsChanged,
 }: BatchActionsProps) {
@@ -128,8 +130,11 @@ export function BatchActions({
       if (batch.job_run_id === null) {
         setRunning(null);
         if (!batch.errors.length) {
-          setNotice({ kind: "error", message: "No selected document was eligible." });
+          setNotice(batch.accepted > 0
+            ? { kind: "success", message: `${batch.accepted} documents queued for preparation.` }
+            : { kind: "error", message: "No selected document was eligible." });
         }
+        if (batch.accepted > 0) await onDocumentsChanged();
         return;
       }
       active.current = { kind, jobRunId: batch.job_run_id };
@@ -189,6 +194,8 @@ export function BatchActions({
         </select>
       </div>
       <div className="batch-buttons">
+        {automaticPreparation ? <details>
+          <summary>Advanced preparation</summary>
         <button
           type="button"
           disabled={busy || !selectedIds.length}
@@ -201,6 +208,20 @@ export function BatchActions({
           )}
           Parse selected
         </button>
+        </details> : (
+        <button
+          type="button"
+          disabled={busy || !selectedIds.length}
+          onClick={() => void run("parse")}
+        >
+          {running === "parse" ? (
+            <LoaderCircle className="spin" size={15} aria-hidden="true" />
+          ) : (
+            <Play size={15} aria-hidden="true" />
+          )}
+          Parse selected
+        </button>
+        )}
         <button
           type="button"
           disabled={busy || !selectedIds.length || !schema}

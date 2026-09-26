@@ -1,5 +1,6 @@
 import { FileText, RefreshCw, Trash2 } from "lucide-react";
 
+import { documentStatusLabel } from "../lib/documentStatus";
 import type { DocumentRecord } from "../types";
 
 type DocumentListProps = {
@@ -137,7 +138,7 @@ export function DocumentList({
                   <td>{document.case_id ?? "-"}</td>
                   <td>
                     <span className={`status-label status-${document.status.toLowerCase()}`}>
-                      {document.status}
+                      {documentStatusLabel(document.status)}
                     </span>
                   </td>
                   <td>{formatter.format(new Date(document.uploaded_at))}</td>

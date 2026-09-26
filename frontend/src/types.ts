@@ -7,6 +7,7 @@ export type HealthResponse = {
 
 export type DocumentStatus =
   | "UPLOADED"
+  | "PARSE_QUEUED"
   | "PARSING"
   | "PARSED"
   | "PARSE_FAILED"
@@ -35,7 +36,7 @@ export type ParseRun = {
   parse_run_id: string;
   document_id: string;
   parser_version: "2.0";
-  status: "RUNNING" | "SUCCESS" | "FAILED";
+  status: "QUEUED" | "RUNNING" | "SUCCESS" | "FAILED";
   page_count: number | null;
   parse_error: Record<string, unknown> | unknown[] | null;
   requested_by: string;

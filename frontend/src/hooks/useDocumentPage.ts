@@ -14,6 +14,7 @@ export function useDocumentPage(enabled: boolean) {
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const generation = useRef(0);
+  const quietRefresh = useRef(false);
   const previousCursors = useRef(new Map<string, string>());
   const queryKey = JSON.stringify([caseId, status, search]);
 
@@ -21,7 +22,9 @@ export function useDocumentPage(enabled: boolean) {
     const current = ++generation.current;
     if (!enabled) { setLoading(false); return; }
     const controller = new AbortController();
-    setLoading(true);
+    const quiet = quietRefresh.current;
+    quietRefresh.current = false;
+    if (!quiet) setLoading(true);
     setError(null);
     const query = new URLSearchParams({ limit: "50" });
     if (caseId) query.set("case_id", caseId);
@@ -47,8 +50,7 @@ export function useDocumentPage(enabled: boolean) {
       })
       .catch((failure: unknown) => {
         if (controller.signal.aborted || current !== generation.current) return;
-        setDocuments([]);
-        setNextCursor(null);
+        if (!quiet) { setDocuments([]); setNextCursor(null); }
         setError(failure instanceof Error ? failure.message : "Documents could not be loaded.");
       })
       .finally(() => {
@@ -56,6 +58,16 @@ export function useDocumentPage(enabled: boolean) {
       });
     return () => controller.abort();
   }, [enabled, caseId, status, search, cursor, revision, queryKey]);
+
+  useEffect(() => {
+    if (!enabled || loading || !documents.some((item) => ["PARSE_QUEUED", "PARSING"].includes(item.status))) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      quietRefresh.current = true;
+      setRevision((value) => value + 1);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [enabled, documents, loading]);
 
   const changeFilter = (name: string, value: string | null) => {
     setParams((current) => {

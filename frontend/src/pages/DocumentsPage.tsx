@@ -5,8 +5,9 @@ import { DocumentList } from "../components/DocumentList";
 import { UploadBatchProgress } from "../components/UploadBatchProgress";
 import type { UploadBatchController } from "../hooks/useUploadBatch";
 import { UploadPanel } from "../components/UploadPanel";
+import { documentStatusLabel } from "../lib/documentStatus";
 import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
-import type { DocumentRecord, Notice } from "../types";
+import type { DocumentRecord, DocumentStatus, Notice } from "../types";
 import { useEffect, useMemo, useState } from "react";
 
 type DocumentsPageProps = {
@@ -64,7 +65,7 @@ export function DocumentsPage({
     return () => window.clearTimeout(timeout);
   }, [searchInput, search, onSearchChanged]);
   // These are domain states, not facets inferred from the current page.
-  const statuses = ["UPLOADED", "PARSING", "PARSED", "PARSE_FAILED", "EXTRACTING",
+  const statuses: DocumentStatus[] = ["UPLOADED", "PARSE_QUEUED", "PARSING", "PARSED", "PARSE_FAILED", "EXTRACTING",
     "EXTRACTED", "EXTRACT_FAILED", "VALIDATING", "VALIDATED_PASS", "REVIEW_REQUIRED"];
   const selection = useMemo(() => [...selectedIds], [selectedIds]);
   const pageDocuments = documents;
@@ -145,7 +146,7 @@ export function DocumentsPage({
               onChange={(event) => onStatusChanged?.(event.target.value)}
             >
               <option value="">All statuses</option>
-              {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
+              {statuses.map((item) => <option key={item} value={item}>{documentStatusLabel(item)}</option>)}
             </select>
           </div>
           <div className="registry-filter">
@@ -164,6 +165,7 @@ export function DocumentsPage({
           </p>
         </div>
         <BatchActions
+          automaticPreparation={upload?.automaticPreparation}
           selectedIds={selection}
           onClear={() => setSelectedIds(new Set())}
           onDocumentsChanged={onDocumentsChanged}

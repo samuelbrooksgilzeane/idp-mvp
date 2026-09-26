@@ -20,6 +20,7 @@ export function UploadBatchProgress({ upload }: { upload: UploadBatchController 
     <p role="status">{registered} of {items.length} uploaded · {queued} waiting · {transferring} uploading · {failed} need attention</p>
     {upload.batch.case_id ? <p>Case: {upload.batch.case_id}</p> : null}
     <p>Uploads continue while you navigate in this app. Closing or refreshing the tab stops unfinished transfers; reselect the original files to continue. Completed files are skipped.</p>
+    {upload.automaticPreparation ? <p>Uploaded documents prepare in the background. Look for “Ready to extract” in the document list.</p> : null}
     {upload.error ? <p role="alert">{upload.error}</p> : null}
     {upload.paused ? <p>Paused. Active transfers finish before the queue stops.</p> : null}
     <button type="button" disabled={!upload.busy || upload.paused} onClick={upload.pause}>Pause uploads</button>

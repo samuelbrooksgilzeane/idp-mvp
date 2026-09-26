@@ -10,15 +10,6 @@ import type { ApiError, DocumentRecord, Notice, ParseRun } from "../types";
 const TABS = ["Extraction", "Validation", "History"] as const;
 type Tab = (typeof TABS)[number];
 
-const RETRYABLE = [
-  "PARSED",
-  "PARSE_FAILED",
-  "EXTRACTED",
-  "EXTRACT_FAILED",
-  "VALIDATED_PASS",
-  "REVIEW_REQUIRED",
-];
-
 const formatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
@@ -57,7 +48,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
       if (!response.ok) throw new Error("Parse history request failed");
       const history = (await response.json()) as ParseRun[];
       setRuns(history);
-      setActiveRunId(history.find((run) => run.status === "RUNNING")?.parse_run_id ?? null);
+      setActiveRunId(history.find((run) => ["QUEUED", "RUNNING"].includes(run.status))?.parse_run_id ?? null);
     } catch {
       setNotice({ kind: "error", message: "Parse history is unavailable." });
     } finally {
@@ -77,6 +68,10 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
     let cancelled = false;
     let timer: number | undefined;
     const poll = async () => {
+      if (window.document.visibilityState === "hidden") {
+        timer = window.setTimeout(() => void poll(), 5000);
+        return;
+      }
       try {
         const response = await fetch(`/api/runs/${activeRunId}`);
         if (!response.ok) throw new Error("Run status request failed");
@@ -86,8 +81,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
           run,
           ...current.filter((item) => item.parse_run_id !== run.parse_run_id),
         ]);
-        if (run.status === "RUNNING") {
-          timer = window.setTimeout(() => void poll(), 500);
+        if (["QUEUED", "RUNNING"].includes(run.status)) {
+          timer = window.setTimeout(() => void poll(), 5000);
           return;
         }
         setActiveRunId(null);
@@ -119,7 +114,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
     setStarting(true);
     setNotice(null);
     try {
-      const response = await fetch(`/api/documents/${document.document_id}/parse`, {
+      const reparse = runs.some((run) => run.status === "SUCCESS") ? "?reparse=true" : "";
+      const response = await fetch(`/api/documents/${document.document_id}/parse${reparse}`, {
         method: "POST",
       });
       const payload = (await response.json()) as ParseRun | ApiError;
@@ -127,7 +123,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
         throw new Error("error" in payload ? payload.error.message : "Parsing could not start.");
       }
       const run = payload as ParseRun;
-      setDocument({ ...document, status: "PARSING" });
+      setDocument({ ...document, status: run.status === "QUEUED" ? "PARSE_QUEUED" : run.status === "SUCCESS" ? "PARSED" : "PARSING" });
       setRuns((current) => [run, ...current]);
       setActiveRunId(run.parse_run_id);
     } catch (error: unknown) {
@@ -157,8 +153,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
     );
   }
 
-  const retry = RETRYABLE.includes(document.status);
-  const unavailable = ["PARSING", "EXTRACTING"].includes(document.status) || starting;
+  const retry = document.status === "PARSE_FAILED";
+  const unavailable = ["PARSE_QUEUED", "PARSING", "EXTRACTING"].includes(document.status) || starting;
 
   return (
     <section className="document-detail" aria-labelledby="detail-title">
@@ -185,13 +181,13 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
           ) : (
             <Play size={16} aria-hidden="true" />
           )}
-          {document.status === "PARSING"
-            ? "Parsing"
+          {["PARSE_QUEUED", "PARSING"].includes(document.status)
+            ? "Preparing"
             : document.status === "EXTRACTING"
               ? "Extracting"
               : retry
                 ? "Retry parse"
-                : "Parse document"}
+                : runs.some((run) => run.status === "SUCCESS") ? "Prepare again" : "Parse document"}
         </button>
       </div>
 

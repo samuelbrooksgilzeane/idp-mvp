@@ -85,7 +85,7 @@ describe("DocumentDetailPage", () => {
     await screen.findByText("invoice-1042.pdf");
     fireEvent.click(screen.getByRole("button", { name: "Parse document" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Parsing" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Preparing" })).toBeDisabled());
     await waitFor(
       () => expect(screen.getByText("Document parsed successfully.")).toBeInTheDocument(),
       { timeout: 1500 },

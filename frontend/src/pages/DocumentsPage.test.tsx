@@ -87,7 +87,7 @@ describe("DocumentsPage", () => {
     fireEvent.change(screen.getByLabelText("Search"), { target: { value: "credit" } });
     expect(onSearchChanged).not.toHaveBeenCalled();
     await waitFor(() => expect(onSearchChanged).toHaveBeenCalledWith("credit"));
-    expect(screen.getByRole("option", { name: "PARSE_FAILED" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Preparation failed" })).toBeInTheDocument();
   });
 
   it("preserves explicit selection across pages, filters and remounts", () => {
