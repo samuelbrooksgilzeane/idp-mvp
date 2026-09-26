@@ -1,6 +1,9 @@
 import { LoaderCircle, Play, ScanText, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useExtractionBatch } from "../hooks/useExtractionBatch";
+import { ExtractionBatchProgress } from "./ExtractionBatchProgress";
+
 import type { Notice } from "../types";
 
 type BatchKind = "parse" | "extract";
@@ -32,6 +35,8 @@ type ExtractableSchema = {
 
 type BatchActionsProps = {
   automaticPreparation?: boolean;
+  bulkExtraction?: boolean;
+  scope?: string;
   selectedIds: string[];
   onClear: () => void;
   onDocumentsChanged: () => Promise<void> | void;
@@ -40,15 +45,20 @@ type BatchActionsProps = {
 export function BatchActions({
   selectedIds,
   automaticPreparation = false,
+  bulkExtraction = false,
+  scope = "project",
   onClear,
   onDocumentsChanged,
 }: BatchActionsProps) {
+  const extraction = useExtractionBatch(bulkExtraction, scope, onDocumentsChanged);
   const [schemas, setSchemas] = useState<ExtractableSchema[]>([]);
   const [schemaKey, setSchemaKey] = useState<string>("");
   const [running, setRunning] = useState<BatchKind | null>(null);
   const [progress, setProgress] = useState<BatchStatus | null>(null);
   const [notice, setNotice] = useState<Notice>(null);
   const active = useRef<{ kind: BatchKind; jobRunId: number } | null>(null);
+  const pollTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => { clearTimeout(pollTimer.current); active.current = null; }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -73,13 +83,18 @@ export function BatchActions({
   const poll = useCallback(async () => {
     const current = active.current;
     if (!current) return;
+    if (document.hidden) {
+      pollTimer.current = window.setTimeout(() => void poll(), 5000);
+      return;
+    }
     try {
       const response = await fetch(`/api/batches/${current.kind}/${current.jobRunId}`);
       if (!response.ok) throw new Error("Batch status request failed");
       const status = (await response.json()) as BatchStatus;
+      if (active.current !== current) return;
       setProgress(status);
       if (status.running > 0) {
-        window.setTimeout(() => void poll(), 1000);
+        pollTimer.current = window.setTimeout(() => void poll(), 5000);
         return;
       }
       active.current = null;
@@ -99,6 +114,10 @@ export function BatchActions({
   }, [onDocumentsChanged]);
 
   async function run(kind: BatchKind) {
+    if (kind === "extract" && bulkExtraction) {
+      if (schema) await extraction.start(selectedIds, schema.schema_id, schema.schema_version);
+      return;
+    }
     setRunning(kind);
     setNotice(null);
     setProgress(null);
@@ -147,7 +166,7 @@ export function BatchActions({
         failed: 0,
       });
       await onDocumentsChanged();
-      window.setTimeout(() => void poll(), 800);
+      pollTimer.current = window.setTimeout(() => void poll(), 800);
     } catch (error: unknown) {
       setRunning(null);
       setNotice({
@@ -157,10 +176,12 @@ export function BatchActions({
     }
   }
 
-  if (!selectedIds.length && !running && !notice) return null;
+  if (!selectedIds.length && !running && !notice) return bulkExtraction ? <ExtractionBatchProgress batch={extraction} /> : null;
 
-  const busy = running !== null;
+  const busy = running !== null || extraction.busy || (bulkExtraction && (Boolean(extraction.pending) || Boolean(extraction.batchId && !extraction.status?.terminal)));
   return (
+    <>
+    {bulkExtraction ? <ExtractionBatchProgress batch={extraction} /> : null}
     <section className="batch-actions" aria-label="Batch actions">
       <div className="batch-summary">
         <strong>{selectedIds.length} selected</strong>
@@ -240,5 +261,6 @@ export function BatchActions({
       </div>
       {notice ? <p className={`notice notice-${notice.kind}`}>{notice.message}</p> : null}
     </section>
+    </>
   );
 }

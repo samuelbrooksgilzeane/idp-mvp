@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BatchActions } from "./BatchActions";
@@ -13,11 +13,13 @@ const ids = ["doc-a", "doc-b"];
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("BatchActions", () => {
   it("submits the selection as one batch and reports completion", async () => {
+    vi.useFakeTimers();
     let settled = false;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input.toString();
@@ -51,12 +53,11 @@ describe("BatchActions", () => {
     );
 
     expect(screen.getByText("2 selected")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Parse selected/ }));
-
-    await waitFor(
-      () => expect(screen.getByText("All 2 documents completed.")).toBeInTheDocument(),
-      { timeout: 4000 },
-    );
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Parse selected/ })); });
+    await act(() => vi.advanceTimersByTimeAsync(800));
+    expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(5000));
+    expect(screen.getByText("All 2 documents completed.")).toBeInTheDocument();
     const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
     // One request carries the whole selection; the engine is never named by the client.
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({ document_ids: ids });

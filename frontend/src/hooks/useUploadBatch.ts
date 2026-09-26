@@ -12,7 +12,7 @@ type SavedBatch = {
   client_request_id: string; case_id: string | null; files: Manifest[];
   batch_id: string | null; items: UploadItem[];
 };
-type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; automaticPreparation?: boolean };
+type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; automaticPreparation?: boolean; bulkExtraction?: boolean };
 const STORAGE_KEY = "idp:upload-batch:v1"; // Storage is isolated by this project's app origin.
 const complete = (item: UploadItem) => item.state === "REGISTERED" || item.state === "ALREADY_REGISTERED";
 const signature = (file: { name: string; size: number; lastModified?: number; last_modified?: number | null }) =>
@@ -68,9 +68,9 @@ export class UploadTransferManager {
     if (this.restored) return;
     this.restored = true;
     try {
-      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; automatic_preparation?: boolean }>(await fetch("/api/upload-batches/limits"));
+      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; automatic_preparation?: boolean; bulk_extraction?: boolean }>(await fetch("/api/upload-batches/limits"));
       if (Number.isInteger(limits.max_files) && limits.max_files > 0 && Number.isInteger(limits.max_file_bytes) && limits.max_file_bytes > 0) {
-        this.update({ maxFiles: Math.min(1000, limits.max_files), maxFileBytes: limits.max_file_bytes, automaticPreparation: Boolean(limits.automatic_preparation) });
+        this.update({ maxFiles: Math.min(1000, limits.max_files), maxFileBytes: limits.max_file_bytes, automaticPreparation: Boolean(limits.automatic_preparation), bulkExtraction: Boolean(limits.bulk_extraction) });
       }
     } catch { /* The API still enforces limits when configuration is unavailable. */ }
     if (this.snapshot.busy) return;

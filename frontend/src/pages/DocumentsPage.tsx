@@ -165,6 +165,9 @@ export function DocumentsPage({
           </p>
         </div>
         <BatchActions
+          key={selectionScope}
+          bulkExtraction={upload?.bulkExtraction}
+          scope={selectionScope}
           automaticPreparation={upload?.automaticPreparation}
           selectedIds={selection}
           onClear={() => setSelectedIds(new Set())}
