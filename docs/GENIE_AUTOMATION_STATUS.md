@@ -76,14 +76,18 @@ uv run --project backend python scripts/prepare_genie_bundle.py --space-id SPACE
 
 Use the ID already managed by `project_genie` in the selected target's bundle state. For a space
 previously managed by the old script, explicitly bind `project_genie` to that existing ID before
-planning, rather than creating a duplicate. The generated overlay includes the current ETag and
-exact serialized definition; a concurrent edit must cause conflict, not a blind overwrite. Confirm
-this behavior in the target workspace before routine automated releases. Preparation removes stale
+planning, rather than creating a duplicate. The generated overlay includes the exact freshly
+exported definition. CLI 1.14.1 rejects explicit ETags during planning despite listing them in its
+schema, so this native path does not provide our own optimistic concurrency guarantee. Avoid
+concurrent curation between export and deployment. Preparation removes stale
 output before authentication, so a failed export leaves no old overlay to deploy accidentally.
 
 The generated resource does not set broad permissions. Configure intended users/groups explicitly.
-Set `genie_embed_url` to the official Share → Embed space URL, after allowing the specific app
-origin. Without that URL, the app provides the native open-in-Databricks fallback. Run the App via
+The user verified the official iframe format on 2026-09-27:
+`https://WORKSPACE/embed/genie/rooms/SPACE_ID?o=WORKSPACE_ID`. Preparation now resolves the workspace
+ID through the authenticated SDK and generates this URL using the bundle's Genie resource ID.
+The specific app origin must still be allowed by an administrator. An explicit `genie_embed_url`
+variable override remains available. Run the App via
 the bundle so resource substitutions reach its environment; the standalone app.yaml remains off.
 
 Volume attachment and content-search activation remain manual Databricks workspace tasks under

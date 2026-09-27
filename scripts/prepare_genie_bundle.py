@@ -1,13 +1,15 @@
 """Prepare an opt-in native Genie bundle overlay; never deploy or run indexing.
 
 Run before every bundle plan/deploy. Existing spaces must be exported afresh, preserving
-user curation and carrying an ETag. First creation requires explicit --new-space.
+user curation. First creation requires explicit --new-space. Native deployment does not
+accept a configured ETag; avoid concurrent curation during the export/deploy interval.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 OVERLAY = ROOT / "databricks_etl/resources/genie.generated.yml"
 
 
-def overlay(remote: Any | None) -> dict[str, Any]:
+def overlay(remote: Any | None, workspace_id: int) -> dict[str, Any]:
+    if workspace_id <= 0:
+        raise ValueError("Workspace ID must be positive")
     resource: dict[str, Any] = {
         "title": "${var.genie_project_name}",
         "warehouse_id": "${var.warehouse_id}",
@@ -31,10 +35,11 @@ def overlay(remote: Any | None) -> dict[str, Any]:
                 "Export and ETag required; refusing to prepare a destructive replacement"
             )
         definition = remote.serialized_space
-        resource["etag"] = remote.etag
+        # CLI validates but rejects user-supplied ETags at plan time. Preserve the
+        # freshly exported definition; do not claim this snapshot is a concurrency lock.
         # Preserve human-edited metadata too; no permissions are replaced by this overlay.
         if remote.title:
-            resource["title"] = remote.title
+            resource["title"] = re.sub(r"^\[dev [^\]]+\] ", "", remote.title)
         if remote.description:
             resource["description"] = remote.description
         if remote.warehouse_id:
@@ -47,6 +52,10 @@ def overlay(remote: Any | None) -> dict[str, Any]:
             "genie_space_id": {"default": "${resources.genie_spaces.project_genie.id}"},
             "genie_workspace_origin": {"default": "${workspace.host}"},
             "genie_enabled": {"default": "true"},
+            "genie_embed_url": {
+                "default": "${workspace.host}/embed/genie/rooms/"
+                "${resources.genie_spaces.project_genie.id}?o=" + str(workspace_id)
+            },
         },
         "resources": {"genie_spaces": {"project_genie": resource}},
     }
@@ -63,17 +72,18 @@ def main() -> None:
     # Remove stale configuration before authentication: a failed refresh cannot leave a
     # previously valid-looking export behind for a subsequent deployment.
     OVERLAY.unlink(missing_ok=True)
+    from databricks.sdk import WorkspaceClient
+
+    client = WorkspaceClient(profile=args.profile)
+    if client.config.host.rstrip("/") != args.host.rstrip("/"):
+        parser.error("Profile does not match the requested workspace")
+    workspace_id = client.get_workspace_id()
     remote = None
     if args.space_id:
-        from databricks.sdk import WorkspaceClient
-
-        client = WorkspaceClient(profile=args.profile)
-        if client.config.host.rstrip("/") != args.host.rstrip("/"):
-            parser.error("Profile does not match the requested workspace")
         remote = client.genie.get_space(args.space_id, include_serialized_space=True)
         if remote.space_id != args.space_id:
             parser.error("Exported space does not match the requested ID")
-    data = overlay(remote)
+    data = overlay(remote, workspace_id)
     # Pin host as well as origin so the artifact cannot silently target a different workspace.
     data["workspace"] = {"host": args.host.rstrip("/")}
     OVERLAY.write_text(yaml.safe_dump(data, sort_keys=False))

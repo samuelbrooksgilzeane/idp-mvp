@@ -18,7 +18,11 @@ def module():
 
 
 def test_native_overlay_connects_app_to_protected_empty_space() -> None:
-    result = module().overlay(None)
+    result = module().overlay(None, 7474660341420973)
+    assert result["variables"]["genie_embed_url"]["default"] == (
+        "${workspace.host}/embed/genie/rooms/"
+        "${resources.genie_spaces.project_genie.id}?o=7474660341420973"
+    )
     resource = result["resources"]["genie_spaces"]["project_genie"]
     assert result["bundle"]["engine"] == "direct"
     assert resource["lifecycle"] == {"prevent_destroy": True}
@@ -39,10 +43,10 @@ def test_export_is_preserved_exactly_and_update_is_etag_guarded() -> None:
         description="Human description",
         warehouse_id="warehouse",
     )
-    result = module().overlay(remote)["resources"]["genie_spaces"]["project_genie"]
+    result = module().overlay(remote, 123)["resources"]["genie_spaces"]["project_genie"]
     assert result["serialized_space"] == definition
-    assert result["etag"] == "current"
+    assert "etag" not in result  # Native CLI rejects explicitly configured ETags.
     assert result["title"] == "Human title"
     remote.etag = None
     with pytest.raises(ValueError, match="ETag"):
-        module().overlay(remote)
+        module().overlay(remote, 123)
