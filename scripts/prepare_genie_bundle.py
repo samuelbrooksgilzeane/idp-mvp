@@ -24,7 +24,7 @@ def overlay(remote: Any | None) -> dict[str, Any]:
         "lifecycle": {"prevent_destroy": True},
     }
     if remote is None:
-        definition = (ROOT / "databricks_etl/genie/project.geniespace.json").read_text()
+        definition = (ROOT / "databricks_etl/genie/project_genie_definition.json").read_text()
     else:
         if not remote.serialized_space or not remote.etag:
             raise ValueError(

@@ -31,7 +31,7 @@ def render(catalog: str, schema: str, prefix: str) -> str:
     ):
         raise ValueError("Project names must be simple SQL identifiers")
     return Template(
-        (ROOT / "databricks_etl/genie/project.geniespace.json").read_text()
+        (ROOT / "databricks_etl/genie/project_genie_definition.json").read_text()
     ).substitute(values)
 
 
