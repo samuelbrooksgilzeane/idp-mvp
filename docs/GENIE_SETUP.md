@@ -1,5 +1,13 @@
 # Project Genie setup
 
+Updated project policy: new spaces start without structured tables. Project maintainers configure
+sources and instructions in Databricks, and ordinary redeployments preserve those edits.
+The existing source volume is the intended whole-volume source. Attachment and content-search
+automation are blocked pending a supported API/export contract; no preview fields are fabricated.
+See `docs/GENIE_AUTOMATION_STATUS.md` before activating a new deployment.
+
+Legacy curated-view setup below remains optional, not a prerequisite for an empty project space.
+
 Status: code prepared; workspace migration, provisioning, permissions and embedded-user
 verification are not yet applied. Genie defaults off. This is structured-data chat;
 no PDF volume attachment, content-search index, prompt or model inference is created by setup.
@@ -29,7 +37,7 @@ no PDF volume attachment, content-search index, prompt or model inference is cre
    If none exists, investigate the failed request before clearing the marker. A stale `.lock`
    after process termination should only be removed after confirming no deployer remains active.
 4. Subsequent applies read the existing space and export a sibling `.remote.json` snapshot.
-   A difference refuses to update. Review the snapshot, reconcile SQL-team edits into the
+   A difference is preserved by default without an update. For an intentional change, review the snapshot, reconcile SQL-team edits into the
    versioned template, then pass the displayed `--reviewed-remote-hash`. An ETag protects the
    update from edits made after the read. Keep snapshots/state private; they may contain
    human-curated SQL or sample values. No app deployment or startup provisions a space.

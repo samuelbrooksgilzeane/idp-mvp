@@ -95,6 +95,12 @@ def reconcile(
             snapshot.write_text(remote.serialized_space)
             remote_hash = digest(remote.serialized_space)
             if remote_hash != digest(definition):
+                if reviewed_hash is None:
+                    # Human curation owns existing sources/instructions by default.
+                    # Export for review, but do not mutate the agent on app redeploy.
+                    state["definition_hash"] = remote_hash
+                    save(state_path, state)
+                    return str(space_id)
                 if reviewed_hash != remote_hash:
                     raise ValueError(
                         f"Review {snapshot}, reconcile local definition, then supply "

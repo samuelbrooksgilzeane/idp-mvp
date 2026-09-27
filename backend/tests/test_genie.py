@@ -80,8 +80,10 @@ def test_provision_reuses_space_and_requires_review_for_changes(tmp_path: Path) 
     client.genie.update_space.assert_not_called()
     remote = json.dumps({"version": 2, "human_edit": True})
     client.genie.get_space.return_value = SimpleNamespace(serialized_space=remote, etag="2")
+    assert module.reconcile(client, state, definition, "warehouse", "project") == SPACE
+    assert json.loads(state.with_suffix(".remote.json").read_text())["human_edit"] is True
     with pytest.raises(ValueError, match="Review"):
-        module.reconcile(client, state, definition, "warehouse", "project")
+        module.reconcile(client, state, definition, "warehouse", "project", "stale-hash")
     client.genie.update_space.assert_not_called()
     module.reconcile(client, state, definition, "warehouse", "project", module.digest(remote))
     assert client.genie.update_space.call_args.kwargs["etag"] == "2"
@@ -97,3 +99,10 @@ def test_uncertain_create_never_automatically_retries(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Uncertain"):
         module.reconcile(client, state, "{}", "warehouse", "project")
     client.genie.create_space.assert_called_once()
+
+
+def test_project_template_starts_without_structured_sources() -> None:
+    definition = json.loads(provisioning_module().render("workspace", "idp", "dev"))
+    assert definition["data_sources"] == {"tables": []}
+    assert "example_question_sqls" not in definition["instructions"]
+    assert "volumes" not in definition["data_sources"]  # Never guess preview export fields.

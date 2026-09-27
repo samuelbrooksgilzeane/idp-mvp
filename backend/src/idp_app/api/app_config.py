@@ -27,8 +27,8 @@ def app_config(
                 else None
             ),
             "coverage": (
-                "Project document metadata and extracted results. "
-                "Original PDF content search is not enabled. "
+                "Answers use the sources configured for this project in Databricks. "
+                "Project maintainers manage tables, volumes and search there. "
                 "App document selections do not filter Genie."
             ),
         },
