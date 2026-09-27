@@ -1,0 +1,62 @@
+{
+  "version": 2,
+  "config": {
+    "sample_questions": [
+      {
+        "id": "11111111111111111111111111111111",
+        "question": [
+          "How many documents are in each workflow status?"
+        ]
+      }
+    ]
+  },
+  "data_sources": {
+    "tables": [
+      {
+        "identifier": "${catalog}.${project_schema}.${table_prefix}_genie_documents",
+        "description": [
+          "One row per document."
+        ]
+      },
+      {
+        "identifier": "${catalog}.${project_schema}.${table_prefix}_genie_extractions",
+        "description": [
+          "Latest successful run per document and schema, across versions."
+        ]
+      },
+      {
+        "identifier": "${catalog}.${project_schema}.${table_prefix}_genie_records",
+        "description": [
+          "Record tree keyed by run_id and record_id; parent_record_id links ancestors."
+        ]
+      },
+      {
+        "identifier": "${catalog}.${project_schema}.${table_prefix}_genie_fields",
+        "description": [
+          "One extracted field instance, with confidence and validation status."
+        ]
+      }
+    ]
+  },
+  "instructions": {
+    "text_instructions": [
+      {
+        "id": "22222222222222222222222222222222",
+        "content": [
+          "Use only these project views. Extracted values are candidates, not approved facts. No original PDF search. App selections do not filter this space. Count DISTINCT document_id for document counts. Join records and fields using run ID and record_id; never join independent arrays on document_id alone. Scope comparisons to schema_id and schema_version. Empty projections on historical runs indicate missing coverage, not zero. Report confidence, validation and extraction errors where relevant. Cite document_id and extraction_run_id for traceability. Do not infer a passing validation from NULL."
+        ]
+      }
+    ],
+    "example_question_sqls": [
+      {
+        "id": "33333333333333333333333333333333",
+        "question": [
+          "How many documents are in each workflow status?"
+        ],
+        "sql": [
+          "SELECT status, COUNT(*) AS document_count FROM ${catalog}.${project_schema}.${table_prefix}_genie_documents GROUP BY status"
+        ]
+      }
+    ]
+  }
+}
