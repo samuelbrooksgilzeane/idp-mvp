@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any
 
+from databricks.sdk.errors import NotFound
+
+from idp_app.core.config import Settings
 from idp_app.services.export_artifacts import ExportArtifacts
 from idp_app.services.export_requests import ExportRequests
-from idp_app.services.export_service import ExportService
+from idp_app.services.export_service import ExportService, _RunTables
 from idp_app.services.export_writer import WRITER_VERSION, write_export
 
 
@@ -29,7 +33,20 @@ def run_export(
         requests.save({**row, "state": "EXPIRED"})
         return
     if row["state"] == "SUCCEEDED":
-        return
+        # Reconcile a previously published artifact before treating a replay as complete.
+        try:
+            digest = hashlib.sha256()
+            size = 0
+            with artifacts.open(identity) as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    digest.update(chunk)
+            if size == row.get("bytes") and digest.hexdigest() == row.get("checksum"):
+                return
+        except (FileNotFoundError, NotFound):
+            pass
+        # Missing/corrupt output is rebuilt from the same pinned membership below.
+
     if row["writer_version"] != WRITER_VERSION:
         requests.save({**row, "state": "FAILED", "error": "Writer changed; create a new export."})
         return
@@ -40,7 +57,7 @@ def run_export(
         with TemporaryDirectory(prefix="idp-export-worker-") as directory:
             destination = Path(directory) / "artifact"
 
-            def tables():
+            def tables() -> Iterator[_RunTables]:
                 for table in sources.iter_tables(row["run_ids"]):
                     yield table
                     row["runs_processed"] += 1
@@ -69,7 +86,7 @@ def run_export(
         raise
 
 
-def build_exports(settings: Any):
+def build_exports(settings: Settings) -> tuple[ExportRequests, ExportService, ExportArtifacts]:
     from idp_app.api.dependencies import build_export_service
     from idp_app.core.config import IdpMode
     from idp_app.services.document_registry import DatabricksDocumentRegistry
@@ -80,6 +97,12 @@ def build_exports(settings: Any):
     else:
         from databricks.sdk import WorkspaceClient
 
+        assert (
+            settings.warehouse_id
+            and settings.catalog
+            and settings.project_schema
+            and settings.table_prefix
+        )
         client = WorkspaceClient()
         sql = DatabricksDocumentRegistry(
             client,

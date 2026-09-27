@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 type ExportState = { export_id: string; state: string; selected_count: number; runs_processed: number;
   bytes: number | null; filename: string | null; error: string | null; download_url: string | null };
-type Pending = { client_request_id: string; run_ids: string[]; format: "xlsx" | "csv" };
+type Pending = { client_request_id: string; run_ids: string[]; format: "xlsx" | "csv"; include_historical_duplicates?: boolean };
 
 export function useExportRequest(scope: string) {
   const key = `idp-export:${scope}`;
@@ -11,6 +11,7 @@ export function useExportRequest(scope: string) {
   });
   const [status, setStatus] = useState<ExportState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmation, setConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => { localStorage.setItem(key, JSON.stringify(saved)); }, [key, saved]);
   useEffect(() => {
@@ -36,12 +37,13 @@ export function useExportRequest(scope: string) {
   async function submit(pending: Pending) {
     // Persist the exact idempotent request before transport; a reload can replay it.
     localStorage.setItem(key, JSON.stringify({ pending }));
-    setSaved({ pending }); setSubmitting(true); setError(null); setStatus(null);
+    setSaved({ pending }); setSubmitting(true); setError(null); setStatus(null); setConfirmation(false);
     try {
       const result = await fetch("/api/export-requests", { method: "POST",
         headers: { "Content-Type": "application/json" }, body: JSON.stringify(pending) });
       if (!result.ok) {
         const body = await result.json();
+        if (body.code === "CONFIRM_HISTORICAL_DUPLICATES") { setConfirmation(true); throw new Error(body.message); }
         throw new Error(body.error?.message || "Export could not be submitted. Retry to confirm.");
       }
       const data = await result.json() as ExportState;
@@ -49,7 +51,8 @@ export function useExportRequest(scope: string) {
     } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setSubmitting(false); }
   }
-  return { status, error, submitting, pending: saved.pending,
+  return { status, error, submitting, confirmation,
+    confirm: () => saved.pending ? submit({ ...saved.pending, include_historical_duplicates: true }) : Promise.resolve(), pending: saved.pending,
     start: (run_ids: string[], format: "xlsx" | "csv" = "xlsx") => submit({
       client_request_id: crypto.randomUUID(), run_ids, format }),
     retry: () => saved.pending ? submit(saved.pending) : Promise.resolve(),

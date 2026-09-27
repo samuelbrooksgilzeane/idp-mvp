@@ -19,10 +19,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from openpyxl import Workbook
-from openpyxl.cell import WriteOnlyCell
-from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
+from openpyxl import Workbook  # type: ignore[import-untyped]
+from openpyxl.cell import WriteOnlyCell  # type: ignore[import-untyped]
+from openpyxl.styles import Font, PatternFill  # type: ignore[import-untyped]
+from openpyxl.utils import get_column_letter  # type: ignore[import-untyped]
+from openpyxl.worksheet._writer import WorksheetWriter  # type: ignore[import-untyped]
 
 from idp_app.services.document_models import ExtractionRunRecord
 from idp_app.services.exports import ExportTable, data_dictionary_rows
@@ -136,7 +137,7 @@ def write_export(
                 # Schema identifiers are labels, never filesystem paths.
                 label = re.sub(r"[^A-Za-z0-9_.-]", "_", schema_id)[:100]
                 label = f"{label}_v{version}_{index}.{suffix}"
-                _write_group(connection, group, output, format, row_limit)
+                _write_group(connection, group, output, format, row_limit, max_disk_bytes)
                 outputs.append((label, output))
                 if sum(p.stat().st_size for p in root.iterdir()) > max_disk_bytes:
                     raise ValueError(
@@ -162,8 +163,20 @@ def write_export(
             connection.close()
 
 
+class _DiskWorksheetWriter(WorksheetWriter):  # type: ignore[misc]
+    # openpyxl is pinned to 3.1.5. Keep its XML spool under our request-owned directory,
+    # so both failure cleanup and the aggregate disk budget include it.
+    def cleanup(self) -> None:
+        Path(self.out).unlink(missing_ok=True)
+
+
 def _write_group(
-    connection: sqlite3.Connection, group: dict[str, Any], output: Path, format: str, row_limit: int
+    connection: sqlite3.Connection,
+    group: dict[str, Any],
+    output: Path,
+    format: str,
+    row_limit: int,
+    max_disk_bytes: int,
 ) -> None:
     used = {"data_dictionary", "export_manifest"}
     dictionary = [
@@ -184,10 +197,21 @@ def _write_group(
                     38, max(12, len(column) + 2)
                 )
             sheet.auto_filter.ref = f"A1:{get_column_letter(len(columns))}{count + 1}"
+            sheet._writer = _DiskWorksheetWriter(
+                sheet, out=str(output.parent / f"{output.stem}-{len(workbook.worksheets)}.xml")
+            )
+            sheet._writer.write_top()
             sheet.append(_cells(sheet, columns, header=True))
             try:
-                for row in rows:
+                for index, row in enumerate(rows):
                     sheet.append(_cells(sheet, row))
+                    if (
+                        index % 100 == 0
+                        and sum(p.stat().st_size for p in output.parent.iterdir()) > max_disk_bytes
+                    ):
+                        raise ValueError(
+                            "Export exceeds the temporary disk budget; select fewer results."
+                        )
             finally:
                 sheet.close()
         else:
@@ -242,4 +266,7 @@ def _write_group(
         if archive is not None:
             archive.close()
         if workbook is not None:
+            for sheet in workbook.worksheets:
+                if sheet._writer is not None:
+                    sheet._writer.cleanup()
             workbook.close()

@@ -31,6 +31,14 @@ class ExportRequests:
                      PRIMARY KEY(export_id, ordinal));
                 """)
 
+    def identity(self, user: str, client_id: str) -> str:
+        return str(
+            uuid5(
+                NAMESPACE_URL,
+                json.dumps([str(self.path or self.namespace), user, client_id, "EXPORT"]),
+            )
+        )
+
     def get(self, identity: str) -> dict[str, Any] | None:
         if self.path is not None:
             with sqlite3.connect(self.path) as conn:
@@ -54,7 +62,13 @@ class ExportRequests:
         return row
 
     def create(
-        self, user: str, client_id: str, format: str, run_ids: list[str], retention_hours: int = 24
+        self,
+        user: str,
+        client_id: str,
+        format: str,
+        run_ids: list[str],
+        retention_hours: int = 24,
+        request_hash: str | None = None,
     ) -> dict[str, Any]:
         run_ids = list(dict.fromkeys(run_ids))
         if not 1 <= len(run_ids) <= 1000 or format not in {"xlsx", "csv"}:
@@ -72,6 +86,7 @@ class ExportRequests:
             "requester": user,
             "client_request_id": client_id,
             "selection_hash": digest,
+            "request_hash": request_hash,
             "writer_version": WRITER_VERSION,
             "format": format,
             "run_ids": run_ids,
@@ -97,7 +112,7 @@ class ExportRequests:
                 {"id": identity, "payload": json.dumps(row)},
             )
         saved = self.owned(identity, user)
-        if saved["selection_hash"] != digest:
+        if saved["selection_hash"] != digest or saved.get("request_hash") != request_hash:
             raise DocumentServiceError(
                 "EXPORT_REQUEST_CONFLICT", "Request ID already used with different inputs.", 409
             )

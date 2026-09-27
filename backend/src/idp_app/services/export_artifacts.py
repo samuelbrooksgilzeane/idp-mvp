@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 from uuid import UUID
+
+from databricks.sdk.errors import NotFound
 
 
 class ExportArtifacts:
@@ -29,6 +32,7 @@ class ExportArtifacts:
             shutil.copyfile(file, temporary)
             temporary.replace(path)
         else:
+            self.client.files.create_directory(target.rsplit("/", 1)[0])
             with file.open("rb") as stream:
                 self.client.files.upload(target, stream, overwrite=True)
         return file.stat().st_size, digest.hexdigest()
@@ -39,10 +43,11 @@ class ExportArtifacts:
         response = self.client.files.download(self.path(identity))
         if response.contents is None:
             raise FileNotFoundError("Export artifact is unavailable")
-        return response.contents
+        return cast(BinaryIO, response.contents)
 
     def delete(self, identity: str) -> None:
         if self.client is None:
             Path(self.path(identity)).unlink(missing_ok=True)
         else:
-            self.client.files.delete(self.path(identity))
+            with suppress(NotFound):
+                self.client.files.delete(self.path(identity))

@@ -71,3 +71,51 @@ def test_worker_restarts_from_pins_and_paged_sources(tmp_path: Path):
 def test_artifacts_reject_untrusted_paths(tmp_path: Path):
     with pytest.raises(ValueError):
         ExportArtifacts(str(tmp_path)).open("../../secrets")
+
+
+def test_api_confirms_cross_page_duplicates_and_replays_without_reresolving(tmp_path: Path):
+    from fastapi.testclient import TestClient
+    from idp_app.core.config import Settings
+    from idp_app.main import create_app
+
+    app = create_app(Settings(local_data_dir=tmp_path, bulk_export_enabled=True))
+    ids = [str(uuid4()), str(uuid4())]
+
+    class Sources:
+        calls = 0
+
+        def get_many(self, selected):
+            self.calls += 1
+            return [
+                ExportSource(
+                    replace(_run(), extraction_run_id=i, ai_result={"response": {}}),
+                    _nested_schema(),
+                    "test.pdf",
+                )
+                for i in selected
+            ]
+
+    sources = Sources()
+    requests = ExportRequests(tmp_path / "exports.sqlite")
+    app.state.durable_exports = (requests, ExportService(sources), ExportArtifacts(str(tmp_path)))
+    client = TestClient(app)
+    body = {"client_request_id": str(uuid4()), "format": "xlsx", "run_ids": ids}
+    confirmation = client.post("/api/export-requests", json=body)
+    assert confirmation.status_code == 409
+    assert confirmation.json()["code"] == "CONFIRM_HISTORICAL_DUPLICATES"
+    body["include_historical_duplicates"] = True
+    accepted = client.post("/api/export-requests", json=body)
+    assert accepted.status_code == 202
+    before = sources.calls
+    assert client.post("/api/export-requests", json=body).json() == accepted.json()
+    assert sources.calls == before
+    identity = accepted.json()["export_id"]
+    assert (
+        client.get(
+            f"/api/export-requests/{identity}", headers={"x-forwarded-email": "other"}
+        ).status_code
+        == 404
+    )
+    assert client.get(f"/api/export-requests/{identity}/download").status_code == 409
+    body["format"] = "csv"
+    assert client.post("/api/export-requests", json=body).status_code == 409

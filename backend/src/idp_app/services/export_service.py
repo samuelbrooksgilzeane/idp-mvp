@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from starlette.concurrency import run_in_threadpool
@@ -29,49 +30,10 @@ class ExportResult:
 
 
 class ExportService:
-    """Bulk-load selected runs and hand their in-memory projections to the export builders.
-
-    The repository returns every run, schema and document name in one read-only query. The
-    retained response is walked locally because export is a read operation: it must never issue
-    one detail query per run or attempt to populate cache tables as a side effect.
-
-    Different schema versions can declare the same table name (e.g. two invoice schema
-    versions both producing a "Line_Items" table) with different columns, so runs are grouped
-    by exact `(schema_id, schema_version)` before building: one group produces today's single
-    workbook/CSV-zip; more than one group produces a ZIP containing one workbook/CSV-zip per
-    schema version, so distinct schemas' tables are never combined.
-    """
+    """Read retained results in bounded joined pages and share the disk-backed writer."""
 
     def __init__(self, sources: ExportSourceRepository) -> None:
         self._sources = sources
-
-    async def _load_tables(self, run_ids: list[str]) -> list[_RunTables]:
-        requested_ids = list(dict.fromkeys(run_ids))
-        sources = await run_in_threadpool(self._sources.get_many, requested_ids)
-        by_run_id = {source.run.extraction_run_id: source for source in sources}
-        for run_id in requested_ids:
-            source = by_run_id.get(run_id)
-            if source is None:
-                raise DocumentServiceError(
-                    "EXTRACTION_RUN_NOT_FOUND", "Extraction run not found.", 404
-                )
-            if source.run.ai_result is None:
-                raise DocumentServiceError(
-                    "EXTRACTION_RESULT_UNAVAILABLE",
-                    "This extraction run has no retained ai_extract result.",
-                    409,
-                )
-        ordered_sources = [by_run_id[run_id] for run_id in requested_ids]
-        return await run_in_threadpool(_build_source_tables, ordered_sources)
-
-    @staticmethod
-    def _group_by_schema_version(
-        tables_by_run: list[_RunTables],
-    ) -> dict[tuple[str, int], list[_RunTables]]:
-        groups: dict[tuple[str, int], list[_RunTables]] = {}
-        for run, schema, tables in tables_by_run:
-            groups.setdefault((run.schema_id, run.schema_version), []).append((run, schema, tables))
-        return groups
 
     async def _export(self, run_ids: list[str], format: str) -> ExportResult:
         from pathlib import Path
@@ -90,7 +52,7 @@ class ExportService:
         except ValueError as error:
             raise DocumentServiceError("EXPORT_LIMIT", str(error), 422) from error
 
-    def iter_tables(self, run_ids: list[str]):
+    def iter_tables(self, run_ids: list[str]) -> Iterator[_RunTables]:
         """One joined read per bounded page; release retained JSON after each page."""
         requested = list(dict.fromkeys(run_ids))
         for offset in range(0, len(requested), 25):
