@@ -18,16 +18,10 @@ export function AskGeniePage() {
   if (!config) return <p role="status">Loading Genie…</p>;
   const genie = config.genie;
   return <section className="genie-workspace" aria-label="Ask Genie">
-    <h2>Ask about {config.project_name}</h2>
-    <p>{genie.coverage}</p>
     {!genie.enabled ? <p>Genie is not configured for this project yet.</p> : <>
-      {genie.open_url ? <p><a href={genie.open_url} target="_blank" rel="noopener noreferrer">Open Genie in Databricks</a></p> : null}
-      <p>Sign in to Databricks with access to this agent and its data. If the embedded view is blocked or asks you to sign in repeatedly, open Genie in Databricks.</p>
       {genie.embed_url && !unavailable ? <iframe className="genie-frame" src={genie.embed_url}
         title={`${config.project_name} Genie`} allow="clipboard-write" onError={() => setUnavailable(true)} />
-        : <p>{unavailable ? "The embedded view is hidden or unavailable." : "Embedding is not configured. Use the link above."}</p>}
-      {genie.embed_url && !unavailable ? <button type="button" onClick={() => setUnavailable(true)}>Hide embedded view</button> : null}
-      <p>Leaving this page may discard an unsent prompt. Saved conversations are managed by Genie.</p>
+        : <p role="alert">{unavailable ? "The embedded view is unavailable." : "Embedding is not configured."}</p>}
     </>}
   </section>;
 }

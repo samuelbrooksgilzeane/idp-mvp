@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { AskGeniePage } from "./AskGeniePage";
 
@@ -19,20 +19,20 @@ it("leaves the iframe absent when disabled", async () => {
   expect(container.querySelector("iframe")).toBeNull();
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
-it("provides a fallback without embedding configured", async () => {
+it("reports missing embedding configuration", async () => {
   configure(true);
   render(<AskGeniePage />);
-  expect(await screen.findByRole("link", { name: "Open Genie in Databricks" })).toHaveAttribute("rel", "noopener noreferrer");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Embedding is not configured.");
   expect(screen.queryByTitle("Project Genie")).toBeNull();
 });
-it("loads the configured frame and preserves its fallback on failure", async () => {
+it("shows only the configured frame without introductory text or controls", async () => {
   configure(true, "https://example.cloud.databricks.com/embed/genie/rooms/abc");
   const { unmount } = render(<AskGeniePage />);
   const frame = await screen.findByTitle("Project Genie");
   expect(frame).toHaveAttribute("allow", "clipboard-write");
-  fireEvent.click(screen.getByRole("button", { name: "Hide embedded view" }));
-  expect(screen.getByText("The embedded view is hidden or unavailable.")).toBeTruthy();
-  expect(screen.getByRole("link")).toBeTruthy();
+  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.queryByRole("link")).toBeNull();
+  expect(screen.getByRole("region", { name: "Ask Genie" }).textContent).toBe("");
   unmount();
   expect(screen.queryByTitle("Project Genie")).toBeNull();
 });
