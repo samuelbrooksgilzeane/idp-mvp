@@ -437,3 +437,11 @@ migration. Added an opt-in overlay generator with exported definition/ETag prese
 resource-to-App ID wiring. Thirteen focused tests, local config validation and real bundle validate/
 plan pass. Plan adds 3, updates 4, deletes 0; unapplied. No Genie creation, indexing or redeployment
 performed. See docs/GENIE_AUTOMATION_STATUS.md for deployment ordering and remaining verification.
+
+## Genie development deployment
+
+Bundle deployment created the project Genie space and published the app with its resource ID. The
+app's public configuration verifies that Genie is enabled and points at the created space. The
+space deliberately begins with no configured structured sources; the project maintainer should
+attach/configure them in Databricks. Embedding remains pending the official Share → Embed URL and
+allowed-surface configuration. No volume indexing or AI work was initiated.

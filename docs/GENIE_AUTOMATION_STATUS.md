@@ -96,3 +96,17 @@ No plan was applied. Removed the temporary first-create overlay after review to 
 reuse. The existing frontend sync warning remains a CLI pattern warning; full local configuration
 validation passes. Thirteen focused Genie tests pass. This is preparation evidence, not server-side
 empty-space creation, iframe behavior or successful preservation under a concurrent workspace edit.
+
+## Development deployment — 2026-09-27
+
+The development bundle was deployed with the first-create overlay. It created project Genie space
+`01f1ba8f44851508b81fcc9c9a013451` and updated the App, parser/extractor/bootstrap Jobs, plus the
+exporter and dispatcher Jobs. The App publish initially failed because Databricks snapshot import
+treated the `.geniespace.json` filename as an unsupported workspace object. The definition was
+renamed to `project_genie_definition.json`; the corrected app deployment succeeded.
+
+Authenticated verification returned HTTP 200 from `/api/app-config`, with `genie_enabled=true`,
+the deployed space ID, and the expected workspace fallback URL. No embed URL is configured and no
+Genie prompt, volume attachment, content-search enablement, SQL query, parser, or extractor run
+was made. Remove the generated first-create overlay before any future deployment and regenerate an
+export overlay from this space before a later bundle plan.
