@@ -320,3 +320,65 @@ Local verification: 22 backend tests and 8 frontend tests passed, including a sy
 restart/paged-read test (40 reads), writer limits, replay and authorization. TypeScript and ESLint
 passed. Workspace downloads, runtime packaging, memory/CPU benchmarking and the 100,000-child-row
 capacity evidence remain release verification work; no uploaded documents or AI functions were used.
+
+## Stages 4–5 — navigation/viewer completion checkpoint
+
+The stage-4 branch ends at `79a1467`, stacked on bulk extraction. Stage 5 is on
+`perf/navigation-viewer`, stacked on stage 4, with these reviewable checkpoints:
+
+- `b9a1ba3`: immutable viewer URLs, page projections, bounded retained-parse fallback and backfill.
+- `29e6788`: shared cursor pages, URL filters, scoped selection, bounded review cache, review navigation.
+- `c187687`: export replay/confirmation and artifact recovery hardening found during integration.
+- `20a6f18`: authenticated viewer access, strict types and cache invalidation after processing.
+
+Results now renders one server page of 50, rather than appending 50-row responses and slicing them
+into local pages of ten. Search is debounced; case/template/status/latest filters and cursor live
+in the URL. Selection survives page/filter changes. Previous/next review preserves that ordered
+scope, including across cursor boundaries, and never substitutes latest for a historical run.
+Deep links do not invent neighbors. Back links restore list context and saved scroll. A refreshed
+cursor can reconstruct its page; if previous-page history is unavailable, Reset list remains available.
+Facets come from the schema and case registries. Shared page requests reject stale responses;
+review-prefetch transports survive individual consumer cancellation. Reviews are limited to 20
+entries/8 MB with a 60-second TTL; latest-document lookup TTL is 10 seconds. Scope changes clear
+these caches. Speculation is capped at two requests and suppressed when hidden/on constrained
+connections. Heavy detail/schema routes are lazy; nested result arrays render 50 children at a time.
+
+`/documents/{id}/viewer` returns the resolved successful parse ID and pinned image URLs. Element
+requests use that ID. Historical extraction evidence now carries its parse provenance into the
+viewer. Missing overlays do not hide loaded images; obsolete image callbacks are ignored. Only
+the current page is rendered, with a three-page/2 MB element cache and next-page prefetch after
+readiness. Original image dimensions still drive coordinate transforms.
+
+Projection manifest + page-element tables publish readiness only after all page writes succeed.
+Multi-page elements retain their identities with page-specific boxes. Successful parses can build
+projections without more inference; projection failure is logged for explicit rebuild, never reparsed.
+Old runs use a read-only, single-pass fallback map (four runs/16 MB serialized input, 60-second TTL).
+`backfill_viewer_projection.py` accepts at most 25 explicit successful parse IDs per invocation.
+No backfill has been run. `viewer_projection_enabled` defaults false until its migration and grants
+are verified. The legacy pages endpoint remains available but now emits pinned image URLs too.
+
+Additional export hardening: cross-page historical duplicates require server-confirmed inclusion;
+replaying a batch-based request retains the original completed-only snapshot even if the batch has
+since progressed. Export artifact replay checks checksum/size; missing or corrupt output rebuilds
+from the same pins. Excel XML spools live inside the request temporary directory and participate
+in cleanup/disk accounting. The writer uses a small adapter for pinned openpyxl 3.1.5 internals,
+covered by writer tests. `scripts/run_local_export.py` is an explicit one-request mock-only driver.
+No worker was run against the user's stored documents.
+
+Local verification: all 73 frontend tests passed, TypeScript/ESLint and the production build passed,
+and strict mypy passed for nine changed backend modules. Six focused configuration checks, the
+new export Job's one-worker/one-retry settings, and runtime syntax checks passed. Backend regression
+results are recorded in the final checkpoint below. Existing PyMuPDF deprecation warnings and the
+jsdom normal-download navigation warning are non-failing test-environment messages.
+
+Outstanding activation/release checks remain explicit: apply export/viewer migrations and narrow
+permissions, verify packaging/Jobs/download behavior in the workspace, and collect workload-specific
+memory/disk/warm-navigation measurements. The 100,000-child-row benchmark and live load testing remain
+user-owned release evidence. Expired downloads are denied immediately; bulk storage cleanup is an
+operator task (no scheduled cleanup workload was added). The previously documented bundle-validator
+sync.include issue is still deferred. No Databricks calls, AI calls, deployment, push or merge occurred.
+Stage 6 (Genie) was not started in this request.
+
+Final local backend checkpoint: **109 tests passed** across export, viewer, intake, preparation,
+bulk extraction, configuration and persistence suites. The tracked working tree is clean after
+committing this handoff; pre-existing untracked `frontend/dist/` and `output/` were preserved.
