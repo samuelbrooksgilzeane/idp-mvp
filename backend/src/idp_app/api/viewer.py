@@ -1,15 +1,15 @@
 from collections.abc import Iterator
-from typing import Annotated, BinaryIO
+from typing import Annotated, Any, BinaryIO
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
-from idp_app.api.dependencies import get_viewer_service
+from idp_app.api.dependencies import get_authenticated_user, get_viewer_service
 from idp_app.api.models import BoundingBoxResponse, ElementResponse, ErrorResponse, PageResponse
 from idp_app.services.viewer import ParsedElement, ParsedPage, ViewerService
 
-viewer_router = APIRouter(tags=["viewer"])
+viewer_router = APIRouter(tags=["viewer"], dependencies=[Depends(get_authenticated_user)])
 
 
 @viewer_router.get(
@@ -31,7 +31,7 @@ async def viewer_metadata(
     document_id: str,
     service: Annotated[ViewerService, Depends(get_viewer_service)],
     parse_run_id: Annotated[str | None, Query(max_length=100)] = None,
-):
+) -> dict[str, Any]:
     resolved, pages = await service.metadata(document_id, parse_run_id)
     return {
         "parse_run_id": resolved,

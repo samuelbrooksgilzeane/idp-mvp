@@ -6,7 +6,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO, Protocol
+from typing import Any, BinaryIO, Protocol, cast
 
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound
@@ -115,7 +115,9 @@ class ViewerService:
         self._projections = projections
         self._fallback: OrderedDict[str, tuple[float, int, Any]] = OrderedDict()
 
-    async def _page_data(self, run: ParseRunRecord, page_id: int | None = None):
+    async def _page_data(
+        self, run: ParseRunRecord, page_id: int | None = None
+    ) -> tuple[list[ParsedPage], list[ParsedElement]]:
         if self._projections is not None:
             manifest = await run_in_threadpool(self._projections.manifest, run.parse_run_id)
             if manifest is not None:
@@ -139,11 +141,9 @@ class ViewerService:
         now = time.monotonic()
         cached = self._fallback.pop(run.parse_run_id, None)
         if cached is None or cached[0] < now:
-            retained = (
-                run
-                if run.parsed is not None
-                else await run_in_threadpool(self._parse_runs.get, run.parse_run_id)
-            )
+            retained: ParseRunRecord | None = run
+            if run.parsed is None:
+                retained = await run_in_threadpool(self._parse_runs.get, run.parse_run_id)
             if retained is None or retained.parsed is None:
                 raise DocumentServiceError(
                     "PARSE_RUN_NOT_FOUND", "Retained parse unavailable.", 404
@@ -157,12 +157,14 @@ class ViewerService:
                 len(self._fallback) > 4 or sum(v[1] for v in self._fallback.values()) > 16_000_000
             ):
                 self._fallback.popitem(last=False)
-        pages, elements = cached[2]
-        if page_id is not None and page_id not in elements:
+        pages, page_elements = cached[2]
+        if page_id is not None and page_id not in page_elements:
             raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
-        return pages, elements.get(page_id, [])
+        return pages, page_elements.get(page_id, []) if page_id is not None else []
 
-    async def metadata(self, document_id: str, parse_run_id: str | None = None):
+    async def metadata(
+        self, document_id: str, parse_run_id: str | None = None
+    ) -> tuple[str, list[ParsedPage]]:
         run = await self._successful_run(document_id, parse_run_id)
         pages, _ = await self._page_data(run)
         return run.parse_run_id, pages
@@ -259,7 +261,7 @@ class ViewerService:
             raise DocumentServiceError(
                 "DOCUMENT_NOT_PARSED", "The requested parse is unavailable.", 409
             )
-        return run
+        return cast(ParseRunRecord, run)
 
 
 def _parsed_pages(parsed: dict[str, Any] | None) -> list[tuple[int, str]]:

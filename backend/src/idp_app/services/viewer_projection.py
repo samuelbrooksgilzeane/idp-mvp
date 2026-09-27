@@ -6,18 +6,23 @@ import json
 import sqlite3
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+from idp_app.services.document_models import ParseRunRecord
+
+if TYPE_CHECKING:
+    from idp_app.services.viewer import BoundingBox, ParsedElement, ParsedPage
 
 VERSION = 1
 
 
-def project(run):
+def project(run: ParseRunRecord) -> tuple[list[ParsedPage], dict[int, list[ParsedElement]]]:
     from idp_app.services.viewer import ParsedPage, _parsed_elements, _parsed_pages
 
     pages = _parsed_pages(run.parsed)
-    by_page = {page_id: [] for page_id, _ in pages}
+    by_page: dict[int, list[ParsedElement]] = {page_id: [] for page_id, _ in pages}
     for element in _parsed_elements(run.parsed):
-        boxes: dict[int, list] = {}
+        boxes: dict[int, list[BoundingBox]] = {}
         for box in element.boxes:
             boxes.setdefault(box.page_id, []).append(box)
         for page_id, page_boxes in boxes.items():
@@ -51,7 +56,7 @@ class ViewerProjection:
                      PRIMARY KEY(parse_run_id, page_id));
                 """)
 
-    def manifest(self, identity: str):
+    def manifest(self, identity: str) -> dict[str, Any] | None:
         if self.path:
             with sqlite3.connect(self.path) as conn:
                 rows = conn.execute(
@@ -64,10 +69,10 @@ class ViewerProjection:
             )
         if len(rows) > 1:
             raise RuntimeError("Duplicate viewer projection")
-        data = json.loads(rows[0][0]) if rows else None
+        data: dict[str, Any] | None = json.loads(rows[0][0]) if rows else None
         return data if data and data["version"] == VERSION else None
 
-    def page(self, identity: str, page_id: int):
+    def page(self, identity: str, page_id: int) -> list[dict[str, Any]]:
         if self.path:
             with sqlite3.connect(self.path) as conn:
                 rows = conn.execute(
@@ -82,9 +87,9 @@ class ViewerProjection:
             )
         if len(rows) != 1:
             raise RuntimeError("Incomplete viewer projection; rebuild from retained parse")
-        return json.loads(rows[0][0])
+        return cast(list[dict[str, Any]], json.loads(rows[0][0]))
 
-    def build(self, run) -> None:
+    def build(self, run: ParseRunRecord) -> None:
         if run.status != "SUCCESS" or run.parsed is None:
             raise ValueError("Projection requires a successful retained parse")
         if self.manifest(run.parse_run_id):

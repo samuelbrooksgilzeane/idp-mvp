@@ -1,3 +1,4 @@
+import { invalidateListPages } from "./hooks/useCursorPage";
 import { setCacheScope } from "./lib/requestCache";
 import { invalidateDocumentReviews } from "./lib/extractionReviewPrefetch";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -82,6 +83,8 @@ export function App() {
   }, []);
 
   const refreshDocuments = useCallback(async () => {
+    invalidateDocumentReviews();
+    invalidateListPages();
     if (!isRegistryRoute) return;
     refreshRegistry();
     await loadCaseIds();
