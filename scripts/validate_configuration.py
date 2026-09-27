@@ -7,6 +7,9 @@ from idp_app.core.config import IdpMode, Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
+    "genie_enabled", "genie_space_id", "genie_embed_url",
+    "genie_workspace_origin", "genie_project_name",
+    "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
     "project_schema",
     "table_prefix",
@@ -555,7 +558,26 @@ def validate_application_resource() -> None:
         raise ValueError("Databricks App resource bindings are incomplete")
 
 
+
+def validate_genie_configuration() -> None:
+    bundle = load_yaml(ROOT / "databricks_etl/databricks.yml")
+    if bundle["variables"]["genie_enabled"]["default"] != "false":
+        raise ValueError("Genie must default off until provisioned")
+    resource = load_yaml(ROOT / "databricks_etl/resources/application.app.yml")
+    env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
+    for name in ("enabled", "space_id", "embed_url", "workspace_origin", "project_name"):
+        if env.get("IDP_GENIE_" + name.upper()) != "${var.genie_" + name + "}":
+            raise ValueError("Genie app setting must use its bundle variable: " + name)
+    bootstrap = load_yaml(ROOT / "databricks_etl/resources/bootstrap.job.yml")
+    jobs = bootstrap["resources"]["jobs"]
+    tasks = next(iter(jobs.values()))["tasks"]
+    task = next(item for item in tasks if item["task_key"] == "create_genie_views")
+    if task["depends_on"] != [{"task_key": "migrate_generic_extraction_fields"}]:
+        raise ValueError("Genie views must follow generic migrations")
+
+
 def main() -> None:
+    validate_genie_configuration()
     validate_app_config()
     validate_bundle_config()
     validate_data_bootstrap()

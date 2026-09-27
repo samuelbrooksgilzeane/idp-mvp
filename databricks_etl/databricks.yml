@@ -9,6 +9,21 @@ sync:
     - ..
 
 variables:
+  genie_enabled:
+    description: Genie display configuration; see docs/GENIE_SETUP.md
+    default: "false"
+  genie_space_id:
+    description: Genie display configuration; see docs/GENIE_SETUP.md
+    default: ""
+  genie_embed_url:
+    description: Genie display configuration; see docs/GENIE_SETUP.md
+    default: ""
+  genie_workspace_origin:
+    description: Genie display configuration; see docs/GENIE_SETUP.md
+    default: ""
+  genie_project_name:
+    description: Genie display configuration; see docs/GENIE_SETUP.md
+    default: "IDP project"
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.
     default: "false"

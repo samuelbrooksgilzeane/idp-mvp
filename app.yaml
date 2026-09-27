@@ -35,6 +35,16 @@ command:
   - --port
   - "8000"
 env:
+  - name: IDP_GENIE_ENABLED
+    value: "false"
+  - name: IDP_GENIE_SPACE_ID
+    value: ""
+  - name: IDP_GENIE_EMBED_URL
+    value: ""
+  - name: IDP_GENIE_WORKSPACE_ORIGIN
+    value: ""
+  - name: IDP_GENIE_PROJECT_NAME
+    value: "IDP project"
   # Enable after applying queue migrations and configuring the dispatcher Job ID.
   - name: IDP_BULK_EXPORT_ENABLED
     value: "false"

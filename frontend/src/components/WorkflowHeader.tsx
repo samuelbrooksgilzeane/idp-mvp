@@ -3,6 +3,7 @@ import { NavLink } from "react-router-dom";
 const NAVIGATION = [
   { label: "Documents", to: "/", end: true },
   { label: "Results", to: "/results", end: false },
+  { label: "Ask Genie", to: "/ask-genie", end: false },
   { label: "Schema", to: "/schema", end: false },
 ];
 

@@ -136,6 +136,16 @@ resources:
           - --port
           - "8000"
         env:
+          - name: IDP_GENIE_ENABLED
+            value: ${var.genie_enabled}
+          - name: IDP_GENIE_SPACE_ID
+            value: ${var.genie_space_id}
+          - name: IDP_GENIE_EMBED_URL
+            value: ${var.genie_embed_url}
+          - name: IDP_GENIE_WORKSPACE_ORIGIN
+            value: ${var.genie_workspace_origin}
+          - name: IDP_GENIE_PROJECT_NAME
+            value: ${var.genie_project_name}
           - name: IDP_VIEWER_PROJECTION_ENABLED
             value: ${var.viewer_projection_enabled}
           - name: IDP_BULK_EXPORT_ENABLED

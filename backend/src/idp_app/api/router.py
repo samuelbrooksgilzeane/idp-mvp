@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Request
 
+from idp_app.api.app_config import router as app_config_router
 from idp_app.api.batches import batches_router
 from idp_app.api.documents import documents_router
 from idp_app.api.export_requests import router as export_requests_router
@@ -16,6 +17,7 @@ from idp_app.core.config import Settings
 from idp_app.services.health import build_health_response
 
 api_router = APIRouter()
+api_router.include_router(app_config_router)
 api_router.include_router(export_requests_router)
 api_router.include_router(documents_router)
 api_router.include_router(upload_batches_router)

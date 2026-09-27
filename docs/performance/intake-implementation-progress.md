@@ -382,3 +382,22 @@ Stage 6 (Genie) was not started in this request.
 Final local backend checkpoint: **109 tests passed** across export, viewer, intake, preparation,
 bulk extraction, configuration and persistence suites. The tracked working tree is clean after
 committing this handoff; pre-existing untracked `frontend/dist/` and `output/` were preserved.
+
+## Stage 6 — structured Genie implementation (2026-09-27)
+
+Added four curated views, a versioned Genie definition and explicit management-API provisioning.
+Views follow generic column migrations; provisioning defaults to offline rendering. Retained
+workspace/warehouse state, exclusive locking, durable create intent and reviewed remote hashes/ETags
+protect against duplicate spaces and overwriting SQL-team edits. No deployment engine change.
+The `/ask-genie` route provides coverage text, user-authenticated iframe and permanent external
+fallback. Public configuration includes no credentials; origin/space validation and CSP restrict
+embedding. All settings default disabled. See `docs/GENIE_SETUP.md` for activation and limitations.
+
+Verified locally: 23 focused backend tests, all 77 frontend tests, strict mypy on the three changed
+backend modules, frontend TypeScript/ESLint, changed Python lint and production build. Genie YAML
+wiring and standalone App settings pass. Full configuration validation still fails on the existing
+missing `sync.include` frontend packaging contract; deployment remains gated on its resolution.
+Curated SQL, actual Genie definition acceptance, user grants and embedding remain workspace checks.
+No migration, space creation, SQL query, upload, indexing or AI inference was run for this stage.
+Earlier implementation branches were pushed to origin in this session; stage 6 is being pushed
+at its logical checkpoints. Code completion does not imply workspace activation.

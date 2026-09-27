@@ -9,6 +9,7 @@ const DocumentDetailPage = lazy(() => import("./pages/DocumentDetailPage").then(
 import { DocumentsPage } from "./pages/DocumentsPage";
 const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(module => ({ default: module.ResultDetailPage })));
 import { ResultsPage } from "./pages/ResultsPage";
+const AskGeniePage = lazy(() => import("./pages/AskGeniePage").then(module => ({ default: module.AskGeniePage })));
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useDocumentPage } from "./hooks/useDocumentPage";
@@ -49,6 +50,7 @@ const HEADINGS: Record<string, { eyebrow: string; title: string; blurb: string }
     title: "Extraction run",
     blurb: "Review one run's result beside its source, with citations and confidence.",
   },
+  genie: { eyebrow: "Project questions", title: "Ask Genie", blurb: "Explore the project’s structured results with your Databricks identity." },
   schema: {
     eyebrow: "Governance",
     title: "Extraction contract",
@@ -198,6 +200,7 @@ export function App() {
           />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:runId" element={<ResultDetailPage />} />
+          <Route path="/ask-genie" element={<AskGeniePage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
         </Suspense>
@@ -214,6 +217,7 @@ function sectionFor(pathname: string): string {
   if (pathname.startsWith("/documents/")) return "detail";
   if (pathname.startsWith("/results/")) return "result-detail";
   if (pathname.startsWith("/results")) return "results";
+  if (pathname.startsWith("/ask-genie")) return "genie";
   if (pathname.startsWith("/schema")) return "schema";
   return "documents";
 }

@@ -653,3 +653,6 @@ footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; ali
 .extraction-batch-progress li { padding: 4px 0; overflow-wrap: anywhere; }
 .extraction-batch-progress nav { display: flex; gap: 8px; }
 .extraction-batch-progress button { justify-self: start; min-height: 34px; padding: 0 13px; border: 1px solid #c8cbc5; border-radius: 4px; background: #fff; color: #2d332d; }
+
+.genie-workspace { display: grid; gap: 1rem; }
+.genie-frame { width: 100%; height: max(600px, 75vh); border: 1px solid #d9ddd7; border-radius: 8px; background: white; }

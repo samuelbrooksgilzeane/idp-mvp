@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.base import RequestResponseEndpoint
 from starlette.responses import Response
 
 from idp_app.api.router import api_router
@@ -44,7 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
 
     @app.middleware("http")
-    async def add_server_timing(request: Request, call_next: Any) -> Response:
+    async def add_server_timing(request: Request, call_next: RequestResponseEndpoint) -> Response:
         """Expose safe aggregate request/warehouse timings for browser and API diagnostics."""
         started_at = perf_counter()
         token = begin_request_metrics()
@@ -59,6 +60,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f'sql;dur={metrics.sql_duration_ms:.1f};desc="{statement_count} statements"'
                 )
             response.headers["Server-Timing"] = ", ".join(timings)
+            frame_source = (
+                resolved_settings.genie_workspace_origin
+                if resolved_settings.genie_enabled
+                else "'none'"
+            )
+            existing = response.headers.get("Content-Security-Policy", "")
+            directives = [
+                item.strip()
+                for item in existing.split(";")
+                if item.strip() and not item.strip().startswith("frame-src ")
+            ]
+            directives.append(f"frame-src {frame_source}")
+            response.headers["Content-Security-Policy"] = "; ".join(directives)
             return response
         finally:
             reset_request_metrics(token)

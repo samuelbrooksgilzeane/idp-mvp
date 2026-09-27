@@ -2,6 +2,7 @@ import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Self
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from pydantic import Field, PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,6 +22,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    genie_enabled: bool = False
+    genie_space_id: str | None = None
+    genie_embed_url: str | None = None
+    genie_workspace_origin: str | None = None
+    genie_project_name: str | None = None
     mode: IdpMode = IdpMode.MOCK
     catalog: str | None = None
     project_schema: str | None = None
@@ -75,6 +81,71 @@ class Settings(BaseSettings):
             if value == "":
                 return None
         return value
+
+    @field_validator(
+        "genie_space_id",
+        "genie_embed_url",
+        "genie_workspace_origin",
+        "genie_project_name",
+        mode="before",
+    )
+    @classmethod
+    def normalize_genie_text(cls, value: Any) -> Any:
+        return value.strip() or None if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_genie(self) -> Self:
+        origin = self.genie_workspace_origin
+        if origin:
+            parsed = urlsplit(origin)
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.port not in (None, 443)
+                or parsed.path not in ("", "/")
+                or parsed.query
+                or parsed.fragment
+                or any(c.isspace() for c in origin)
+            ):
+                raise ValueError("Genie workspace origin must be a plain HTTPS origin")
+            self.genie_workspace_origin = origin.rstrip("/")
+        if (
+            self.genie_space_id
+            and re.fullmatch(
+                r"[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                self.genie_space_id,
+            )
+            is None
+        ):
+            raise ValueError("Genie space ID must be a UUID")
+        if self.genie_enabled and (not origin or not self.genie_space_id):
+            raise ValueError("Enabled Genie requires its workspace origin and space ID")
+        if self.genie_embed_url:
+            url = urlsplit(self.genie_embed_url)
+            if (
+                not origin
+                or not self.genie_space_id
+                or url.scheme != "https"
+                or f"{url.scheme}://{url.netloc}" != self.genie_workspace_origin
+                or url.username
+                or url.password
+                or url.fragment
+            ):
+                raise ValueError("Genie embed URL must match the trusted workspace origin")
+            segments = unquote(url.path).strip("/").split("/")
+            if (
+                "genie" not in segments
+                or self.genie_space_id not in segments
+                or any(
+                    segment not in {"embed", "genie", "rooms", "spaces", self.genie_space_id}
+                    for segment in segments
+                )
+                or any(key not in {"o", "embed", "theme"} for key, _ in parse_qsl(url.query))
+            ):
+                raise ValueError("Use the official Genie embed URL for the configured space ID")
+        return self
 
     @model_validator(mode="after")
     def require_databricks_configuration(self) -> Self:
