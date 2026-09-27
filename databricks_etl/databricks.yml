@@ -5,6 +5,8 @@ include:
   - resources/*.yml
 
 sync:
+  include:
+    - ../frontend/dist/**
   paths:
     - ..
 

@@ -159,6 +159,7 @@ def validate_data_bootstrap() -> None:
         "migrate_generic_schema_registry",
         "migrate_generic_extraction_records",
         "migrate_generic_extraction_fields",
+        "create_genie_views",
         "migrate_work_batches",
     ]
     if (
