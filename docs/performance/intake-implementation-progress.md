@@ -410,3 +410,20 @@ passed: warehouse STOPPED, first page lists two Genie spaces and one App. Zero S
 Job submissions or AI requests. This confirms authentication/resource visibility only, not Genie
 volume preview availability, view SQL acceptance or deployed feature behavior. Stage 6 and initial
 stage 7 checkpoints are pushed; scale measurements and workspace activation remain outstanding.
+
+## Review app deployment — 2026-09-27
+
+User authorized deployment for feedback. Fixed the missing frontend sync include and added the
+Genie view task to the bootstrap validator's expected order; full configuration validation passes.
+Production frontend build passes. Packaging commit: `2b74914` on `fix/app-review-deployment`.
+Uploaded tracked backend/schema sources, standalone app.yaml and the freshly built frontend to
+`/Workspace/Users/luke7777.lb@gmail.com/idp-review-deployment`, excluding local data and credentials.
+Started the existing stopped app once. Databricks first restored the prior deployment, then accepted
+review snapshot `01f1ba8acdb11677aef66d60f18e946a`, which reports SUCCEEDED.
+
+App URL: https://idp-mvp-dev-7474660341420973.aws.databricksapps.com
+Authenticated checks: `/api/health` 200 in Databricks mode, `/api/app-config` 200 with Genie disabled,
+`/ask-genie` 200 with the current frontend asset hash. No document SQL, processing jobs or AI requests
+were issued. This is an app-only deployment: migrations, new Job definitions and feature activation
+remain pending. Automatic preparation, bulk extraction/export, viewer projections and Genie remain
+off. Bulk intake still requires its prepared table migration/grants before upload testing.

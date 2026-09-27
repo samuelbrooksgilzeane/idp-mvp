@@ -8,7 +8,7 @@ Free Edition is not being used for bulk uploads, repeated inference or indexing.
 | Stages 1–5 local regression | Prior checkpoint: 109 backend / 73 frontend tests passed | Workspace migrations, permissions and small workflow test |
 | Stage 6 Genie local checks | 23 backend / 77 frontend tests; type/lint/build checks passed | SQL view acceptance, API provisioning, user grants and iframe |
 | Metadata smoke | Passed after OAuth refresh: warehouse STOPPED, 2 Genie spaces, 1 App; zero SQL/jobs/AI | Actual feature activation remains unverified |
-| Bundle packaging | Full local configuration validator fails missing sync.include contract | Resolve and inspect actual synced production assets before deployment |
+| Bundle packaging | Resolved: full configuration validation passes; new build deployed and asset hash verified | Bundle resource/migration deployment remains separate |
 | Synthetic export scale | Existing writer correctness tests; no performance measurement recorded | Local retained-fixture benchmark with memory/disk tracking |
 | Navigation p50/p95 | No browser performance measurement recorded | Warm versus cold API, network, image decode and render timing |
 | Real PDFs / AI throughput | Not run | User-managed eligible workspace and explicit test budget |
