@@ -1,5 +1,7 @@
+import { ReviewNavigation } from "../components/ReviewNavigation";
+import { invalidateDocumentReviews } from "../lib/extractionReviewPrefetch";
 import { ArrowLeft, Clock3, LoaderCircle, Play, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { DocumentViewer, type CitationTarget } from "../components/DocumentViewer";
@@ -19,6 +21,8 @@ type DocumentDetailPageProps = { onDocumentsChanged: () => void };
 
 export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPageProps) {
   const { documentId = "" } = useParams();
+  const activeDocument = useRef(documentId);
+  activeDocument.current = documentId;
   const [document, setDocument] = useState<DocumentRecord | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
   const [runs, setRuns] = useState<ParseRun[]>([]);
@@ -34,9 +38,12 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
     try {
       const response = await fetch(`/api/documents/${documentId}`);
       if (!response.ok) throw new Error("Document request failed");
-      setDocument((await response.json()) as DocumentRecord);
+      const payload = (await response.json()) as DocumentRecord;
+      if (activeDocument.current !== documentId) return;
+      setDocument(payload);
       setState("ready");
     } catch {
+      if (activeDocument.current !== documentId) return;
       setState("missing");
     }
   }, [documentId]);
@@ -47,21 +54,26 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
       const response = await fetch(`/api/documents/${documentId}/parse-runs`);
       if (!response.ok) throw new Error("Parse history request failed");
       const history = (await response.json()) as ParseRun[];
+      if (activeDocument.current !== documentId) return;
       setRuns(history);
       setActiveRunId(history.find((run) => ["QUEUED", "RUNNING"].includes(run.status))?.parse_run_id ?? null);
     } catch {
+      if (activeDocument.current !== documentId) return;
       setNotice({ kind: "error", message: "Parse history is unavailable." });
     } finally {
-      setRunsLoading(false);
+      if (activeDocument.current === documentId) setRunsLoading(false);
     }
   }, [documentId]);
 
   useEffect(() => {
+    activeDocument.current = documentId;
+    setState("loading");
     setCitationTarget(null);
     setTab("Extraction");
     void loadDocument();
     void loadRuns();
-  }, [loadDocument, loadRuns]);
+    return () => { activeDocument.current = ""; };
+  }, [documentId, loadDocument, loadRuns]);
 
   useEffect(() => {
     if (!activeRunId) return;
@@ -93,6 +105,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
               ? "Document parsed successfully."
               : "Document parsing failed.",
         });
+        invalidateDocumentReviews(documentId);
         await loadDocument();
         onDocumentsChanged();
       } catch {
@@ -107,7 +120,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
       cancelled = true;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [activeRunId, loadDocument, onDocumentsChanged]);
+  }, [activeRunId, documentId, loadDocument, onDocumentsChanged]);
 
   async function handleParse() {
     if (!document) return;
@@ -162,6 +175,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
         <ArrowLeft size={14} aria-hidden="true" /> All documents
       </Link>
 
+      <ReviewNavigation id={documentId} kind="documents" />
       <div className="detail-header">
         <div>
           <p className="eyebrow">Document detail</p>
@@ -233,6 +247,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
             documentId={document.document_id}
             documentStatus={document.status}
             citationTarget={citationTarget}
+            parseRunId={citationTarget?.parseRunId}
           />
         </div>
 

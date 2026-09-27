@@ -1,3 +1,4 @@
+import { invalidateListPages } from "./hooks/useCursorPage";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -34,7 +35,7 @@ function renderApp(path = "/") {
 }
 
 afterEach(() => {
-  cleanup();
+  cleanup(); invalidateListPages();
   sessionStorage.clear();
   localStorage.clear();
   vi.unstubAllGlobals();
@@ -102,7 +103,7 @@ describe("App", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Inspect a document" })).toBeInTheDocument(),
     );
-    expect(screen.getByRole("tab", { name: "Extraction" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: "Extraction" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /All documents/ })).toBeInTheDocument();
   });
 
@@ -121,7 +122,7 @@ describe("App", () => {
     expect(
       await screen.findByRole("heading", { name: "Extraction contract" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Schema library" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Schema library" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents");
     expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents/cases");
   });
@@ -144,6 +145,6 @@ describe("App", () => {
     const requested = fetchMock.mock.calls.map(([input]) => input.toString());
     expect(requested.some((url) => url.startsWith("/api/extractions?"))).toBe(true);
     expect(requested.some((url) => url.startsWith("/api/documents/page"))).toBe(false);
-    expect(requested).not.toContain("/api/documents/cases");
+    expect(requested).toContain("/api/documents/cases"); // Small server-side facet registry.
   });
 });

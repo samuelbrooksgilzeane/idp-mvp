@@ -32,10 +32,14 @@ def create_upload_batch(
 
 
 @upload_batches_router.get("/limits")
-def get_upload_limits(request: Request, user: User) -> dict[str, int | bool]:
-    del user
+def get_upload_limits(request: Request, user: User) -> dict[str, int | bool | str]:
+    import hashlib
+
     settings = request.app.state.settings
     return {
+        "cache_scope": hashlib.sha256(
+            f"{user}:{settings.catalog}:{settings.project_schema}:{settings.table_prefix}:{settings.local_data_dir}".encode()
+        ).hexdigest(),
         "max_files": min(1000, settings.max_upload_batch_files),
         "max_file_bytes": settings.max_upload_bytes,
         "automatic_preparation": settings.auto_prepare_enabled,

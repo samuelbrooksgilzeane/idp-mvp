@@ -1,3 +1,4 @@
+import { invalidateListPages } from "../hooks/useCursorPage";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,28 +43,25 @@ function bySchemaCellText(): string[] {
 
 afterEach(() => {
   cleanup();
+  invalidateListPages();
+  sessionStorage.clear();
   vi.unstubAllGlobals();
 });
 
 describe("ResultsPage", () => {
-  it("paginates extraction runs in groups of ten", async () => {
-    const manyRows = Array.from({ length: 12 }, (_, index) => ({
-      ...rows[0],
-      extraction_run_id: `run-${index + 1}`,
-      document_id: `doc-${index + 1}`,
-      document_name: `invoice-${index + 1}.pdf`,
-    }));
-    vi.stubGlobal("fetch", vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ items: manyRows, next_cursor: null }),
-    })));
-
-    render(<MemoryRouter><ResultsPage /></MemoryRouter>);
-
-    expect(await screen.findAllByRole("link", { name: /invoice-\d+\.pdf/ })).toHaveLength(10);
-    fireEvent.click(screen.getByRole("button", { name: "Page 2" }));
-    expect(screen.getAllByRole("link", { name: /invoice-\d+\.pdf/ })).toHaveLength(2);
-    expect(screen.getByText("11–12 of 12 runs")).toBeInTheDocument();
+  it("renders a server page of fifty and retains selection across cursor navigation", async () => {
+    const manyRows = Array.from({ length: 50 }, (_, index) => ({ ...rows[0],
+      extraction_run_id: `run-${index}`, document_id: `doc-${index}`, document_name: `invoice-${index}.pdf` }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true,
+      json: async () => url.includes("cursor=next") ? { items: [rows[1]], next_cursor: null }
+        : { items: manyRows, next_cursor: "next" } })));
+    render(<MemoryRouter initialEntries={["/results"]}><ResultsPage /></MemoryRouter>);
+    expect(await screen.findAllByRole("link", { name: /invoice-\d+\.pdf/ })).toHaveLength(50);
+    fireEvent.click(screen.getByLabelText("Select run for invoice-0.pdf"));
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(await screen.findByText("1 runs on this page · 1 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(await screen.findByLabelText("Select run for invoice-0.pdf")).toBeChecked();
   });
 
   it("lists extraction runs, links to the detail page, and defaults to latest-only", async () => {
@@ -145,7 +143,8 @@ describe("ResultsPage", () => {
       return { ok: false, json: async () => ({}) };
     }));
     // URL.createObjectURL/revokeObjectURL are not implemented in jsdom.
-    vi.stubGlobal("URL", { ...URL, createObjectURL: vi.fn(() => "blob:mock"), revokeObjectURL: vi.fn() });
+    URL.createObjectURL = vi.fn(() => "blob:mock");
+    URL.revokeObjectURL = vi.fn();
 
     render(
       <MemoryRouter initialEntries={["/results"]}>

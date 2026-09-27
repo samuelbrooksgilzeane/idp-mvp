@@ -1,4 +1,6 @@
-import { useNavigate } from "react-router-dom";
+import { saveScroll, restoreScroll, previousCursor } from "../lib/listNavigation";
+import { useListSelection } from "../hooks/useListSelection";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
@@ -29,6 +31,7 @@ type DocumentsPageProps = {
   onNext?: () => void;
   onReset?: () => void;
   selectionScope?: string;
+  nextCursor?: string | null;
 };
 
 export function DocumentsPage({
@@ -41,20 +44,14 @@ export function DocumentsPage({
   onDocumentsChanged,
   status = "", search = "", onStatusChanged, onSearchChanged,
   pageError, hasPrevious, hasNext, onPrevious, onNext, onReset,
-  selectionScope = "project",
+  selectionScope = "project", nextCursor,
 }: DocumentsPageProps) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const listUrl = location.pathname + location.search;
+  useEffect(() => { if (!loading) restoreScroll(listUrl); }, [loading, listUrl]);
   const [notice, setNotice] = useState<Notice>(null);
-  const selectionKey = `idp:document-selection:${selectionScope}`;
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
-    try {
-      const saved: unknown = JSON.parse(sessionStorage.getItem(selectionKey) ?? "[]");
-      return new Set(Array.isArray(saved) ? saved.filter((id): id is string => typeof id === "string").slice(0, 1000) : []);
-    } catch { return new Set(); }
-  });
-  useEffect(() => {
-    try { sessionStorage.setItem(selectionKey, JSON.stringify([...selectedIds])); } catch { /* Storage may be unavailable. */ }
-  }, [selectedIds, selectionKey]);
+  const [selectedIds, setSelectedIds] = useListSelection(`${selectionScope}:documents`);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const [searchInput, setSearchInput] = useState(search);
@@ -179,7 +176,21 @@ export function DocumentsPage({
           loading={loading}
           selectedDocumentId={null}
           onRefresh={() => void onDocumentsChanged()}
-          onSelect={(document) => navigate(`/documents/${document.document_id}`)}
+          onSelect={(document) => {
+            const query = new URLSearchParams({ limit: "50" });
+            if (selectedCaseId) query.set("case_id", selectedCaseId);
+            if (status) query.set("status", status);
+            if (search) query.set("search", search);
+            const key = `/api/documents/page?${query}`;
+            const cursor = new URLSearchParams(location.search).get("cursor") || "";
+            if (cursor) query.set("cursor", cursor);
+            saveScroll(listUrl);
+            navigate(`/documents/${document.document_id}`, { state: { list: {
+              url: listUrl, endpoint: "/api/documents/page", query: query.toString(),
+              ids: documents.map(d => d.document_id), next: nextCursor || null,
+              previous: previousCursor(key, cursor), kind: "documents",
+            } } });
+          }}
           onPreview={(document) => prefetchDocumentExtractionReview(document.document_id)}
           selectedIds={selectedIds}
           onToggleSelect={toggleSelect}

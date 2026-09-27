@@ -2,37 +2,54 @@ import { useExportRequest } from "../hooks/useExportRequest";
 import { ExportStatus } from "../components/ExportStatus";
 import { Download, FileSpreadsheet, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 
 import { prefetchExtractionReview } from "../lib/extractionReviewPrefetch";
-import { Pagination } from "../components/Pagination";
-import type { ExtractionRunPage, ExtractionRunSummary } from "../types";
+import { useCursorPage, invalidateListPages } from "../hooks/useCursorPage";
+import { useListSelection } from "../hooks/useListSelection";
+import { cacheScope } from "../lib/requestCache";
+import { rememberCursor, previousCursor, saveScroll, restoreScroll } from "../lib/listNavigation";
+import type { ExtractionRunSummary } from "../types";
 
 const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
 export function ResultsPage() {
   const [bulkExport, setBulkExport] = useState(false);
-  const exportTask = useExportRequest(window.location.origin);
+  const exportTask = useExportRequest(cacheScope());
   useEffect(() => {
     void fetch("/api/upload-batches/limits").then(r => r.json())
       .then(value => setBulkExport(value.bulk_export === true)).catch(() => undefined);
   }, []);
-  const [rows, setRows] = useState<ExtractionRunSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const caseId = params.get("case") || "";
+  const schemaKey = params.get("schema") || "";
+  const status = params.get("status") || "";
+  const search = params.get("search") || "";
+  const latestOnly = params.get("latest") !== "false";
+  const cursor = params.get("cursor") || "";
+  const [searchInput, setSearchInput] = useState(search);
   const [reloadToken, setReloadToken] = useState(0);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
-
-  const [caseId, setCaseId] = useState("");
-  const [schemaKey, setSchemaKey] = useState("");
-  const [status, setStatus] = useState("");
-  const [search, setSearch] = useState("");
-  const [latestOnly, setLatestOnly] = useState(true);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectedIds, setSelectedIds] = useListSelection(`${cacheScope()}:results`);
+  function filter(name: string, value: string) {
+    setParams(current => { const next = new URLSearchParams(current);
+      if (value) next.set(name, value); else next.delete(name);
+      next.delete("cursor"); return next; });
+  }
+  function changeCursor(value: string) {
+    setParams(current => { const next = new URLSearchParams(current);
+      if (value) next.set("cursor", value); else next.delete("cursor"); return next; });
+  }
+  useEffect(() => { setSearchInput(search); }, [search]);
+  useEffect(() => {
+    if (searchInput === search) return;
+    const timer = setTimeout(() => setParams(current => { const next = new URLSearchParams(current);
+      if (searchInput) next.set("search", searchInput); else next.delete("search");
+      next.delete("cursor"); return next; }), 250);
+    return () => clearTimeout(timer);
+  }, [searchInput, search, setParams]);
   const [duplicateWarning, setDuplicateWarning] = useState<{
     documentName: string;
     runIds: string[];
@@ -47,64 +64,39 @@ export function ResultsPage() {
     return parameters.toString();
   }, [caseId, latestOnly, schemaKey, search, status]);
 
+  const query = new URLSearchParams(requestQuery);
+  if (cursor) query.set("cursor", cursor);
+  const { items: rows, next_cursor: nextCursor, loading, error } = useCursorPage<ExtractionRunSummary>(
+    `/api/extractions?${query}`, true, reloadToken);
+  const cursorKey = `/api/extractions?${requestQuery}`;
+  rememberCursor(cursorKey, nextCursor, cursor);
+  const previous = previousCursor(cursorKey, cursor);
+  const listUrl = location.pathname + location.search;
+  useEffect(() => { if (!loading) restoreScroll(listUrl); }, [loading, listUrl]);
+  const listContext = { url: listUrl, endpoint: "/api/extractions", query: query.toString(),
+    ids: rows.map(row => row.extraction_run_id), next: nextCursor, previous, kind: "results" as const };
+  const [schemas, setSchemas] = useState<[string, string][]>([]);
+  const [caseIds, setCaseIds] = useState<string[]>([]);
+  const statuses = ["RUNNING", "EXTRACTED", "FAILED"];
   useEffect(() => {
-    const controller = new AbortController();
-    setPage(1);
-    setLoading(true);
-    setError(null);
-    fetch(`/api/extractions?${requestQuery}`, { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("Extraction runs request failed");
-        return response.json() as Promise<ExtractionRunPage>;
-      })
-      .then((page) => {
-        setRows(page.items);
-        setNextCursor(page.next_cursor);
-      })
-      .catch((caught: unknown) => {
-        if (!(caught instanceof DOMException && caught.name === "AbortError")) {
-          setRows([]);
-          setNextCursor(null);
-          setError("Extraction runs could not be loaded.");
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [reloadToken, requestQuery]);
-
-  const schemas = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const row of rows) {
-      // Pages arrive newest first; retain the display name from the newest observed version.
-      if (!seen.has(row.schema_id)) seen.set(row.schema_id, row.schema_display_name);
-    }
-    return [...seen.entries()];
-  }, [rows]);
-  const statuses = useMemo(() => [...new Set(rows.map((row) => row.status))].sort(), [rows]);
-  const caseIds = useMemo(
-    () => [...new Set(rows.flatMap((row) => (row.case_id ? [row.case_id] : [])))].sort(),
-    [rows],
-  );
-
+    let active = true;
+    void fetch("/api/schemas?status=ALL").then(r => r.json()).then(data => {
+      if (active && Array.isArray(data)) setSchemas([...new Map(data.map((row: { schema_id: string; display_name: string }) => [row.schema_id, row.display_name])).entries()]);
+    }).catch(() => undefined);
+    void fetch("/api/documents/cases").then(r => r.json()).then(data => {
+      if (active && Array.isArray(data)) setCaseIds(data);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
   const visible = rows;
-  const pageCount = Math.max(1, Math.ceil(visible.length / 10));
-  const pageRows = visible.slice((page - 1) * 10, page * 10);
-  const visibleIds = useMemo(
-    () => new Set(visible.map((row) => row.extraction_run_id)),
-    [visible],
-  );
-  const selection = useMemo(
-    () => [...selectedIds].filter((id) => visibleIds.has(id)),
-    [selectedIds, visibleIds],
-  );
+  const pageRows = rows;
+  const selection = [...selectedIds];
 
   function toggleSelect(runId: string) {
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(runId)) next.delete(runId);
-      else next.add(runId);
+      else if (next.size < 1000) next.add(runId);
       return next;
     });
   }
@@ -115,7 +107,7 @@ export function ResultsPage() {
       const next = new Set(current);
       for (const row of pageRows) {
         if (allSelected) next.delete(row.extraction_run_id);
-        else next.add(row.extraction_run_id);
+        else if (next.size < 1000) next.add(row.extraction_run_id);
       }
       return next;
     });
@@ -173,46 +165,26 @@ export function ResultsPage() {
     void runExport(selection);
   }
 
-  async function loadMore() {
-    if (!nextCursor) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const parameters = new URLSearchParams(requestQuery);
-      parameters.set("cursor", nextCursor);
-      const response = await fetch(`/api/extractions?${parameters.toString()}`);
-      if (!response.ok) throw new Error("Extraction runs request failed");
-      const page = (await response.json()) as ExtractionRunPage;
-      setRows((current) => [...current, ...page.items]);
-      setNextCursor(page.next_cursor);
-      setPage((current) => current + 1);
-    } catch {
-      setError("More extraction runs could not be loaded.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   return (
     <section className="results-workspace" aria-labelledby="results-title">
       <div className="registry-filters results-filters">
         <div className="registry-filter">
           <label htmlFor="results-case-filter">Case</label>
-          <select id="results-case-filter" value={caseId} onChange={(event) => setCaseId(event.target.value)}>
+          <select id="results-case-filter" value={caseId} onChange={(event) => filter("case", event.target.value)}>
             <option value="">All cases</option>
             {caseIds.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
         <div className="registry-filter">
           <label htmlFor="results-schema-filter">Schema</label>
-          <select id="results-schema-filter" value={schemaKey} onChange={(event) => setSchemaKey(event.target.value)}>
+          <select id="results-schema-filter" value={schemaKey} onChange={(event) => filter("schema", event.target.value)}>
             <option value="">All schemas</option>
             {schemas.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
           </select>
         </div>
         <div className="registry-filter">
           <label htmlFor="results-status-filter">Status</label>
-          <select id="results-status-filter" value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select id="results-status-filter" value={status} onChange={(event) => filter("status", event.target.value)}>
             <option value="">All statuses</option>
             {statuses.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
@@ -222,16 +194,16 @@ export function ResultsPage() {
           <input
             id="results-name-filter"
             type="search"
-            value={search}
+            value={searchInput}
             placeholder="File name"
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
         <label className="results-latest-toggle">
           <input
             type="checkbox"
             checked={latestOnly}
-            onChange={(event) => setLatestOnly(event.target.checked)}
+            onChange={(event) => filter("latest", String(event.target.checked))}
           />
           Latest runs only
         </label>
@@ -246,7 +218,7 @@ export function ResultsPage() {
           <button
             className="icon-button"
             type="button"
-            onClick={() => setReloadToken((value) => value + 1)}
+            onClick={() => { invalidateListPages(); setReloadToken((value) => value + 1); }}
             aria-label="Refresh extraction runs"
             title="Refresh extraction runs"
           >
@@ -299,6 +271,7 @@ export function ResultsPage() {
         </div>
       ) : null}
 
+      {cursor ? <button type="button" onClick={() => changeCursor("")}>Reset list</button> : null}
       {loading ? <div className="results-state">Loading extraction runs...</div> : null}
       {!loading && error ? (
         <div className="results-state results-error"><strong>Results unavailable</strong><span>{error}</span></div>
@@ -344,6 +317,8 @@ export function ResultsPage() {
                     <Link
                       className="document-link"
                       to={`/results/${row.extraction_run_id}`}
+                      state={{ list: listContext }}
+                      onClick={() => saveScroll(listUrl)}
                       onPointerEnter={() => {
                         if (row.status === "EXTRACTED") prefetchExtractionReview(row.extraction_run_id);
                       }}
@@ -367,16 +342,11 @@ export function ResultsPage() {
         </div>
       ) : null}
       {!error && visible.length ? (
-        <Pagination
-          page={Math.min(page, pageCount)}
-          pageCount={pageCount}
-          itemCount={visible.length}
-          itemLabel="runs"
-          onPageChange={setPage}
-          hasMore={Boolean(nextCursor)}
-          onLoadNext={() => void loadMore()}
-          loading={loading}
-        />
+        <nav className="pagination" aria-label="runs pagination">
+          <span>{rows.length} runs on this page · {selection.length} selected</span>
+          <button disabled={loading || previous === undefined} onClick={() => changeCursor(previous || "")}>Previous page</button>
+          <button disabled={loading || !nextCursor} onClick={() => changeCursor(nextCursor || "")}>Next page</button>
+        </nav>
       ) : null}
     </section>
   );

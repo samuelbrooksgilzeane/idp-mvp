@@ -1,7 +1,9 @@
+import { cacheScope } from "../lib/requestCache";
+import { ReviewNavigation } from "../components/ReviewNavigation";
 import { useExportRequest } from "../hooks/useExportRequest";
 import { ExportStatus } from "../components/ExportStatus";
 import { ArrowLeft, ChevronDown, Download, LoaderCircle, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { DocumentViewer, type CitationTarget } from "../components/DocumentViewer";
@@ -13,13 +15,14 @@ const formatter = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", time
 
 export function ResultDetailPage() {
   const [bulkExport, setBulkExport] = useState(false);
-  const exportTask = useExportRequest(window.location.origin);
+  const exportTask = useExportRequest(cacheScope());
   useEffect(() => {
     void fetch("/api/upload-batches/limits").then(r => r.json())
       .then(value => setBulkExport(value.bulk_export === true)).catch(() => undefined);
   }, []);
   const { runId = "" } = useParams();
   const navigate = useNavigate();
+  const generation = useRef(0);
   const [review, setReview] = useState<ExtractionReview | null>(null);
   const [fieldPolicies, setFieldPolicies] = useState<Map<string, FieldPolicy>>(new Map());
   const [state, setState] = useState<"loading" | "ready" | "missing">("loading");
@@ -29,10 +32,12 @@ export function ResultDetailPage() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    const current = ++generation.current;
     setState("loading");
     setCitationTarget(null);
     try {
       const payload = await loadExtractionReview(runId);
+      if (generation.current !== current) return;
       setReview(payload);
       setFieldPolicies(
         new Map(
@@ -47,12 +52,15 @@ export function ResultDetailPage() {
       );
       setState("ready");
     } catch {
+      if (generation.current !== current) return;
       setState("missing");
     }
   }, [runId]);
 
   useEffect(() => {
     void load();
+    const currentGeneration = generation;
+    return () => { currentGeneration.current++; };
   }, [load]);
 
   async function handleRerun() {
@@ -154,6 +162,7 @@ export function ResultDetailPage() {
         </div>
       </div>
 
+      <ReviewNavigation id={runId} kind="results" />
       <ExportStatus task={exportTask} />
       {notice ? <p className="notice notice-error">{notice}</p> : null}
 

@@ -1,3 +1,4 @@
+import { invalidateListPages } from "./useCursorPage";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +9,7 @@ function wrapper({ children }: { children: ReactNode }) {
   return <MemoryRouter>{children}</MemoryRouter>;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); invalidateListPages(); vi.unstubAllGlobals(); });
 
 describe("useDocumentPage", () => {
   it("ignores an obsolete response even if the transport ignores abort", async () => {

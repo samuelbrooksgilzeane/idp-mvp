@@ -331,7 +331,7 @@ export function ExtractionPanel({
           hierarchy={review.result}
           fields={review.fields}
           fieldPolicies={reviewFieldPolicies(review)}
-          onViewEvidence={onViewEvidence}
+          onViewEvidence={target => onViewEvidence({ ...target, parseRunId: selectedRun?.parse_run_id })}
         />
       ) : null}
     </section>

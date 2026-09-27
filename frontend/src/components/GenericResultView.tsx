@@ -47,6 +47,7 @@ export function GenericResultView({
     [fields],
   );
   const evidenceNonce = useMemo(() => ({ current: 0 }), []);
+  const [arrayPages, setArrayPages] = useState<Record<string, number>>({});
   const [recordIndex, setRecordIndex] = useState(0);
 
   const rootEntries = Object.entries(hierarchy);
@@ -125,6 +126,14 @@ export function GenericResultView({
   }
 
   function renderArray(items: unknown[], instancePath: string, label: string) {
+    const offset = Math.min(arrayPages[instancePath] || 0, Math.max(0, items.length - 1));
+    const shown = items.slice(offset, offset + 50);
+    const controls = items.length > 50 ? <nav aria-label={`${label} records`}>
+      <button disabled={offset === 0} onClick={() => setArrayPages(p => ({ ...p, [instancePath]: Math.max(0, offset - 50) }))}>Previous records</button>
+      <span> {offset + 1}–{Math.min(offset + 50, items.length)} of {items.length} </span>
+      <button disabled={offset + 50 >= items.length} onClick={() => setArrayPages(p => ({ ...p, [instancePath]: offset + 50 }))}>Next records</button>
+    </nav> : null;
+
     if (items.length === 0) {
       return (
         <p className="result-empty-array" key={instancePath}>
@@ -142,7 +151,7 @@ export function GenericResultView({
               <tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr>
             </thead>
             <tbody>
-              {items.map((item, index) => (
+              {shown.map((item, localIndex) => { const index = offset + localIndex; return (
                 <tr key={index}>
                   {columns.map((column) => {
                     const leaf = (item as Record<string, unknown>)[column] as
@@ -167,21 +176,23 @@ export function GenericResultView({
                     );
                   })}
                 </tr>
-              ))}
+              ); })}
             </tbody>
           </table>
+          {controls}
         </div>
       );
     }
     return (
       <details className="result-nested-group" open key={instancePath}>
         <summary>{label} ({items.length})</summary>
-        {items.map((item, index) => (
+        {shown.map((item, localIndex) => { const index = offset + localIndex; return (
           <div className="result-array-item" key={index}>
             <p className="result-array-item-label">Item {index + 1}</p>
             {renderNode(item, `${instancePath}[${index}]`, `${label} ${index + 1}`)}
           </div>
-        ))}
+        ); })}
+        {controls}
       </details>
     );
   }

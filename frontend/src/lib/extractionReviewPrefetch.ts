@@ -1,67 +1,46 @@
 import type { ExtractionReview } from "../types";
+import { RequestCache, cacheScope, canPrefetch, onScopeReset } from "./requestCache";
 
-type ExtractionRunSummary = {
-  extraction_run_id: string;
-  status: "RUNNING" | "EXTRACTED" | "FAILED";
-};
+type Run = { extraction_run_id: string; status: string };
+const reviews = new RequestCache<ExtractionReview>(20, 8_000_000, 60_000);
+const documentRuns = new RequestCache<Run[]>(20, 200_000, 10_000);
+onScopeReset(() => { reviews.clear(); documentRuns.clear(); });
+let speculative = 0;
+async function json<T>(url: string): Promise<T> {
+  const response = await fetch(url, undefined);
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  return response.json() as Promise<T>;
+}
 
-const reviews = new Map<string, Promise<ExtractionReview>>();
-const documentRuns = new Map<string, Promise<ExtractionRunSummary[]>>();
-
-function requestJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  return fetch(url, signal ? { signal } : undefined).then(async (response) => {
-    if (!response.ok) throw new Error(`Request failed: ${response.status}`);
-    return (await response.json()) as T;
+export function loadExtractionReview(id: string, signal?: AbortSignal): Promise<ExtractionReview> {
+  const shared = reviews.get(`${cacheScope()}:${id}`, () => json(`/api/extractions/${id}/review`));
+  if (!signal) return shared;
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(new DOMException("Aborted", "AbortError"));
+    if (signal.aborted) { abort(); return; }
+    signal.addEventListener("abort", abort, { once: true });
+    void shared.then(value => { if (!signal.aborted) resolve(value); }, reject)
+      .finally(() => signal.removeEventListener("abort", abort));
   });
 }
-
-/**
- * The review response is immutable for a completed run, so it is safe to share a request
- * started by a link hover with the detail route reached by the subsequent click.
- */
-export function loadExtractionReview(
-  extractionRunId: string,
-  signal?: AbortSignal,
-): Promise<ExtractionReview> {
-  const existing = reviews.get(extractionRunId);
-  if (existing) return existing;
-
-  const request = requestJson<ExtractionReview>(
-    `/api/extractions/${extractionRunId}/review`,
-    signal,
-  );
-  reviews.set(extractionRunId, request);
-  void request.catch(() => reviews.delete(extractionRunId));
-  return request;
+export function invalidateDocumentReviews(documentId?: string) {
+  if (documentId) documentRuns.delete(`${cacheScope()}:${documentId}`);
+  else documentRuns.clear();
+  reviews.clear();
 }
-
-export function prefetchExtractionReview(extractionRunId: string): void {
-  void loadExtractionReview(extractionRunId);
+function speculate(task: () => Promise<unknown>) {
+  if (!canPrefetch() || speculative >= 2) return;
+  speculative++;
+  void task().catch(() => undefined).finally(() => { speculative--; });
 }
-
-/** Warm the latest completed extraction visible from a document-registry row. */
-export function prefetchDocumentExtractionReview(documentId: string): void {
-  let runs = documentRuns.get(documentId);
-  if (!runs) {
-    runs = requestJson<unknown>(`/api/documents/${documentId}/extraction-runs`).then((payload) =>
-      Array.isArray(payload) ? payload.filter(isExtractionRunSummary) : [],
-    );
-    documentRuns.set(documentId, runs);
-    void runs.catch(() => documentRuns.delete(documentId));
-  }
-  void runs
-    .then((history) => {
-      const latest = history.find((run) => run.status === "EXTRACTED");
-      if (latest) prefetchExtractionReview(latest.extraction_run_id);
-    })
-    .catch(() => undefined);
-}
-
-function isExtractionRunSummary(value: unknown): value is ExtractionRunSummary {
-  if (!value || typeof value !== "object") return false;
-  const run = value as Partial<ExtractionRunSummary>;
-  return (
-    typeof run.extraction_run_id === "string" &&
-    (run.status === "RUNNING" || run.status === "EXTRACTED" || run.status === "FAILED")
-  );
+export function prefetchExtractionReview(id: string) { speculate(() => loadExtractionReview(id)); }
+export function prefetchDocumentExtractionReview(documentId: string) {
+  speculate(async () => {
+    const history = await documentRuns.get(`${cacheScope()}:${documentId}`, async () => {
+      const payload = await json<unknown>(`/api/documents/${documentId}/extraction-runs`);
+      return Array.isArray(payload) ? payload as Run[] : [];
+    });
+    const latest = history.find(run => run.status === "EXTRACTED");
+    if (latest) await loadExtractionReview(latest.extraction_run_id);
+  });
 }

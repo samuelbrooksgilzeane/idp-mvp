@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { setCacheScope } from "./lib/requestCache";
+import { invalidateDocumentReviews } from "./lib/extractionReviewPrefetch";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 
 import { WorkflowHeader } from "./components/WorkflowHeader";
-import { DocumentDetailPage } from "./pages/DocumentDetailPage";
+const DocumentDetailPage = lazy(() => import("./pages/DocumentDetailPage").then(module => ({ default: module.DocumentDetailPage })));
 import { DocumentsPage } from "./pages/DocumentsPage";
-import { ResultDetailPage } from "./pages/ResultDetailPage";
+const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(module => ({ default: module.ResultDetailPage })));
 import { ResultsPage } from "./pages/ResultsPage";
-import { SchemaPage } from "./pages/SchemaPage";
+const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useDocumentPage } from "./hooks/useDocumentPage";
 import type { HealthResponse } from "./types";
@@ -55,6 +57,8 @@ const HEADINGS: Record<string, { eyebrow: string; title: string; blurb: string }
 
 export function App() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
+  const [scope, setScope] = useState("initial");
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
@@ -83,7 +87,28 @@ export function App() {
     await loadCaseIds();
   }, [isRegistryRoute, loadCaseIds, refreshRegistry]);
 
-  const upload = useUploadBatch(() => { void refreshDocuments(); });
+  const upload = useUploadBatch(() => {
+    if (refreshTimer.current) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null; invalidateDocumentReviews(); void refreshDocuments();
+    }, 750);
+  });
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
+  useEffect(() => {
+    let active = true;
+    const updateScope = () => {
+      void fetch("/api/upload-batches/limits").then(response => {
+        if (!response.ok) { setCacheScope("signed-out"); setScope("signed-out"); throw new Error("Unavailable"); }
+        return response.json();
+      }).then(value => {
+        if (active && typeof value.cache_scope === "string") {
+          setCacheScope(value.cache_scope); setScope(value.cache_scope);
+        }
+      }).catch(() => undefined);
+    };
+    updateScope(); window.addEventListener("focus", updateScope);
+    return () => { active = false; window.removeEventListener("focus", updateScope); };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -135,7 +160,8 @@ export function App() {
           </dl>
         </section>
 
-        <Routes>
+        <Suspense fallback={<div className="results-state" role="status">Loading view…</div>}>
+        <Routes key={scope}>
           <Route
             path="/"
             element={
@@ -157,7 +183,8 @@ export function App() {
                 onPrevious={() => registry.changeCursor(registry.previousCursor ?? "")}
                 onNext={() => registry.changeCursor(registry.nextCursor ?? "")}
                 onReset={() => registry.changeCursor("")}
-                selectionScope={appName}
+                selectionScope={scope}
+                nextCursor={registry.nextCursor}
                 onDocumentsChanged={refreshDocuments}
               />
             }
@@ -170,6 +197,7 @@ export function App() {
           <Route path="/results/:runId" element={<ResultDetailPage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
+        </Suspense>
       </main>
       <footer>
         <span>Retained parser contract 2.0</span>

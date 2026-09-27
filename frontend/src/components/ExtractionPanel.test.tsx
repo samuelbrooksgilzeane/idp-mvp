@@ -288,7 +288,7 @@ describe("ExtractionPanel", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/extractions/${latestRunId}/review`,
-      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      undefined,
     );
   });
 
