@@ -33,3 +33,6 @@ client-documents/
 .DS_Store
 .idea/
 .vscode/
+
+# Per-workspace Genie exports; may contain user-curated instructions or sample values.
+databricks_etl/resources/genie.generated.yml

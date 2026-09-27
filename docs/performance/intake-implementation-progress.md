@@ -427,3 +427,13 @@ Authenticated checks: `/api/health` 200 in Databricks mode, `/api/app-config` 20
 were issued. This is an app-only deployment: migrations, new Job definitions and feature activation
 remain pending. Automatic preparation, bulk extraction/export, viewer projections and Genie remain
 off. Bulk intake still requires its prepared table migration/grants before upload testing.
+
+## Revised project Genie lifecycle
+
+User approved empty structured sources, whole existing source-volume scope, and preservation of
+Databricks user curation. With no supported attachment/indexing management contract found, user
+approved manual workspace setup for those capabilities and preparation of the native direct-engine
+migration. Added an opt-in overlay generator with exported definition/ETag preservation and native
+resource-to-App ID wiring. Thirteen focused tests, local config validation and real bundle validate/
+plan pass. Plan adds 3, updates 4, deletes 0; unapplied. No Genie creation, indexing or redeployment
+performed. See docs/GENIE_AUTOMATION_STATUS.md for deployment ordering and remaining verification.

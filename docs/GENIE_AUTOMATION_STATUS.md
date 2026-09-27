@@ -47,3 +47,52 @@ Sources inspected 2026-09-27:
 - https://docs.databricks.com/aws/en/genie-agents/volumes
 - https://docs.databricks.com/aws/en/volumes/content-search
 - https://docs.databricks.com/aws/en/genie-agents/embed
+
+## Native migration preparation (approved option 1)
+
+`scripts/prepare_genie_bundle.py` now writes an ignored `resources/genie.generated.yml` overlay.
+It opts into the direct engine, adds a protected `project_genie` resource, and wires its bundle ID
+and workspace host into the existing App environment variables. The ordinary checked-in bundle
+stays unchanged until this explicit preparation step. Only one provisioning owner may be used:
+once native management is adopted, do not use `provision_genie.py --apply` for this same space.
+
+First creation, from repository root:
+
+```sh
+uv run --project backend python scripts/prepare_genie_bundle.py --new-space --host https://YOUR-WORKSPACE
+```
+
+Then, from `databricks_etl`, use the same profile, target and project variables for `bundle validate`
+and `bundle plan`. Review the full migration, especially existing App/Job IDs, grants, and any
+replacement/deletion actions before `bundle deploy`. Do not force migration or bypass plan checks.
+After deployment, record the resource ID from bundle summary and remove the generated overlay.
+Never reuse a first-create overlay for a later deployment: it contains the empty initial definition.
+
+For every later plan/deploy, export current human curation afresh:
+
+```sh
+uv run --project backend python scripts/prepare_genie_bundle.py --space-id SPACE_ID --profile PROFILE --host https://YOUR-WORKSPACE
+```
+
+Use the ID already managed by `project_genie` in the selected target's bundle state. For a space
+previously managed by the old script, explicitly bind `project_genie` to that existing ID before
+planning, rather than creating a duplicate. The generated overlay includes the current ETag and
+exact serialized definition; a concurrent edit must cause conflict, not a blind overwrite. Confirm
+this behavior in the target workspace before routine automated releases. Preparation removes stale
+output before authentication, so a failed export leaves no old overlay to deploy accidentally.
+
+The generated resource does not set broad permissions. Configure intended users/groups explicitly.
+Set `genie_embed_url` to the official Share → Embed space URL, after allowing the specific app
+origin. Without that URL, the app provides the native open-in-Databricks fallback. Run the App via
+the bundle so resource substitutions reach its environment; the standalone app.yaml remains off.
+
+Volume attachment and content-search activation remain manual Databricks workspace tasks under
+the approved revised scope. No in-app source editor or fake automation toggle was added.
+
+Validation checkpoint (2026-09-27): installed CLI 1.14.1 accepted the generated native overlay.
+Read-only bundle plan: create project_genie, results_exporter, work_dispatcher; update idp_app,
+document_extractor, document_parser, governed_data_bootstrap. Totals: 3 add, 4 change, 0 delete.
+No plan was applied. Removed the temporary first-create overlay after review to prevent accidental
+reuse. The existing frontend sync warning remains a CLI pattern warning; full local configuration
+validation passes. Thirteen focused Genie tests pass. This is preparation evidence, not server-side
+empty-space creation, iframe behavior or successful preservation under a concurrent workspace edit.
