@@ -401,3 +401,12 @@ Curated SQL, actual Genie definition acceptance, user grants and embedding remai
 No migration, space creation, SQL query, upload, indexing or AI inference was run for this stage.
 Earlier implementation branches were pushed to origin in this session; stage 6 is being pushed
 at its logical checkpoints. Code completion does not imply workspace activation.
+
+## Stage 7 — initial release tooling and authenticated smoke
+
+Added a three-read, fail-fast metadata smoke script and release-evidence ledger. Two local
+smoke-tool tests pass. After user-requested OAuth refresh, all three workspace metadata reads
+passed: warehouse STOPPED, first page lists two Genie spaces and one App. Zero SQL statements,
+Job submissions or AI requests. This confirms authentication/resource visibility only, not Genie
+volume preview availability, view SQL acceptance or deployed feature behavior. Stage 6 and initial
+stage 7 checkpoints are pushed; scale measurements and workspace activation remain outstanding.

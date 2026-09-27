@@ -7,7 +7,7 @@ Free Edition is not being used for bulk uploads, repeated inference or indexing.
 | --- | --- | --- |
 | Stages 1–5 local regression | Prior checkpoint: 109 backend / 73 frontend tests passed | Workspace migrations, permissions and small workflow test |
 | Stage 6 Genie local checks | 23 backend / 77 frontend tests; type/lint/build checks passed | SQL view acceptance, API provisioning, user grants and iframe |
-| Metadata smoke | Attempt blocked by CLI authentication; browser redirects to sign-in | Refresh login and run the bounded script once |
+| Metadata smoke | Passed after OAuth refresh: warehouse STOPPED, 2 Genie spaces, 1 App; zero SQL/jobs/AI | Actual feature activation remains unverified |
 | Bundle packaging | Full local configuration validator fails missing sync.include contract | Resolve and inspect actual synced production assets before deployment |
 | Synthetic export scale | Existing writer correctness tests; no performance measurement recorded | Local retained-fixture benchmark with memory/disk tracking |
 | Navigation p50/p95 | No browser performance measurement recorded | Warm versus cold API, network, image decode and render timing |
@@ -16,7 +16,7 @@ Free Edition is not being used for bulk uploads, repeated inference or indexing.
 
 ## Next steps in order
 
-1. Refresh `idp-mvp` OAuth. Run metadata-only smoke once from the repository root:
+1. Metadata smoke passed after refreshing `idp-mvp` OAuth. For a later explicit recheck, run once from the repository root:
 
    ```sh
    uv run --project backend python scripts/workspace_smoke.py --profile idp-mvp --host https://dbc-97e4a372-40b1.cloud.databricks.com --warehouse 647704f77f24020a
