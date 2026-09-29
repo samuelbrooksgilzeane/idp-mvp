@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import pymupdf
+import pytest
 from fastapi.testclient import TestClient
 
 from idp_app.core.config import Settings
@@ -66,7 +67,10 @@ def test_page_metadata_elements_and_image_stream_are_document_scoped(
             "page_number": 1,
             "element_count": 1,
             "element_types": ["text"],
-            "image_url": f"/api/documents/{document_id}/pages/0/image?parse_run_id={run['parse_run_id']}",
+            "image_url": (
+                f"/api/documents/{document_id}/pages/0/image"
+                f"?parse_run_id={run['parse_run_id']}"
+            ),
         }
     ]
     assert "/Volumes/" not in pages_response.text
@@ -245,6 +249,7 @@ def test_projection_reads_avoid_retained_parse_and_preserve_multi_page_boxes(
     tmp_path: Path,
 ) -> None:
     from dataclasses import replace
+
     from idp_app.services.viewer_projection import ViewerProjection, project
 
     client, settings = _client(tmp_path)
@@ -296,3 +301,41 @@ def test_old_run_fallback_reads_retained_parse_once(tmp_path: Path) -> None:
         ).status_code
         == 200
     )
+
+
+@pytest.mark.parametrize("projected", [False, True])
+def test_viewer_uses_retained_parse_when_registry_status_is_stale(tmp_path: Path, projected):
+    client, settings = _client(tmp_path)
+    document, run = _upload_and_parse(client, _pdf_bytes(), "retained.pdf")
+    settings.viewer_projection_enabled = projected
+    with sqlite3.connect(settings.local_data_dir / "registry.sqlite3") as connection:
+        connection.execute(
+            "UPDATE documents SET status = 'UPLOADED' WHERE document_id = ?",
+            (document["document_id"],),
+        )
+    path = f"/api/documents/{document['document_id']}"
+    for params in ({}, {"parse_run_id": run["parse_run_id"]}):
+        response = client.get(f"{path}/viewer", params=params)
+        assert response.status_code == 200
+        assert response.json()["parse_run_id"] == run["parse_run_id"]
+        page = response.json()["pages"][0]
+        assert client.get(page["image_url"]).status_code == 200
+        assert client.get(f"{path}/elements", params={**params, "page_id": 0}).status_code == 200
+
+
+@pytest.mark.parametrize("projected", [False, True])
+def test_deleted_document_cannot_reuse_cached_or_projected_viewer(tmp_path: Path, projected):
+    client, settings = _client(tmp_path)
+    document, run = _upload_and_parse(client, _pdf_bytes(), "deleted.pdf")
+    settings.viewer_projection_enabled = projected
+    path = f"/api/documents/{document['document_id']}"
+    warmed = client.get(f"{path}/viewer")
+    assert warmed.status_code == 200
+    image_url = warmed.json()["pages"][0]["image_url"]
+    assert client.get(image_url).status_code == 200
+    assert client.delete(path).status_code == 204
+    for params in ({}, {"parse_run_id": run["parse_run_id"]}):
+        for endpoint in ("viewer", "pages", "elements", "pages/0/image"):
+            response = client.get(f"{path}/{endpoint}", params={**params, "page_id": 0})
+            assert response.status_code == 404
+            assert response.json()["error"]["code"] == "DOCUMENT_NOT_FOUND"

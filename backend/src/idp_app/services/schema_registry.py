@@ -316,12 +316,8 @@ class DatabricksSchemaRepository:
         return int(value) if value is not None else 0
 
     def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
-        existing = self.get(manifest.schema_id, manifest.schema_version)
-        if existing is not None and existing.status != "DRAFT":
-            raise SchemaNotDraftError(
-                f"Schema {manifest.schema_id} version {manifest.schema_version} "
-                f"is {existing.status}, not DRAFT"
-            )
+        # The MERGE guards draft-only writes atomically; a preliminary SELECT adds
+        # latency without protecting against a concurrent publish.
         values = dict(
             zip(
                 SCHEMA_COLUMNS,
@@ -346,6 +342,11 @@ class DatabricksSchemaRepository:
         saved = self.get(manifest.schema_id, manifest.schema_version)
         if saved is None:
             raise RuntimeError("Draft schema save did not produce a readable row")
+        if saved.status != "DRAFT":
+            raise SchemaNotDraftError(
+                f"Schema {manifest.schema_id} version {manifest.schema_version} "
+                f"is {saved.status}, not DRAFT"
+            )
         return saved
 
     def publish(self, schema_id: str, schema_version: int) -> SchemaRecord:

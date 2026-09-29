@@ -233,3 +233,35 @@ def test_polling_failure_marks_run_and_document_failed(tmp_path: Path) -> None:
         "error_message": "Databricks task failed"
     }
     assert registry.get(document.document_id).status == "PARSE_FAILED"  # type: ignore[union-attr]
+
+
+def test_terminal_parse_and_document_are_visible_together_before_projection(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from threading import Event
+
+    from idp_app.services.viewer_projection import ViewerProjection
+
+    client, settings = _client(tmp_path)
+    uploaded = _upload(client, _pdf_bytes())
+    database = settings.local_data_dir / "registry.sqlite3"
+    registry = SQLiteDocumentRegistry(database)
+    runs = SQLiteParseRunRepository(database)
+    observed = []
+    projected = Event()
+    original = ViewerProjection.build
+
+    def inspect_before_projection(self, run):
+        # This callback runs after the retained-result transaction commits but before
+        # the worker returns; it deterministically probes the former race window.
+        observed.append((runs.get(run.parse_run_id).status,
+                         registry.get(run.document_id).status))
+        projected.set()
+        return original(self, run)
+
+    monkeypatch.setattr(ViewerProjection, "build", inspect_before_projection)
+    started = client.post(f"/api/documents/{uploaded['document_id']}/parse")
+    assert started.status_code == 202
+    assert projected.wait(5), "Parser did not reach projection"
+    assert observed == [("SUCCESS", "PARSED")]
+    assert _wait_for_terminal(client, started.json()["parse_run_id"])["status"] == "SUCCESS"

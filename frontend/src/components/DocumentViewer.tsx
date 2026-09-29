@@ -100,14 +100,8 @@ export function DocumentViewer({
     setNaturalSize({ width: 0, height: 0 });
     setRenderedSize({ width: 0, height: 0 });
 
-    if (documentStatus === "UPLOADED") {
-      setViewer({
-        kind: "empty",
-        message: "Parse this document to inspect its pages and detected elements.",
-      });
-      return () => controller.abort();
-    }
-
+    // Workflow status can lag retained parse history (including historical extraction
+    // evidence). Let the authenticated viewer endpoint determine availability.
     setViewer({ kind: "loading" });
     const query = parseRunId ? `?parse_run_id=${encodeURIComponent(parseRunId)}` : "";
     fetch(`/api/documents/${documentId}/viewer${query}`, { signal: controller.signal })

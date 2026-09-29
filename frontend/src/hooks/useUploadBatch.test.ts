@@ -19,7 +19,12 @@ function server(upload: (id: string, items: UploadItem[]) => Promise<Response>) 
     }
     if (url === "/api/documents") return upload((init!.body as FormData).get("client_file_id") as string, items);
     if (url.endsWith("/transport-failure")) return reply({});
-    if (url.includes("/items?")) return reply({ items, next_cursor: null });
+    if (url.includes("/items?")) {
+      const params = new URL(url, "https://local.test").searchParams;
+      const start = Number(params.get("cursor")) + 1;
+      const page = items.slice(start, start + Number(params.get("limit")));
+      return reply({ items: page, next_cursor: start + page.length < items.length ? String(start + page.length - 1) : null });
+    }
     return reply(items.find((item) => url.endsWith(item.client_file_id)));
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -33,6 +38,56 @@ function finish(id: string, items: UploadItem[]) {
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("durable upload transfers", () => {
+  it("enforces the deployed file-count limit before creating a manifest", async () => {
+    const fetchMock = vi.fn(async () => reply({ max_files: 2, max_file_bytes: 1024 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const manager = new UploadTransferManager();
+    await manager.restore();
+    await manager.start({ files: [file("a.pdf"), file("b.pdf"), file("c.pdf")], caseId: "" });
+    expect(manager.getSnapshot().maxFiles).toBe(2);
+    expect(manager.getSnapshot().maxFileBytes).toBe(1024);
+    expect(manager.getSnapshot().error).toBe("Select between 1 and 2 PDFs.");
+    expect(manager.getSnapshot().batch).toBeNull();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock).toHaveBeenCalledWith("/api/upload-batches/limits");
+  });
+
+  it("accounts for 1,000 synthetic files across ten progress pages with three transfers maximum", async () => {
+    let active = 0; let peak = 0;
+    const { fetchMock } = server(async (id, items) => {
+      active++; peak = Math.max(peak, active);
+      await Promise.resolve();
+      active--;
+      return finish(id, items);
+    });
+    const manager = new UploadTransferManager();
+    await manager.start({ files: Array.from({ length: 1000 }, (_, i) => file(`${i}.pdf`)), caseId: "synthetic" });
+    expect(peak).toBe(3);
+    expect(manager.getSnapshot().error).toBeNull();
+    const items = manager.getSnapshot().batch!.items;
+    expect(items).toHaveLength(1000);
+    expect(new Set(items.map((item) => item.document_id)).size).toBe(1000);
+    expect(items.every((item) => item.state === "REGISTERED")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(1000);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/items?"))).toHaveLength(10);
+    const restored = new UploadTransferManager();
+    await restored.restore();
+    expect(restored.getSnapshot().batch!.items).toHaveLength(1000);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(1000);
+  });
+
+  it("stops a repeated pagination cursor without discarding saved outcomes", async () => {
+    server(async (id, items) => finish(id, items));
+    const manager = new UploadTransferManager();
+    await manager.start({ files: [file("one.pdf")], caseId: "" });
+    const saved = manager.getSnapshot().batch;
+    const fetchMock = vi.fn(async () => reply({ items: [], next_cursor: "-1" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(manager.refresh()).rejects.toThrow("pagination did not advance");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(manager.getSnapshot().batch).toBe(saved);
+  });
+
   it("keeps at most three one-file transfers active and invalidates once", async () => {
     const pending: (() => void)[] = [];
     let active = 0; let peak = 0;

@@ -15,7 +15,7 @@
 # startup. Both have happened, hence the complete configuration below.
 #
 # These values are deployment-specific but not secret -- the same ones are recorded in
-# docs/PROJECT_CONTEXT.md under "Trusted dev variables" -- and no token or credential belongs
+# docs/archive/PROJECT_CONTEXT.md under "Trusted dev variables" -- and no token or credential belongs
 # in this file. `scripts/validate_configuration.py` builds a real Settings object out of this
 # env block, so an edit that would leave the App unable to boot fails `make check`.
 #

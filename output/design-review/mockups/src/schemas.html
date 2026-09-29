@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Schemas</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .grid { display: grid; grid-template-columns: 320px 1fr; gap: 16px; align-items: start; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .sc { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .sc.on { border-color: var(--accent-line); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .sc .t { display: flex; justify-content: space-between; align-items: center; }
+  .sc b { font-weight: 600; }
+  .sc .m { display: flex; gap: 12px; color: var(--faint); font-size: 12px; }
+  .detail { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  .dhead { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .dhead h2 { font-size: 18px; display: flex; align-items: center; gap: 10px; }
+  .ver { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border: 1px solid var(--border-2); border-radius: 7px; font: 500 12px var(--mono); color: var(--text-2); }
+  .ft td { padding: 9px 20px; }
+  .ft th { padding: 9px 20px; }
+  .ft .grp td { background: var(--panel-2); font-weight: 600; }
+  .ft .child td:first-child { padding-left: 42px; }
+  .ft code { font: 12.5px var(--mono); color: var(--text); }
+  .type { font: 500 11.5px var(--mono); padding: 1px 6px; border-radius: 4px; }
+  .type.text { color: var(--blue); background: var(--blue-soft); }
+  .type.dec { color: var(--amber); background: var(--amber-soft); }
+  .type.date { color: var(--violet); background: var(--violet-soft); }
+  .type.grp { color: var(--accent); background: var(--accent-soft); }
+  .section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .versions { display: flex; gap: 8px; }
+  .versions span { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; color: var(--muted); }
+  .versions span.cur { border-color: var(--accent-line); color: var(--text); }
+  .ta { border: 1px solid var(--border-2); border-radius: 8px; background: var(--panel-2); padding: 10px 12px; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
+  .editor { padding: 0 20px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .er { display: grid; grid-template-columns: 16px 200px 150px 1fr 28px; gap: 8px; align-items: center; }
+  .er .h { color: var(--faint); cursor: grab; }
+  .er .in { height: 32px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-2); display: flex; align-items: center; padding: 0 10px; color: var(--text-2); font-size: 12.5px; justify-content: space-between; white-space: nowrap; overflow: hidden; }
+  .er .in.mono { font-family: var(--mono); color: var(--text); }
+  .er.new .in { border-color: var(--accent-line); }
+  .er .x { color: var(--faint); display: grid; place-items: center; }
+  .nest { margin-left: 24px; padding-left: 14px; border-left: 1px dashed var(--border-2); display: flex; flex-direction: column; gap: 6px; }
+  .addf { display: inline-flex; gap: 6px; align-items: center; color: var(--accent); font-size: 12.5px; font-weight: 500; padding: 4px 0; }
+  .choices { display: flex; gap: 4px; }
+  .choices span { height: 20px; padding: 0 7px; border-radius: 5px; background: var(--panel); border: 1px solid var(--border-2); font-size: 11.5px; display: inline-flex; align-items: center; color: var(--text-2); }
+  .newtag { font: 500 10.5px var(--sans); color: var(--accent); background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body data-page="schemas" data-crumbs="Invoices 2026 / Schemas">
+<div class="glow"></div>
+<div class="page-head">
+  <div>
+    <h1>Schemas</h1>
+    <p class="sub">A schema lists the fields to pull out of a document. Pick one when you extract.</p>
+  </div>
+  <div class="actions"><button class="btn primary"><i data-i="plus" class="sm"></i>New schema</button></div>
+</div>
+
+<div class="grid">
+  <div class="list">
+    <div class="input" style="width:100%;color:var(--faint);margin-bottom:4px"><i data-i="search" class="sm"></i>Search schemas</div>
+    <div class="sc on"><div class="t"><b>Invoice</b><span class="pill done" style="height:20px;font-size:11.5px">v4 · Published</span></div><div class="muted" style="font-size:12.5px">Invoices with header totals and billed line items.</div><div class="m"><span>10 fields</span><span>Used on 71 docs</span><span>Updated 2d ago</span></div></div>
+    <div class="sc"><div class="t"><b>HUD 50080-TIHD Payment Voucher</b><span class="pill done" style="height:20px;font-size:11.5px">v1</span></div><div class="m"><span>14 fields</span><span>6 docs</span></div></div>
+    <div class="sc"><div class="t"><b>HUD 90052 Closing Worksheet</b><span class="pill done" style="height:20px;font-size:11.5px">v1</span></div><div class="m"><span>22 fields</span><span>2 docs</span></div></div>
+    <div class="sc"><div class="t"><b>OF 1017-G Journal Voucher</b><span class="pill done" style="height:20px;font-size:11.5px">v1</span></div><div class="m"><span>11 fields</span><span>0 docs</span></div></div>
+    <div class="sc"><div class="t"><b>Purchase order</b><span class="pill neutral" style="height:20px;font-size:11.5px">Draft</span></div><div class="m"><span>7 fields</span><span>Not published</span></div></div>
+  </div>
+
+  <div class="detail" id="view">
+    <div class="dhead">
+      <div>
+        <h2>Invoice <span class="ver">v4<i data-i="down" class="sm"></i></span><span class="pill done">Published</span></h2>
+        <p class="muted" style="margin:6px 0 0">Invoices with header totals and billed line items. One document can contain several invoices.</p>
+      </div>
+      <div class="actions"><button class="btn"><i data-i="copy" class="sm"></i>Duplicate as new schema</button><button class="btn primary"><i data-i="pencil" class="sm"></i>Edit</button></div>
+    </div>
+    <div class="section" style="padding-bottom:14px">
+      <div class="callout info"><i data-i="lock"></i><div><b style="font-size:12.5px">Published versions are locked so past results stay reproducible</b><p><b style="color:var(--text-2);font-weight:500">Edit</b> creates a draft <span class="mono">v5</span>. Your changes apply to new extractions once you publish it — existing results keep v4.</p></div></div>
+    </div>
+    <table class="ft">
+      <thead><tr><th>Field</th><th>Type</th><th>What to extract</th><th>Required <span class="faint" style="font-weight:400">(policy)</span></th></tr></thead>
+      <tbody>
+        <tr class="grp"><td><code>invoices</code></td><td><span class="type grp">repeating group</span></td><td class="muted" style="font-weight:400">Each invoice in the document, in order</td><td></td></tr>
+        <tr class="child"><td><code>invoice_number</code></td><td><span class="type text">text</span></td><td class="muted">Invoice identifier exactly as stated by the seller</td><td><i data-i="check" class="sm" style="color:var(--accent)"></i></td></tr>
+        <tr class="child"><td><code>invoice_date</code></td><td><span class="type text">text</span></td><td class="muted">Issue date as stated on the invoice</td><td><i data-i="check" class="sm" style="color:var(--accent)"></i></td></tr>
+        <tr class="child"><td><code>seller_name</code></td><td><span class="type text">text</span></td><td class="muted">Legal or trading name of the seller</td><td><i data-i="check" class="sm" style="color:var(--accent)"></i></td></tr>
+        <tr class="child"><td><code>subtotal</code></td><td><span class="type dec">decimal</span></td><td class="muted">Subtotal before discounts and tax</td><td class="faint">—</td></tr>
+        <tr class="child"><td><code>discount</code></td><td><span class="type dec">decimal</span></td><td class="muted">Discount stated on the invoice</td><td class="faint">—</td></tr>
+        <tr class="child"><td><code>tax</code></td><td><span class="type dec">decimal</span></td><td class="muted">Total tax stated on the invoice</td><td class="faint">—</td></tr>
+        <tr class="child"><td><code>total</code></td><td><span class="type dec">decimal</span></td><td class="muted">Final total payable</td><td><i data-i="check" class="sm" style="color:var(--accent)"></i></td></tr>
+        <tr class="child"><td><code>currency</code></td><td><span class="type text">text</span></td><td class="muted">Currency code or name stated for the amounts</td><td class="faint">—</td></tr>
+        <tr class="grp child"><td><code>line_items</code></td><td><span class="type grp">repeating group</span></td><td class="muted" style="font-weight:400">Each billed line, in stated order · 5 fields</td><td></td></tr>
+      </tbody>
+    </table>
+    <div class="section" style="border-top:1px solid var(--border);border-bottom:0;display:flex;justify-content:space-between;align-items:center">
+      <div class="versions"><span class="cur"><span class="pill done nodot" style="height:18px;font-size:11px;padding:0 6px">current</span>v4 · 27 Sep</span><span>v3 · 12 Sep</span><span>v2 · 2 Sep</span><span>v1 · 28 Aug</span></div>
+      <span class="muted" style="display:flex;gap:6px;align-items:center;font-size:12.5px">Extraction instructions<i data-i="down" class="sm"></i></span>
+    </div>
+  </div>
+
+  <div class="detail" id="edit" hidden>
+    <div class="dhead">
+      <div>
+        <h2>Invoice <span class="ver">v5<i data-i="down" class="sm"></i></span><span class="pill processing nodot">Draft · unsaved changes</span></h2>
+        <p class="muted" style="margin:6px 0 0;white-space:nowrap;font-size:12.5px">Copy of v4 <span class="faint">·</span> <span class="mono faint">12/256 fields · depth 3/12</span></p>
+      </div>
+      <div class="actions" style="flex-wrap:wrap;justify-content:flex-end"><button class="btn ghost">Discard</button><button class="btn"><i data-i="check" class="sm"></i>Check schema</button><button class="btn">Save draft</button><button class="btn primary">Publish v5</button></div>
+    </div>
+    <div class="section" style="padding-bottom:14px">
+      <div class="callout info"><i data-i="info"></i><div><b style="font-size:12.5px">v4 stays live until you publish</b><p>Extractions keep using v4. Publishing v5 locks it and makes it the default for new extractions.</p></div></div>
+    </div>
+    <div class="section">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px"><h3>Extraction instructions</h3><span class="faint" style="font-size:12px">Tells the model how to read the document</span></div>
+      <div class="ta">Extract only values explicitly stated in the source invoice. Do not infer, calculate, reconcile, or populate a missing value. A single document may contain more than one invoice: return every invoice it contains as a separate item, in the order they appear…</div>
+    </div>
+    <div class="section" style="border-bottom:0;padding-bottom:6px"><div style="display:flex;justify-content:space-between;align-items:center"><h3>Fields</h3><span class="callout" style="padding:4px 10px;border-radius:8px;border-color:color-mix(in srgb,var(--success) 35%,var(--border));font-size:12px;color:var(--success);gap:6px;align-items:center"><i data-i="check" class="sm"></i>Schema is valid</span></div></div>
+    <div class="editor" id="rows"></div>
+    <div class="section" style="border-top:1px solid var(--border);border-bottom:0;display:flex;justify-content:space-between;align-items:center">
+      <span class="muted" style="display:flex;gap:6px;align-items:center;font-size:12.5px"><i data-i="braces" class="sm"></i>Advanced: edit as JSON<i data-i="down" class="sm"></i></span>
+      <span class="faint" style="font-size:12px">Draft saved 2 min ago</span>
+    </div>
+  </div>
+</div>
+<script>
+if (new URLSearchParams(location.search).get("state") === "edit") {
+  document.getElementById("view").hidden = true;
+  document.getElementById("edit").hidden = false;
+  const card = document.querySelector(".sc.on .pill");
+  card.className = "pill processing"; card.style.cssText = "height:20px;font-size:11.5px"; card.textContent = "v5 · Draft";
+  const row = (name, type, desc, o = {}) => `<div class="er ${o.cls || ""}"><span class="h">⋮⋮</span><div class="in mono">${name}${o.tag ? ' <span class="newtag">new</span>' : ""}</div><div class="in">${type}<i data-i="down" class="sm"></i></div><div class="in">${desc}</div><span class="x"><i data-i="x" class="sm"></i></span></div>`;
+  document.getElementById("rows").innerHTML = `
+    ${row("invoices", "Repeating group", "Each invoice contained in the document, in order")}
+    <div class="nest">
+      ${row("invoice_number", "Text", "Invoice identifier exactly as stated by the seller")}
+      ${row("invoice_date", "Text", "Issue date exactly as stated in the source")}
+      ${row("seller_name", "Text", "Legal or trading name of the seller")}
+      ${row("purchase_order", "Text", "Buyer's PO number, if stated", { cls: "new", tag: true })}
+      <div class="er new"><span class="h">⋮⋮</span><div class="in mono">payment_terms <span class="newtag">new</span></div><div class="in">Choice list<i data-i="down" class="sm"></i></div><div class="in"><span class="choices"><span>Net 30</span><span>Net 60</span><span>Due on receipt</span><span style="color:var(--faint)">+ add</span></span></div><span class="x"><i data-i="x" class="sm"></i></span></div>
+      ${row("total", "Decimal", "Final invoice total explicitly stated as payable")}
+      ${row("currency", "Text", "Currency code or name stated for the amounts")}
+      <div class="faint" style="font-size:12px;padding:2px 0 2px 24px">+ subtotal, discount, tax (collapsed)</div>
+      ${row("line_items", "Repeating group", "Each billed line exactly as stated · 5 fields")}
+      <span class="addf"><i data-i="plus" class="sm"></i>Add field to invoices</span>
+    </div>
+    <span class="addf"><i data-i="plus" class="sm"></i>Add top-level field</span>`;
+}
+</script>
+<script src="shell.js"></script>
+</body>
+</html>

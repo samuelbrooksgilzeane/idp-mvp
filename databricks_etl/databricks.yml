@@ -12,21 +12,21 @@ sync:
 
 variables:
   genie_enabled:
-    description: Genie display configuration; see docs/GENIE_SETUP.md
+    description: Genie display configuration; see docs/DEPLOYMENT_NOTES.md
     default: "false"
   genie_space_id:
-    description: Genie display configuration; see docs/GENIE_SETUP.md
+    description: Genie display configuration; see docs/DEPLOYMENT_NOTES.md
     default: ""
   genie_embed_url:
-    description: Genie display configuration; see docs/GENIE_SETUP.md
+    description: Genie display configuration; see docs/DEPLOYMENT_NOTES.md
     # Databricks Apps rejects an environment entry whose substituted value is empty.
     # Settings strips this placeholder to None until an official embed URL is configured.
     default: " "
   genie_workspace_origin:
-    description: Genie display configuration; see docs/GENIE_SETUP.md
+    description: Genie display configuration; see docs/DEPLOYMENT_NOTES.md
     default: ""
   genie_project_name:
-    description: Genie display configuration; see docs/GENIE_SETUP.md
+    description: Genie display configuration; see docs/DEPLOYMENT_NOTES.md
     default: "IDP project"
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.

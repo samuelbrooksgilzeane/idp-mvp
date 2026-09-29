@@ -4,6 +4,7 @@ TABLE_NAMES = (
     "documents",
     "upload_batches",
     "upload_items",
+    "work_batches",
     "work_items",
     "work_dispatches",
     "parsed_documents",

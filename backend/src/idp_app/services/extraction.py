@@ -233,7 +233,11 @@ class ExtractionService:
             if poll.state is not ExtractionJobState.RUNNING:
                 for run in runs:
                     refreshed = await run_in_threadpool(self._runs.get, run.extraction_run_id)
-                    if refreshed and refreshed.status == "RUNNING" and not refreshed.options.get("work_item_id"):
+                    if (
+                        refreshed
+                        and refreshed.status == "RUNNING"
+                        and not refreshed.options.get("work_item_id")
+                    ):
                         await self._fail_running(
                             refreshed, poll.message or "Extraction job failed."
                         )
@@ -299,7 +303,11 @@ class ExtractionService:
             await self._fail_running(run, poll.message or "Extraction job failed.")
         elif poll.state is ExtractionJobState.SUCCEEDED:
             refreshed = await run_in_threadpool(self._runs.get, run.extraction_run_id)
-            if refreshed and refreshed.status == "RUNNING" and not refreshed.options.get("work_item_id"):
+            if (
+                refreshed
+                and refreshed.status == "RUNNING"
+                and not refreshed.options.get("work_item_id")
+            ):
                 await self._fail_running(
                     refreshed,
                     "Extraction job completed without committing a terminal result.",

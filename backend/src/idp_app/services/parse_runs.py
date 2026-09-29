@@ -137,6 +137,8 @@ class SQLiteParseRunRepository:
         parsed: dict[str, Any],
         document_text: str,
         page_count: int,
+        *,
+        document_status: str | None = None,
     ) -> None:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -156,6 +158,8 @@ class SQLiteParseRunRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Parse run is not eligible for completion")
+            if document_status is not None:
+                self._finish_document(connection, parse_run_id, document_status)
 
         # Projection failure must never turn a successful parse into another AI attempt.
         try:
@@ -175,6 +179,8 @@ class SQLiteParseRunRepository:
         self,
         parse_run_id: str,
         parse_error: dict[str, Any] | list[Any],
+        *,
+        document_status: str | None = None,
     ) -> None:
         with self._connect() as connection:
             cursor = connection.execute(
@@ -191,6 +197,24 @@ class SQLiteParseRunRepository:
             )
             if cursor.rowcount != 1:
                 raise RuntimeError("Parse run is not eligible for failure completion")
+            if document_status is not None:
+                self._finish_document(connection, parse_run_id, document_status)
+
+    @staticmethod
+    def _finish_document(
+        connection: sqlite3.Connection, parse_run_id: str, status: str
+    ) -> None:
+        # Local workers publish both terminal states in the same transaction. Never
+        # overwrite a deletion or a newer attempt that now owns the document.
+        connection.execute(
+            "UPDATE documents SET status = ?, updated_at = ? "
+            "WHERE status = 'PARSING' AND document_id = "
+            "(SELECT document_id FROM parse_runs WHERE parse_run_id = ?) "
+            "AND NOT EXISTS (SELECT 1 FROM parse_runs newer "
+            "WHERE newer.document_id = documents.document_id "
+            "AND newer.parse_run_id <> ? AND newer.status IN ('QUEUED', 'RUNNING'))",
+            (status, datetime.now(UTC).isoformat(), parse_run_id, parse_run_id),
+        )
 
     def metadata(self, parse_run_id: str) -> ParseRunRecord | None:
         columns = ", ".join(

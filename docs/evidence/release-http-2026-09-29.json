@@ -1,0 +1,218 @@
+{
+  "date": "2026-09-29",
+  "warehouse_condition": "already running; first app request and repeats, not cold warehouse",
+  "measurements": [
+    {
+      "operation": "/api/health",
+      "status": 200,
+      "seconds": 0.676,
+      "bytes": 292,
+      "server_timing": "app;dur=1.1, request_id;dur=0;desc=\"297ecc5d-dcfb-48a6-be02-cb1e324dda4b\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=53"
+    },
+    {
+      "operation": "/api/upload-batches/limits",
+      "status": 200,
+      "seconds": 0.116,
+      "bytes": 199,
+      "server_timing": "app;dur=0.8, request_id;dur=0;desc=\"e8aca4e7-fea7-465f-a4d2-08c6d1e22d63\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6"
+    },
+    {
+      "operation": "/api/app-config",
+      "status": 200,
+      "seconds": 0.115,
+      "bytes": 523,
+      "server_timing": "app;dur=0.7, request_id;dur=0;desc=\"67e07854-8562-480b-9edc-b56c923e7388\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6"
+    },
+    {
+      "operation": "frontend_index",
+      "status": 200,
+      "seconds": 0.117,
+      "bytes": 442,
+      "server_timing": "app;dur=0.8, request_id;dur=0;desc=\"016a3680-c035-4bc8-8508-95daecf6acaa\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6"
+    },
+    {
+      "operation": "asset_index-BV33GSRk.css",
+      "status": 200,
+      "seconds": 0.338,
+      "bytes": 51490,
+      "server_timing": "app;dur=0.6, request_id;dur=0;desc=\"089bd62c-9e42-446b-9408-2095825f06bc\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=7"
+    },
+    {
+      "operation": "asset_index-BXilEIxo.js",
+      "status": 200,
+      "seconds": 0.45,
+      "bytes": 280101,
+      "server_timing": "app;dur=0.7, request_id;dur=0;desc=\"19ef7ff5-b56b-4370-ac3f-a8bcd6f09904\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=7"
+    },
+    {
+      "operation": "documents_1",
+      "status": 200,
+      "seconds": 1.862,
+      "bytes": 1646,
+      "server_timing": "app;dur=1676.1, sql;dur=1540.5;desc=\"1 statements\", request_id;dur=0;desc=\"f0fdaf25-44ad-4572-b61f-c5a5f0021593\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=1682"
+    },
+    {
+      "operation": "results_1",
+      "status": 200,
+      "seconds": 1.949,
+      "bytes": 6188,
+      "server_timing": "app;dur=1718.5, sql;dur=1630.2;desc=\"1 statements\", request_id;dur=0;desc=\"ed757408-84db-4f20-a81d-2b78d171c353\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=1724"
+    },
+    {
+      "operation": "schemas_1",
+      "status": 200,
+      "seconds": 1.015,
+      "bytes": 4351,
+      "server_timing": "app;dur=891.4, sql;dur=797.7;desc=\"1 statements\", request_id;dur=0;desc=\"f12af92c-d910-4aff-8185-e9e6cbc292ef\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=897"
+    },
+    {
+      "operation": "viewer_1",
+      "status": 200,
+      "seconds": 2.219,
+      "bytes": 339,
+      "server_timing": "app;dur=2097.5, sql;dur=2011.6;desc=\"3 statements\", request_id;dur=0;desc=\"64e1c803-df57-4ebe-932d-836f733c5110\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=2104"
+    },
+    {
+      "operation": "viewer_image_transfer",
+      "status": 200,
+      "seconds": 2.658,
+      "bytes": 522078,
+      "server_timing": "app;dur=1981.9, sql;dur=1552.1;desc=\"3 statements\", request_id;dur=0;desc=\"02069e04-3fe3-41d4-baf9-22ee8a797d9f\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=1988"
+    },
+    {
+      "operation": "documents_2",
+      "status": 200,
+      "seconds": 0.6,
+      "bytes": 1646,
+      "server_timing": "app;dur=472.1, sql;dur=470.9;desc=\"1 statements\", request_id;dur=0;desc=\"0de213df-cea3-4789-a2c7-fe7b2336920c\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=478"
+    },
+    {
+      "operation": "results_2",
+      "status": 200,
+      "seconds": 0.654,
+      "bytes": 6188,
+      "server_timing": "app;dur=529.4, sql;dur=528.2;desc=\"1 statements\", request_id;dur=0;desc=\"f8c1ecb1-17e0-4c5a-8cd8-b1c5748ed732\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=535"
+    },
+    {
+      "operation": "schemas_2",
+      "status": 200,
+      "seconds": 0.614,
+      "bytes": 4351,
+      "server_timing": "app;dur=496.1, sql;dur=494.1;desc=\"1 statements\", request_id;dur=0;desc=\"66990d88-f7f6-4777-a7b9-c1809d8afffa\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=501"
+    },
+    {
+      "operation": "viewer_2",
+      "status": 200,
+      "seconds": 1.578,
+      "bytes": 339,
+      "server_timing": "app;dur=1463.6, sql;dur=1462.1;desc=\"3 statements\", request_id;dur=0;desc=\"c30e6268-59c8-4f15-a022-849c2eb1ffea\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=1469"
+    },
+    {
+      "operation": "documents_3",
+      "status": 200,
+      "seconds": 0.572,
+      "bytes": 1646,
+      "server_timing": "app;dur=446.8, sql;dur=445.7;desc=\"1 statements\", request_id;dur=0;desc=\"f67a1811-b1b4-4271-8cd7-fd87287763ce\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=458"
+    },
+    {
+      "operation": "results_3",
+      "status": 200,
+      "seconds": 0.667,
+      "bytes": 6188,
+      "server_timing": "app;dur=549.5, sql;dur=548.3;desc=\"1 statements\", request_id;dur=0;desc=\"5d8a330e-fb37-4f7e-98e7-6750285e8f8a\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=555"
+    },
+    {
+      "operation": "schemas_3",
+      "status": 200,
+      "seconds": 0.617,
+      "bytes": 4351,
+      "server_timing": "app;dur=496.9, sql;dur=494.9;desc=\"1 statements\", request_id;dur=0;desc=\"6f88ad09-da97-4766-adff-3c961cd08196\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=502"
+    },
+    {
+      "operation": "viewer_3",
+      "status": 200,
+      "seconds": 1.602,
+      "bytes": 339,
+      "server_timing": "app;dur=1469.1, sql;dur=1467.6;desc=\"3 statements\", request_id;dur=0;desc=\"f66f0092-eb72-4a6b-a66b-b889cf0c5919\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=1476"
+    },
+    {
+      "operation": "create_1",
+      "status": 201,
+      "seconds": 5.542,
+      "bytes": 951,
+      "server_timing": "app;dur=5421.9, sql;dur=5418.6;desc=\"3 statements\", request_id;dur=0;desc=\"4b64df4e-71f5-44a0-80be-84930f1a02ab\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=5428"
+    },
+    {
+      "operation": "save_1_1",
+      "status": 200,
+      "seconds": 6.14,
+      "bytes": 936,
+      "server_timing": "app;dur=6021.7, sql;dur=6017.8;desc=\"3 statements\", request_id;dur=0;desc=\"492ddd04-f0f7-4ef2-b934-d4ded76c3877\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6029"
+    },
+    {
+      "operation": "save_1_2",
+      "status": 200,
+      "seconds": 6.278,
+      "bytes": 936,
+      "server_timing": "app;dur=6158.1, sql;dur=6156.3;desc=\"3 statements\", request_id;dur=0;desc=\"f666d37f-06e7-4975-984a-e260789dd66a\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6165"
+    },
+    {
+      "operation": "publish_1",
+      "status": 200,
+      "seconds": 6.167,
+      "bytes": 966,
+      "server_timing": "app;dur=6049.8, sql;dur=6048.3;desc=\"4 statements\", request_id;dur=0;desc=\"4508a808-81b0-4b90-aaf2-03a7f881767d\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6055"
+    },
+    {
+      "operation": "create_2",
+      "status": 201,
+      "seconds": 6.62,
+      "bytes": 951,
+      "server_timing": "app;dur=6499.0, sql;dur=6497.2;desc=\"3 statements\", request_id;dur=0;desc=\"574e1d11-d856-4e8a-b1dd-94d0fc0b0b2c\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=6505"
+    },
+    {
+      "operation": "save_2_1",
+      "status": 200,
+      "seconds": 5.348,
+      "bytes": 936,
+      "server_timing": "app;dur=5222.1, sql;dur=5220.2;desc=\"3 statements\", request_id;dur=0;desc=\"98a6308c-54b8-41db-987f-8e89ba08c466\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=5227"
+    },
+    {
+      "operation": "save_2_2",
+      "status": 200,
+      "seconds": 5.713,
+      "bytes": 936,
+      "server_timing": "app;dur=5586.9, sql;dur=5585.0;desc=\"3 statements\", request_id;dur=0;desc=\"ef0112c3-88a4-4bda-8e55-a7f75cbf1ca1\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=5593"
+    },
+    {
+      "operation": "publish_2",
+      "status": 200,
+      "seconds": 4.812,
+      "bytes": 966,
+      "server_timing": "app;dur=4692.9, sql;dur=4691.0;desc=\"4 statements\", request_id;dur=0;desc=\"922498ae-f361-4d7a-bf8f-19d9bea2bdad\", client_protocol;dur=0;desc=\"HTTP/1.1\", request_ttfb;dur=4699"
+    }
+  ],
+  "assets": [
+    {
+      "asset": "index-BV33GSRk.css",
+      "matches_local": true
+    },
+    {
+      "asset": "index-BXilEIxo.js",
+      "matches_local": true
+    }
+  ],
+  "disposable_schemas": [
+    {
+      "schema_id": "agent_release_measurement_20260929_1790720203_1",
+      "schema_version": 1
+    },
+    {
+      "schema_id": "agent_release_measurement_20260929_1790720227_2",
+      "schema_version": 1
+    }
+  ],
+  "uploads": 0,
+  "inference_calls": 0,
+  "browser_render_decode": "not measured"
+}

@@ -1,0 +1,181 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Document</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .back { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .back svg { transform: rotate(180deg); }
+  .dh { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px; }
+  .dh h1 { font-size: 20px; }
+  .meta { display: flex; gap: 14px; color: var(--muted); font-size: 12.5px; align-items: center; }
+  .meta .d { width: 3px; height: 3px; border-radius: 50%; background: var(--faint); }
+  .split { display: grid; grid-template-columns: 1fr 460px; gap: 16px; margin-top: 16px; }
+  .viewer { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+  .vbar { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .vbar .grp { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+  .sw { width: 28px; height: 16px; border-radius: 10px; background: var(--accent-fill); position: relative; }
+  .sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent-ink); }
+  .stage { height: 500px; overflow: hidden; background: repeating-linear-gradient(45deg, var(--panel-2) 0 10px, var(--panel) 10px 20px); display: flex; justify-content: center; padding: 22px 0; }
+  .page { position: relative; width: 560px; flex: none; align-self: flex-start; box-shadow: 0 10px 40px rgba(0,0,0,.45); border-radius: 3px; overflow: hidden; }
+  .page img { display: block; width: 100%; }
+  .box { position: absolute; border: 1px solid rgba(94,177,255,.55); background: rgba(94,177,255,.07); border-radius: 3px; }
+  .box.on { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
+  :root { --t-text: #5eb1ff; } [data-theme="blue"], [data-theme="navy"] { --t-text: #2dd4bf; }
+  .box.t-text { border-color: color-mix(in srgb, var(--t-text) 60%, transparent); background: color-mix(in srgb, var(--t-text) 7%, transparent); }
+  .box.t-table { border-color: rgba(245,181,68,.7); background: rgba(245,181,68,.06); }
+  .box.t-figure { border-color: rgba(255,122,182,.7); background: rgba(255,122,182,.07); }
+  .chips { display: flex; gap: 4px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 500; }
+  .chip.on { color: var(--text); background: var(--panel-2); border-color: var(--border-2); }
+  .chip i { width: 8px; height: 8px; border-radius: 2px; display: block; }
+  .chip b { font: 500 11px var(--mono); color: var(--faint); }
+  .inspector { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12.5px; }
+  .inspector .k { color: var(--faint); }
+  .box.warn { border-color: rgba(182,156,255,.9); background: rgba(182,156,255,.14); }
+  .box .lbl { position: absolute; top: 50%; transform: translateY(-50%); left: calc(100% + 8px); background: var(--accent-fill); color: var(--accent-ink); font: 600 10.5px var(--sans); padding: 2px 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; }
+  .panel { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); display: flex; flex-direction: column; }
+  .panel .tabs { padding: 0 8px; }
+  .fields { padding: 6px 0; }
+  .f { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 16px; border-left: 2px solid transparent; }
+  .f.on { background: var(--accent-soft); border-left-color: var(--accent); }
+  .f small { color: var(--faint); font-size: 11.5px; }
+  .f .v { font-weight: 500; }
+  .f .v.warn { color: var(--violet); }
+  .f .r { grid-row: 1 / 3; grid-column: 2; display: flex; gap: 8px; align-items: center; }
+  .conf { display: flex; align-items: center; gap: 6px; font: 500 11.5px var(--mono); color: var(--muted); }
+  .conf i { width: 34px; height: 4px; background: var(--border-2); border-radius: 3px; overflow: hidden; display: block; }
+  .conf i b { display: block; height: 100%; background: var(--accent); }
+  .conf.low i b { background: var(--amber); }
+  .cite { font: 500 11px var(--mono); color: var(--muted); border: 1px solid var(--border-2); border-radius: 4px; padding: 0 5px; }
+  .panel-foot { margin-top: auto; border-top: 1px solid var(--border); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; color: var(--faint); font-size: 12px; }
+  .skeleton { width: 520px; height: 560px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--border); padding: 36px; display: flex; flex-direction: column; gap: 14px; position: relative; overflow: hidden; }
+  .skeleton span { display: block; height: 10px; border-radius: 4px; background: var(--border-2); }
+  .skeleton::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.05) 50%, transparent 70%); }
+  .overlay-msg { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .overlay-msg > div { background: var(--panel); border: 1px solid var(--border-2); border-radius: 12px; padding: 18px 22px; box-shadow: var(--shadow); max-width: 320px; }
+  .spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--amber-soft); border-top-color: var(--amber); margin: 0 auto 10px; }
+  .next li { margin-bottom: 8px; color: var(--muted); }
+  .next li b { color: var(--text); font-weight: 500; }
+  .check { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--accent-line); border-radius: 10px; background: var(--accent-soft); }
+  .code { font: 12px/1.5 var(--mono); color: var(--muted); background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+</style>
+</head>
+<body data-page="documents" data-crumbs="Invoices 2026 / Documents / fatura_template10_instance175_discount_invoice.pdf">
+<div class="glow"></div>
+<div class="back"><i data-i="arrow" class="sm"></i>All documents</div>
+<div class="dh">
+  <div>
+    <h1 style="display:flex;gap:12px;align-items:center">fatura_template10_instance175_discount_invoice.pdf <span id="headpill"></span></h1>
+    <div class="meta"><span class="tag">VIEWER-QA-5814</span><span>1 page</span><span class="d"></span><span>Uploaded 28 Aug by Alex Morgan</span><span class="d"></span><span>52.5 KB</span></div>
+  </div>
+  <div class="actions" id="headactions"></div>
+</div>
+
+<div class="stepper" id="stepper"></div>
+
+<div class="split">
+  <div class="viewer">
+    <div class="vbar">
+      <div class="grp"><button class="btn ghost sm"><i data-i="left" class="sm"></i></button><span style="color:var(--text-2);white-space:nowrap" class="mono">1 / 1</span><button class="btn ghost sm"><i data-i="right" class="sm"></i></button></div>
+      <div class="grp"><div class="chips">
+        <span class="chip on">All <b>27</b></span>
+        <span class="chip"><i style="background:var(--t-text)"></i>Text <b>21</b></span>
+        <span class="chip"><i style="background:var(--amber)"></i>Tables <b>1</b></span>
+        <span class="chip"><i style="background:#ff7ab6"></i>Figures <b>1</b></span>
+        <span class="chip"><i style="background:var(--faint)"></i>Other <b>4</b></span>
+      </div><span style="width:1px;height:18px;background:var(--border);margin:0 6px"></span><button class="btn ghost sm"><i data-i="zoomout" class="sm"></i></button><span class="mono">100%</span><button class="btn ghost sm"><i data-i="zoomin" class="sm"></i></button></div>
+    </div>
+    <div class="stage" id="stage"></div>
+    <div class="inspector" id="inspector"><span class="pill nodot" style="background:color-mix(in srgb, var(--t-text) 14%, transparent);color:var(--t-text);height:20px">Text</span><span class="mono" style="color:var(--text)">"INVOICE ID INV/06-92/543"</span><span class="k">·</span><span class="k">page 1</span><span class="k">·</span><span class="k">confidence</span><span class="mono">0.99</span><span style="margin-left:auto" class="k">Used by</span><span class="tag" style="color:var(--accent);border-color:var(--accent-line)">Invoice number</span></div>
+  </div>
+  <div class="panel" id="panel"></div>
+</div>
+
+<script>
+const state = new URLSearchParams(location.search).get("state") || "extracted";
+const ok = '<span class="dot ok"><i data-i="check"></i></span>';
+const steps = {
+  extracted: [[ok, "Uploaded", "28 Aug, 20:46"], [ok, "Prepared", "1 page read"], [ok, "Extracted", "Invoice v4 · today 11:52"], ['<span class="dot warn">!</span>', "Review", "1 warning to check"]],
+  preparing: [[ok, "Uploaded", "Just now"], ['<span class="dot go">2</span>', "Preparing", "Started 11:48 · in progress", "current"], ['<span class="dot">3</span>', "Extract", "Choose a schema"], ['<span class="dot">4</span>', "Review", "Check values"]],
+  failed: [[ok, "Uploaded", "28 Aug, 20:46"], [ok, "Prepared", "1 page read"], ['<span class="dot" style="border-color:var(--red);color:var(--red)">!</span>', "Extraction failed", "Today 11:52 · Invoice v4"], ['<span class="dot">4</span>', "Review", "Waiting for extraction"]],
+}[state];
+document.getElementById("stepper").innerHTML = steps.map(([d, t, s, c]) => `<div class="step ${c || ""}">${d}<div><b>${t}</b><span>${s}</span></div></div>`).join("");
+document.getElementById("headpill").outerHTML = { extracted: '<span class="pill review">Needs review</span>', preparing: '<span class="pill preparing">Preparing</span>', failed: '<span class="pill failed">Extraction failed</span>' }[state];
+document.getElementById("headactions").innerHTML = state === "extracted"
+  ? `<button class="btn"><i data-i="chat" class="sm"></i>Ask Genie</button><button class="btn"><i data-i="download" class="sm"></i>Export</button><button class="btn"><i data-i="refresh" class="sm"></i>Re-extract<i data-i="down" class="sm"></i></button>`
+  : `<button class="btn ghost"><i data-i="more"></i></button>`;
+
+const page = (boxes) => `<div class="page"><img src="invoice-page.png">${boxes}</div>`;
+if (state !== "extracted") document.getElementById("inspector").remove();
+if (state === "preparing") {
+  document.getElementById("stage").style.position = "relative";
+  document.getElementById("stage").innerHTML = `<div class="skeleton">${"<span style='width:40%'></span><span style='width:60%'></span><span style='width:30%'></span><span style='width:90%;margin-top:40px'></span><span></span><span style='width:80%'></span><span></span><span style='width:70%'></span>"}</div>
+    <div class="overlay-msg"><div><div class="spinner"></div><b>Reading your document</b><p class="muted" style="margin:6px 0 0;font-size:12.5px">Page previews appear here when preparation finishes. You can leave this page; we'll keep going and update the status.</p></div></div>`;
+} else {
+  const regions = state === "extracted" ? `
+    <div class="box t-text" style="top:4.7%;left:0.5%;width:24.5%;height:2.3%"></div>
+    <div class="box on" style="top:6.9%;left:0.5%;width:25.5%;height:2.4%"><span class="lbl">Invoice number · 99%</span></div>
+    <div class="box t-figure" style="top:5.7%;left:58.5%;width:15.5%;height:11.5%"></div>
+    <div class="box t-text" style="top:0.6%;left:54.5%;width:36%;height:4%"></div>
+    <div class="box t-text" style="top:27.6%;left:54.5%;width:30%;height:13.5%;display:none"></div>
+    <div class="box warn" style="top:11%;left:0.5%;width:23%;height:2.3%"></div>
+    <div class="box t-text" style="top:8.6%;left:78.5%;width:17%;height:2.3%"></div>
+    <div class="box t-table" style="top:35.8%;left:1%;width:86%;height:20.8%"></div>
+    <div class="box t-text" style="top:59.6%;left:41%;width:30%;height:2.3%"></div>
+    <div class="box t-text" style="top:65.6%;left:53%;width:29%;height:2.4%"></div>` : "";
+  document.getElementById("stage").innerHTML = page(regions);
+}
+
+const field = (label, value, conf, opts = {}) => `<div class="f ${opts.on ? "on" : ""}"><small>${label}</small><span class="v ${opts.warn ? "warn" : ""}">${value}</span><div class="r"><span class="conf ${conf < 90 ? "low" : ""}"><i><b style="width:${conf}%"></b></i>${conf}%</span><span class="cite">p1</span></div></div>`;
+const panels = {
+  extracted: `
+    <div class="tabs"><a class="on">Fields <span class="n">10</span></a><a>Line items <span class="n">5</span></a><a>Validation <span class="n" style="color:var(--violet)">1</span></a><a>History <span class="n">2</span></a></div>
+    <div style="padding:14px 16px 4px">
+      <div class="callout warn"><i data-i="alert"></i><div><b>Due date is before the invoice date</b><p>03 Oct 1997 vs 28 Jul 2011. Check the source, then mark as reviewed.</p><div class="actions" style="margin-top:10px"><button class="btn sm">Mark as reviewed</button><button class="btn sm ghost">Show on page</button></div></div></div>
+    </div>
+    <div class="fields">
+      ${field("Invoice number", "INV/06-92/543", 99, { on: true })}
+      ${field("Invoice date", "28 Jul 2011", 97)}
+      ${field("Due date", "03 Oct 1997", 94, { warn: true })}
+      ${field("Seller", "Mclean-Cochran", 92)}
+      ${field("Bill to", "Grant Salazar", 95)}
+      ${field("Subtotal", "881.11", 96)}
+      ${field("Discount", "29.87", 93)}
+      ${field("Total", "888.55", 96)}
+      ${field("Currency", "EUR", 88)}
+    </div>
+    <div class="panel-foot"><span>Invoice v4 · extracted today 11:52</span><span style="display:flex;gap:6px;align-items:center">Technical details<i data-i="down" class="sm"></i></span></div>`,
+  preparing: `
+    <div class="card-head"><h2>Next: extract</h2><span class="pill neutral nodot">Available after preparation</span></div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+      <div><small class="muted">Schema</small><div class="select" style="width:100%;margin-top:6px"><span>Invoice · v4 <span class="faint">(latest · 10 fields)</span></span><i data-i="down" class="sm"></i></div></div>
+      <div class="check"><span class="cb on" style="margin-top:1px"><i data-i="check"></i></span><div><b>Extract automatically when ready</b><p class="muted" style="margin:2px 0 0;font-size:12.5px">We'll start extraction as soon as preparation finishes. No need to come back.</p></div></div>
+      <button class="btn primary" style="justify-content:center;height:36px"><i data-i="play" class="sm"></i>Extract when ready</button>
+      <div style="border-top:1px solid var(--border);padding-top:14px">
+        <h3 style="margin-bottom:10px">What happens next</h3>
+        <ol class="next" style="padding-left:18px;margin:0">
+          <li><b>Preparing</b> — we read each page and its layout.</li>
+          <li><b>Extract</b> — the schema's fields are pulled out, each linked to where it appears.</li>
+          <li><b>Review</b> — check any warnings, then export or ask Genie.</li>
+        </ol>
+      </div>
+    </div>`,
+  failed: `
+    <div class="tabs"><a class="on">Fields</a><a>Line items</a><a>Validation</a><a>History <span class="n">1</span></a></div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+      <div class="callout err"><i data-i="alert"></i><div><b>Extraction didn't finish</b><p>Something went wrong on our side while saving the results. Your document is fine and doesn't need to be uploaded again.</p><div class="actions" style="margin-top:12px"><button class="btn sm primary"><i data-i="refresh" class="sm"></i>Try again</button><button class="btn sm"><i data-i="copy" class="sm"></i>Copy reference</button></div></div></div>
+      <div class="muted" style="font-size:12.5px">If it keeps failing, send the reference to your project admin.</div>
+      <details open style="border-top:1px solid var(--border);padding-top:12px"><summary class="muted" style="font-size:12.5px;cursor:pointer">Technical details</summary>
+        <div class="code" style="margin-top:10px">run 694c44d6 · invoice v4 · ai_extract 2.1<br>error: table invoice_candidates has no column named invoice_index</div>
+      </details>
+    </div>
+    <div class="panel-foot"><span>No values were saved from this run</span></div>`,
+};
+document.getElementById("panel").innerHTML = panels[state];
+</script>
+<script src="shell.js"></script>
+</body>
+</html>

@@ -364,3 +364,27 @@ def test_integral_numbers_hash_identically_however_they_are_written() -> None:
     payload = manifest.model_dump(mode="json", exclude_none=True)
     integral = SchemaManifest.model_validate({**payload, "schema_version": 1})
     assert integral.canonical_json() == manifest.canonical_json()
+
+
+@pytest.mark.parametrize("status", ["DRAFT", "PUBLISHED", "PRODUCTION", "RETIRED"])
+def test_databricks_draft_save_uses_guarded_write_and_verified_read(manifest, status):
+    from unittest.mock import Mock
+
+    from idp_app.services.schema_registry import (
+        DatabricksSchemaRepository,
+        SchemaNotDraftError,
+    )
+
+    sql = Mock()
+    repository = DatabricksSchemaRepository(sql, "catalog", "project", "idp")
+    retained = Mock(status=status)
+    repository.get = Mock(return_value=retained)
+    if status == "DRAFT":
+        assert repository.save_draft(manifest, "user") is retained
+    else:
+        with pytest.raises(SchemaNotDraftError):
+            repository.save_draft(manifest, "user")
+    sql.execute_sql.assert_called_once()
+    statement = sql.execute_sql.call_args.args[0]
+    assert "WHEN MATCHED AND target.status = 'DRAFT' THEN UPDATE" in statement
+    repository.get.assert_called_once_with(manifest.schema_id, manifest.schema_version)

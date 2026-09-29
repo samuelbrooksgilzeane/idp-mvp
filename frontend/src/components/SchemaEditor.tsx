@@ -163,10 +163,9 @@ export function SchemaEditor() {
   const [notice, setNotice] = useState<{ kind: "success" | "error"; message: string } | null>(
     null,
   );
-  const [reloadToken, setReloadToken] = useState(0);
-
-  function reload() {
-    setReloadToken((token) => token + 1);
+  function retainSavedSchema(detail: SchemaDetail) {
+    setSchemas((current) => [...current.filter((item) =>
+      item.schema_id !== detail.schema_id || item.schema_version !== detail.schema_version), detail]);
   }
 
   useEffect(() => {
@@ -187,7 +186,7 @@ export function SchemaEditor() {
         if (!controller.signal.aborted) setListState("error");
       });
     return () => controller.abort();
-  }, [reloadToken]);
+  }, []);
 
   const grouped = useMemo(() => {
     const map = new Map<string, SchemaSummary[]>();
@@ -268,7 +267,7 @@ export function SchemaEditor() {
               onCreated={(detail) => {
                 setCreating(false);
                 setNotice({ kind: "success", message: `${detail.display_name} created as a draft.` });
-                reload();
+                retainSavedSchema(detail);
                 setSelectedKey(`${detail.schema_id}:${detail.schema_version}`);
               }}
               onCancel={() => setCreating(false)}
@@ -276,10 +275,11 @@ export function SchemaEditor() {
           ) : null}
           {!creating && selected ? (
             <SchemaDetailPanel
+              key={selectedKey}
               summary={selected}
-              onChanged={(message) => {
+              onChanged={(message, saved) => {
                 setNotice(message);
-                reload();
+                if (saved) retainSavedSchema(saved);
               }}
               onSelect={(schemaId, version) => setSelectedKey(`${schemaId}:${version}`)}
             />
@@ -386,7 +386,7 @@ function SchemaDetailPanel({
   onSelect,
 }: {
   summary: SchemaSummary;
-  onChanged: (notice: { kind: "success" | "error"; message: string }) => void;
+  onChanged: (notice: { kind: "success" | "error"; message: string }, saved?: SchemaDetail) => void;
   onSelect: (schemaId: string, version: number) => void;
 }) {
   const [detail, setDetail] = useState<SchemaDetail | null>(null);
@@ -474,7 +474,8 @@ function SchemaDetailPanel({
       if (!response.ok) {
         throw new Error((payload as { error?: { message?: string } }).error?.message ?? "Could not save draft.");
       }
-      onChanged({ kind: "success", message: "Draft saved." });
+      setDetail(payload as SchemaDetail);
+      onChanged({ kind: "success", message: "Draft saved." }, payload as SchemaDetail);
     } catch (error: unknown) {
       onChanged({ kind: "error", message: error instanceof Error ? error.message : "Could not save draft." });
     } finally {
@@ -493,7 +494,8 @@ function SchemaDetailPanel({
       if (!response.ok) {
         throw new Error((payload as { error?: { message?: string } }).error?.message ?? "Could not publish.");
       }
-      onChanged({ kind: "success", message: "Schema published. It is now immutable and extractable." });
+      setDetail(payload as SchemaDetail);
+      onChanged({ kind: "success", message: "Schema published. It is now immutable and extractable." }, payload as SchemaDetail);
     } catch (error: unknown) {
       onChanged({ kind: "error", message: error instanceof Error ? error.message : "Could not publish." });
     } finally {
@@ -517,7 +519,7 @@ function SchemaDetailPanel({
         throw new Error((payload as { error?: { message?: string } }).error?.message ?? "Could not clone.");
       }
       const cloned = payload as SchemaDetail;
-      onChanged({ kind: "success", message: `Draft version ${cloned.schema_version} created for editing.` });
+      onChanged({ kind: "success", message: `Draft version ${cloned.schema_version} created for editing.` }, cloned);
       onSelect(cloned.schema_id, cloned.schema_version);
     } catch (error: unknown) {
       onChanged({ kind: "error", message: error instanceof Error ? error.message : "Could not clone." });

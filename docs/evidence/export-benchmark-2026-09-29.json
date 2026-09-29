@@ -1,0 +1,49 @@
+{
+  "recorded_at": "2026-09-29T22:12:36.681430+00:00",
+  "python": "3.13.1",
+  "platform": "macOS-15.3.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "synthetic_local_only": true,
+  "results": [
+    {
+      "format": "csv",
+      "documents": 1000,
+      "records_per_document": 10,
+      "verified_rows": {
+        "Document": 1000,
+        "Records": 10000
+      },
+      "source_page_calls": 40,
+      "max_source_page": 25,
+      "duration_seconds": 0.5503,
+      "baseline_process_high_water_rss_bytes": 112050176,
+      "writer_process_peak_rss_bytes": 114081792,
+      "sampled_peak_temp_disk_bytes": 7775448,
+      "disk_sample_interval_ms": 10,
+      "output_bytes": 438528,
+      "output_sha256": "5d390af8de621232b05a1a88c12e59392d519267f789f8013e07cc8422771eb4",
+      "spools_cleaned": true,
+      "writer_version": "2"
+    },
+    {
+      "format": "xlsx",
+      "documents": 1000,
+      "records_per_document": 10,
+      "verified_rows": {
+        "Document": 1000,
+        "Records": 10000
+      },
+      "source_page_calls": 40,
+      "max_source_page": 25,
+      "duration_seconds": 1.1938,
+      "baseline_process_high_water_rss_bytes": 109346816,
+      "writer_process_peak_rss_bytes": 112410624,
+      "sampled_peak_temp_disk_bytes": 15023713,
+      "disk_sample_interval_ms": 10,
+      "output_bytes": 801885,
+      "output_sha256": "9744ef4212abc7291c92ea86d9f145c514dd844181c395bf63517bdcc1b12754",
+      "spools_cleaned": true,
+      "writer_version": "2"
+    }
+  ]
+}

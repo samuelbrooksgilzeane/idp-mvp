@@ -219,7 +219,8 @@ class SQLiteExtractionRunRepository:
         placeholders = ", ".join("?" for _ in RUN_COLUMNS)
         with self._connect() as connection:
             connection.execute(
-                f"INSERT OR IGNORE INTO extraction_runs ({', '.join(RUN_COLUMNS)}) VALUES ({placeholders})",
+                f"INSERT OR IGNORE INTO extraction_runs ({', '.join(RUN_COLUMNS)}) "
+                f"VALUES ({placeholders})",
                 _run_values(run),
             )
 
@@ -527,7 +528,8 @@ class DatabricksExtractionRunRepository:
             )
         for field in fields:
             self._sql.execute_sql(
-                f"INSERT INTO {self._fields} (extraction_run_id, document_id, field_path, field_type, "
+                f"INSERT INTO {self._fields} "
+                "(extraction_run_id, document_id, field_path, field_type, "
                 "value, value_string, confidence_score, citation_ids, citations, extraction_error) "
                 "VALUES (:extraction_run_id, :document_id, "
                 ":field_path, :field_type, PARSE_JSON(:value), :value_string, "

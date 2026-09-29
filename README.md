@@ -8,12 +8,10 @@ deployed mode uses Databricks Jobs, SQL, Unity Catalog volumes and governed Delt
 
 ## Engineering guides
 
-- [`docs/SOLUTION_GUIDE.md`](docs/SOLUTION_GUIDE.md) explains the architecture, data model and
-  end-to-end workflow for a technical presentation.
-- [`docs/PERFORMANCE_AND_SIMPLIFICATION_REVIEW.md`](docs/PERFORMANCE_AND_SIMPLIFICATION_REVIEW.md)
-  records the Results-page findings and the prioritized performance/code-reduction roadmap.
-- [`docs/PROJECT_CONTEXT.md`](docs/PROJECT_CONTEXT.md) contains the chronological implementation
-  and deployment evidence.
+- [Current release checklist](docs/RELEASE_CHECKLIST.md): deployment, performance, sharing and required
+  1,000-file upload acceptance gates.
+- [Deployment notes](docs/DEPLOYMENT_NOTES.md): target configuration, migrations and Genie preservation.
+- [Documentation index](docs/README.md) and [historical archive](docs/archive/README.md).
 
 ## Prerequisites
 

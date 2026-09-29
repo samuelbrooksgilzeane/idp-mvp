@@ -85,8 +85,11 @@ export class UploadTransferManager {
     const batch = this.snapshot.batch;
     if (!batch?.batch_id) return;
     const items: UploadItem[] = [];
+    const visited = new Set<string>();
     let cursor: string | null = "-1";
     do {
+      if (visited.has(cursor)) throw new Error("Upload progress pagination did not advance. Retry refreshing progress.");
+      visited.add(cursor);
       const response: { items: UploadItem[]; next_cursor: string | null } = await jsonResponse(
         await fetch(`/api/upload-batches/${batch.batch_id}/items?limit=100&cursor=${cursor}`));
       items.push(...response.items);
@@ -95,8 +98,9 @@ export class UploadTransferManager {
     } while (cursor !== null);
     if (this.snapshot.batch?.client_request_id !== batch.client_request_id) return;
     // Gateway failures never reached the API; keep their local explanation until retry.
+    const localItems = new Map(this.snapshot.batch.items.map((item) => [item.client_file_id, item]));
     const merged = items.map((item) => {
-      const local = this.snapshot.batch?.items.find((old) => old.client_file_id === item.client_file_id);
+      const local = localItems.get(item.client_file_id);
       return item.state === "QUEUED" && local?.state === "FAILED" ? local : item;
     });
     this.update({ batch: { ...batch, items: merged } });

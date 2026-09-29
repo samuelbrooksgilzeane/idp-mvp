@@ -1,10 +1,11 @@
 import hashlib
 from collections.abc import Iterator
+from contextlib import suppress
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
 from databricks.sdk import WorkspaceClient
-from databricks.sdk.errors import ResourceAlreadyExists
+from databricks.sdk.errors import NotFound, ResourceAlreadyExists
 
 
 class DocumentStorage(Protocol):
@@ -98,7 +99,9 @@ class DatabricksVolumeStorage:
     def delete(self, object_name: str) -> None:
         if Path(object_name).name != object_name:
             raise ValueError("Storage object name must not contain a path")
-        self._client.files.delete(f"{self._incoming}/{object_name}")
+        # A prior attempt may have removed the file before registry update failed.
+        with suppress(NotFound):
+            self._client.files.delete(f"{self._incoming}/{object_name}")
 
 
 def _verify(contents: BinaryIO, content_hash: str, expected_size: int) -> None:

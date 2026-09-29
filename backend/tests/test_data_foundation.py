@@ -47,7 +47,10 @@ def test_unknown_object_name_is_rejected() -> None:
 def test_migration_is_idempotent_prefixed_and_non_destructive() -> None:
     # Tables and views are defined separately because a view can only project columns the
     # retained tables already carry, so views are created after the column migrations.
-    sql = MIGRATION.read_text(encoding="utf-8") + "\n" + VIEWS.read_text(encoding="utf-8")
+    sql = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (MIGRATION, MIGRATION.parent / "migrate_work_batches.sql", VIEWS)
+    )
     normalized = " ".join(sql.upper().split())
 
     assert normalized.count("CREATE TABLE IF NOT EXISTS") == len(TABLE_NAMES)
@@ -227,7 +230,8 @@ def test_schema_registration_task_is_immutable_and_source_controlled() -> None:
 def test_extraction_job_pins_evidence_contract_and_retains_raw_first() -> None:
     resource = yaml.safe_load(EXTRACTION_JOB.read_text(encoding="utf-8"))
     job = resource["resources"]["jobs"]["document_extractor"]
-    for_each = job["tasks"][0]["for_each_task"]
+    tasks = {task["task_key"]: task for task in job["tasks"]}
+    for_each = tasks["extract_document_batch"]["for_each_task"]
     task = for_each["task"]["spark_python_task"]
     source = EXTRACTION_SOURCE.read_text(encoding="utf-8")
 
@@ -239,10 +243,20 @@ def test_extraction_job_pins_evidence_contract_and_retains_raw_first() -> None:
         "project_schema",
         "table_prefix",
         "inputs",
+        "dispatch_id",
+        "warehouse_id",
+        "source_volume_name",
+        "artifacts_volume_name",
     }
     assert for_each["inputs"] == "{{job.parameters.inputs}}"
     # for_each defaults to concurrency 1, which would process a batch sequentially.
-    assert for_each["concurrency"] == "${var.batch_concurrency}"
+    assert for_each["concurrency"] == "${var.extraction_concurrency}"
+    assert tasks["extract_document_batch"]["depends_on"] == [
+        {"task_key": "load_work_manifest"}
+    ]
+    manifest = tasks["extract_manifest"]["for_each_task"]
+    assert manifest["inputs"] == "{{tasks.load_work_manifest.values.work_item_ids}}"
+    assert manifest["concurrency"] == "${var.extraction_concurrency}"
     assert [
         parameter for parameter in task["parameters"] if parameter.startswith("{{input.")
     ] == [
@@ -259,7 +273,8 @@ def test_extraction_job_pins_evidence_contract_and_retains_raw_first() -> None:
         "'enableCitations', 'true'",
         "'enableConfidenceScores', 'true'",
         "SET ai_result = PARSE_JSON(:result_json)",
-        "ORDER BY completed_at DESC, parse_run_id DESC",
+        "WHERE parse_run_id = :parse_run_id AND document_id = :document_id",
+        'require_pinned_parse(spark, parse_runs, run["parse_run_id"]',
         "computed_hash",
         "flatten_fields(",
     ):

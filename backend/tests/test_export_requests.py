@@ -75,6 +75,7 @@ def test_artifacts_reject_untrusted_paths(tmp_path: Path):
 
 def test_api_confirms_cross_page_duplicates_and_replays_without_reresolving(tmp_path: Path):
     from fastapi.testclient import TestClient
+
     from idp_app.core.config import Settings
     from idp_app.main import create_app
 
@@ -116,6 +117,9 @@ def test_api_confirms_cross_page_duplicates_and_replays_without_reresolving(tmp_
         ).status_code
         == 404
     )
+    assert client.get(
+        f"/api/export-requests/{identity}/download", headers={"x-forwarded-email": "other"}
+    ).status_code == 404
     assert client.get(f"/api/export-requests/{identity}/download").status_code == 409
     body["format"] = "csv"
     assert client.post("/api/export-requests", json=body).status_code == 409

@@ -77,9 +77,11 @@ def test_retained_result_recovers_without_repeating_inference(tmp_path):
     identity = dispatch.work_item_ids[0]
     inference = Mock(return_value={"response": {}, "error_message": None})
     original = queue.runs.complete
-    with patch.object(queue.runs, "complete", side_effect=TimeoutError("projection unavailable")):
-        with pytest.raises(TimeoutError):
-            execute_extraction(queue, dispatch.dispatch_id, identity, inference)
+    with (
+        patch.object(queue.runs, "complete", side_effect=TimeoutError("projection unavailable")),
+        pytest.raises(TimeoutError),
+    ):
+        execute_extraction(queue, dispatch.dispatch_id, identity, inference)
     assert inference.call_count == 1
     assert queue.runs.get(queue.work.item(identity).extraction_run_id).ai_result is not None
     jobs.state = ParseJobState.FAILED
@@ -156,6 +158,11 @@ def test_table_backed_api_ownership_pagination_and_failed_only_retry(tmp_path):
         assert again.json()["batch_id"] == child.batch_id
         app.dependency_overrides[get_authenticated_user] = lambda: "someone-else"
         assert client.get(f"/api/extraction-batches/{batch.batch_id}").status_code == 404
+        assert client.get(f"/api/extraction-batches/{batch.batch_id}/items").status_code == 404
+        assert client.post(
+            f"/api/extraction-batches/{batch.batch_id}/retry",
+            json={"client_request_id": str(uuid4())},
+        ).status_code == 404
     assert len(jobs.tokens) == 1  # Status endpoints never poll or submit Jobs.
 
 

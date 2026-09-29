@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Results</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .bar { display: flex; justify-content: space-between; align-items: center; margin: 20px 0 12px; }
+  .schemas { display: flex; gap: 6px; }
+  .schemas a { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); color: var(--muted); font-weight: 500; background: var(--panel); }
+  .schemas a.on { color: var(--text); border-color: var(--accent-line); background: var(--accent-soft); }
+  .schemas b { font: 500 11.5px var(--mono); color: var(--faint); }
+  .schemas a.on b { color: var(--accent); }
+  .tablewrap { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+  .kpi .spark { display: flex; gap: 3px; align-items: flex-end; height: 22px; margin-top: 8px; }
+  .kpi .spark i { width: 7px; border-radius: 2px; background: var(--border-2); }
+  .kpi .spark i.hi { background: var(--accent); }
+  td.mono { font-size: 12.5px; color: var(--text-2); }
+  td { white-space: nowrap; }
+  .tip { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; color: var(--faint); font-size: 12.5px; }
+</style>
+</head>
+<body data-page="results" data-crumbs="Invoices 2026 / Results">
+<div class="glow"></div>
+<div class="page-head">
+  <div>
+    <h1>Results</h1>
+    <p class="sub">The latest extraction for every document, field by field. Select rows to export.</p>
+  </div>
+  <div class="actions">
+    <button class="btn"><i data-i="chat" class="sm"></i>Ask Genie about these</button>
+    <button class="btn primary"><i data-i="download" class="sm"></i>Export 3 selected</button>
+  </div>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><small>Documents extracted</small><b>71</b><em>+12 this week</em><div class="spark"><i style="height:30%"></i><i style="height:45%"></i><i style="height:25%"></i><i style="height:60%"></i><i style="height:50%"></i><i style="height:70%"></i><i class="hi" style="height:100%"></i></div></div>
+  <div class="kpi"><small>Total invoiced</small><b>€412,880.14</b><em>EUR · 3 invoices in USD not converted</em></div>
+  <div class="kpi"><small>Passed validation</small><b>63 <span style="font-size:14px;color:var(--accent);font-weight:500">89%</span></b><em>Totals reconcile with line items</em></div>
+  <div class="kpi" style="border-color:color-mix(in srgb,var(--violet) 35%,var(--border))"><small>Needs review</small><b style="color:var(--violet)">8</b><em>Open the first one →</em></div>
+</div>
+
+<div class="bar">
+  <div class="schemas">
+    <a class="on"><i data-i="braces" class="sm"></i>Invoice v4 <b>71</b></a>
+    <a>HUD 50080 voucher <b>6</b></a>
+    <a>HUD 90052 worksheet <b>2</b></a>
+  </div>
+  <div class="toolbar">
+    <div class="input" style="width:190px;color:var(--faint)"><i data-i="search" class="sm"></i>Search values</div>
+    <div class="select" style="min-width:130px"><span><span class="k">Case</span>&nbsp; All</span><i data-i="down" class="sm"></i></div>
+    <div class="select" style="min-width:150px"><span><span class="k">Validation</span>&nbsp; All</span><i data-i="down" class="sm"></i></div>
+  </div>
+</div>
+
+<div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:40px"><span class="cb"></span></th><th>Document</th><th>Invoice #</th><th>Seller</th><th>Invoice date</th><th class="num">Total</th><th>Cur.</th><th class="num">Lines</th><th>Validation</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<div class="tip"><span>Showing 1–10 of 71 · Export includes a <b style="color:var(--text-2);font-weight:500">Summary</b> and a <b style="color:var(--text-2);font-weight:500">Line items</b> sheet</span><div class="actions"><button class="btn sm" disabled style="opacity:.5">Previous</button><button class="btn sm">Next</button></div></div>
+
+<script>
+const rows = [
+  ["fatura_template10_…_discount_invoice.pdf", "INV/06-92/543", "Mclean-Cochran", "28 Jul 2011", "888.55", "EUR", 5, "review", "Due date before invoice date"],
+  ["globex_inv_88213.pdf", "88213", "Globex Corporation", "02 Sep 2026", "12,450.00", "EUR", 12, "done", "Passed"],
+  ["initech_q3_services.pdf", "IN-2026-0312", "Initech Ltd", "30 Sep 2026", "4,980.50", "EUR", 3, "done", "Passed"],
+  ["contoso_services_sep.pdf", "CS-7781", "Contoso GmbH", "15 Sep 2026", "2,310.00", "EUR", 4, "done", "Passed"],
+  ["umbrella_supplies_0917.pdf", "UMB-44120", "Umbrella Supplies", "17 Sep 2026", "18,204.66", "USD", 21, "review", "Line total ≠ stated total (Δ 12.00)"],
+  ["fatura_template05_…_tax_invoice.pdf", "INV/11-03/219", "Hernandez LLC", "11 Mar 2019", "1,406.18", "EUR", 6, "done", "Passed"],
+  ["stark_ind_invoice_5521.pdf", "SI-5521", "Stark Industries", "08 Sep 2026", "73,900.00", "EUR", 2, "done", "Passed"],
+  ["wayne_ent_sept.pdf", "WE-09-2026", "Wayne Enterprises", "01 Sep 2026", "9,112.40", "EUR", 8, "failed", "Total missing"],
+  ["acme_corp_0921.pdf", "AC-0921", "Acme Corp", "21 Sep 2026", "640.00", "EUR", 1, "done", "Passed"],
+  ["hooli_cloud_aug.pdf", "HC-88-AUG", "Hooli", "31 Aug 2026", "27,381.09", "EUR", 14, "done", "Passed"],
+];
+const sel = new Set([1, 2, 3]);
+document.getElementById("rows").innerHTML = rows.map((r, i) => {
+  const [doc, num, seller, date, total, cur, lines, v, vtext] = r;
+  const on = sel.has(i);
+  const label = { done: "Passed", review: "Needs review", failed: "Failed check" }[v];
+  return `<tr class="${on ? "sel" : ""}">
+    <td><span class="cb ${on ? "on" : ""}">${on ? '<i data-i="check"></i>' : ""}</span></td>
+    <td><div class="doc-name" style="font-weight:500">${doc}</div></td>
+    <td class="mono">${num}</td>
+    <td>${seller}</td>
+    <td class="muted">${date}</td>
+    <td class="num" style="font-weight:500">${total}</td>
+    <td class="muted">${cur}</td>
+    <td class="num muted">${lines}</td>
+    <td><span class="pill ${v}">${label}</span>${v !== "done" ? `<div style="font-size:12px;color:var(--faint);margin-top:2px">${vtext}</div>` : ""}</td>
+    <td style="text-align:right;color:var(--faint)"><i data-i="right" class="sm"></i></td>
+  </tr>`;
+}).join("");
+</script>
+<script src="shell.js"></script>
+</body>
+</html>

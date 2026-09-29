@@ -260,8 +260,8 @@ def test_export_of_two_schema_versions_produces_separate_workbooks(tmp_path: Pat
     with zipfile.ZipFile(io.BytesIO(exported.content)) as archive:
         names = set(archive.namelist())
         assert names == {
-            f"{schema_a['schema_id']}_v{schema_a['schema_version']}.xlsx",
-            f"{schema_b['schema_id']}_v{schema_b['schema_version']}.xlsx",
+            f"{schema_a['schema_id']}_v{schema_a['schema_version']}_0.xlsx",
+            f"{schema_b['schema_id']}_v{schema_b['schema_version']}_1.xlsx",
         }
 
     # A single-schema selection is unaffected: still one plain workbook, not a ZIP.

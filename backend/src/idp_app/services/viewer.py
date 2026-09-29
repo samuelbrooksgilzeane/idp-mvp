@@ -228,7 +228,7 @@ class ViewerService:
 
     async def _latest_successful(self, document_id: str) -> ParseRunRecord:
         document = await run_in_threadpool(self._documents.get, document_id)
-        if document is None:
+        if document is None or document.status == "DELETED":
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         run = await run_in_threadpool(self._parse_runs.latest_successful, document_id)
         if run is None or run.parsed is None:
@@ -241,7 +241,7 @@ class ViewerService:
 
     async def _successful_run(self, document_id: str, parse_run_id: str | None) -> ParseRunRecord:
         document = await run_in_threadpool(self._documents.get, document_id)
-        if document is None:
+        if document is None or document.status == "DELETED":
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
         if parse_run_id is None:
             references = await run_in_threadpool(

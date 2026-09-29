@@ -142,6 +142,10 @@ describe("SchemaEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publish" }));
     await waitFor(() => expect(published).toBe(true));
     expect(await screen.findByText(/now immutable and extractable/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.filter(([url]) => String(url) === "/api/schemas?status=ALL")).toHaveLength(1);
+    expect(screen.getAllByText("PUBLISHED")).toHaveLength(2);
   });
 
   it("shows a published schema read-only and clones it into a new editable draft", async () => {

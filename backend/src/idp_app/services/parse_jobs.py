@@ -15,7 +15,7 @@ from databricks.sdk.service import jobs
 from idp_app.services.document_models import DocumentRecord
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.job_batches import batch_idempotency_token, encode_inputs
-from idp_app.services.parse_runs import ParseRunRepository
+from idp_app.services.parse_runs import SQLiteParseRunRepository
 
 
 @dataclass(frozen=True)
@@ -47,7 +47,7 @@ class ParseJobRunner(Protocol):
 class MockParseJobRunner:
     def __init__(
         self,
-        parse_runs: ParseRunRepository,
+        parse_runs: SQLiteParseRunRepository,
         documents: DocumentRegistry,
         *,
         delay_seconds: float = 0.15,
@@ -96,23 +96,14 @@ class MockParseJobRunner:
                 parsed,
                 document_text,
                 page_count,
-            )
-            self._documents.update_status(
-                request.document.document_id,
-                {"PARSING"},
-                "PARSED",
+                document_status="PARSED",
             )
         except Exception as error:
             failure = {"error_message": str(error)[:500] or "Document parsing failed."}
             current_run = self._parse_runs.get(request.parse_run_id)
             if current_run and current_run.status == "RUNNING":
-                self._parse_runs.fail(request.parse_run_id, failure)
-            current_document = self._documents.get(request.document.document_id)
-            if current_document and current_document.status == "PARSING":
-                self._documents.update_status(
-                    request.document.document_id,
-                    {"PARSING"},
-                    "PARSE_FAILED",
+                self._parse_runs.fail(
+                    request.parse_run_id, failure, document_status="PARSE_FAILED"
                 )
 
 

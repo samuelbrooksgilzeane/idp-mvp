@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Documents</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .how { display: grid; grid-template-columns: repeat(4, 1fr) auto; align-items: center; gap: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-bottom: 16px; }
+  .how > div { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-right: 1px solid var(--border); }
+  .how .n { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-2); display: grid; place-items: center; font: 500 11px var(--mono); color: var(--muted); flex: none; }
+  .how .n.auto { border-color: var(--accent-line); color: var(--accent); }
+  .how b { font-weight: 600; font-size: 12.5px; display: block; }
+  .how span { font-size: 12px; color: var(--muted); }
+  .how .close { padding: 0 14px; color: var(--faint); border: 0; }
+  .upload-card { display: grid; grid-template-columns: 1fr auto; gap: 14px 24px; padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+  .upload-card .bar { grid-column: 1 / -1; }
+  .filters { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0; }
+  .seg { display: flex; gap: 4px; }
+  .seg a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--muted); font-weight: 500; border: 1px solid transparent; }
+  .seg a.on { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+  .seg a b { font: 500 11.5px var(--mono); color: var(--faint); }
+  .seg a.on b { color: var(--text-2); }
+  .seg .sw { width: 7px; height: 7px; border-radius: 50%; }
+  .tablewrap { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; margin-top: 12px; }
+  .row-action { text-align: right; }
+  .hint { font-size: 12px; color: var(--faint); margin-top: 2px; }
+  .hint.err { color: var(--red); opacity: .85; }
+  .selbar { position: fixed; left: calc(236px + 50%); transform: translateX(-50%); bottom: 24px; width: 860px; display: flex; align-items: center; gap: 14px; padding: 10px 10px 10px 16px; border-radius: 14px; border: 1px solid var(--border-2); background: color-mix(in srgb, var(--panel-2) 94%, transparent); backdrop-filter: blur(10px); box-shadow: var(--shadow); z-index: 10; margin-left: -118px; }
+  .selbar .count { font-weight: 600; white-space: nowrap; }
+  .selbar .sep { width: 1px; height: 22px; background: var(--border-2); }
+  .selbar .note { font-size: 12px; color: var(--muted); flex: 1; line-height: 1.35; }
+</style>
+</head>
+<body data-page="documents" data-crumbs="Invoices 2026 / Documents">
+<div class="glow"></div>
+<div class="page-head">
+  <div>
+    <h1>Documents</h1>
+    <p class="sub">Upload PDFs — we prepare them automatically. Then pick a schema and extract.</p>
+  </div>
+  <div class="actions">
+    <button class="btn"><i data-i="download"></i>Export list</button>
+    <button class="btn primary"><i data-i="upload"></i>Upload PDFs</button>
+  </div>
+</div>
+
+<div class="how">
+  <div><span class="n">1</span><div><b>Upload</b><span>PDFs, up to 1,000 at a time</span></div></div>
+  <div><span class="n auto"><i data-i="check" class="sm"></i></span><div><b>Prepared automatically</b><span>Starts on upload, no action needed</span></div></div>
+  <div><span class="n">3</span><div><b>Extract</b><span>Select documents + a schema</span></div></div>
+  <div><span class="n">4</span><div><b>Review, export or ask</b><span>Results, XLSX, or Ask Genie</span></div></div>
+  <button class="btn ghost close"><i data-i="x"></i></button>
+</div>
+
+<div class="upload-card" id="upload">
+  <div style="display:flex;gap:12px;align-items:center">
+    <div class="doc-ic" style="color:var(--accent);border-color:var(--accent-line);background:var(--accent-soft)"><i data-i="upload"></i></div>
+    <div>
+      <b>Uploading 12 files to CASE-1042</b> <span class="mono muted" style="margin-left:6px">9 / 12</span>
+      <div class="muted" style="font-size:12.5px">9 uploaded · 3 transferring · <span style="color:var(--text-2)">1 duplicate skipped</span> — <span style="color:var(--text-2)">globex_inv_88213.pdf</span> is already in this project. <a class="btn link" style="font-size:12.5px">View it</a></div>
+    </div>
+  </div>
+  <div class="actions"><button class="btn sm">Pause</button><button class="btn sm ghost">Hide</button></div>
+  <div class="bar"><div class="activity"></div></div>
+</div>
+
+<div class="filters">
+  <div class="seg">
+    <a class="on">All <b>128</b></a>
+    <a><span class="sw" style="background:var(--amber)"></span>Preparing <b>3</b></a>
+    <a><span class="sw" style="background:var(--ready)"></span>Ready to extract <b>41</b></a>
+    <a><span class="sw" style="background:var(--success)"></span>Extracted <b>79</b></a>
+    <a><span class="sw" style="background:var(--red)"></span>Needs attention <b>5</b></a>
+  </div>
+  <div class="toolbar">
+    <div class="input" style="width:200px;color:var(--faint)"><i data-i="search" class="sm"></i>Filter by name</div>
+    <div class="select"><span><span class="k">Case</span>&nbsp; All</span><i data-i="down" class="sm"></i></div>
+  </div>
+</div>
+
+<div class="tablewrap">
+  <table>
+    <thead><tr><th style="width:40px"><span class="cb"></span></th><th>Document</th><th>Status</th><th>Progress</th><th>Schema</th><th>Updated</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+</div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px" class="muted">
+  <span style="font-size:12.5px">Showing 1–9 of 128</span>
+  <div class="actions"><button class="btn sm" disabled style="opacity:.5">Previous</button><button class="btn sm">Next</button></div>
+</div>
+
+<div id="selbar-slot"></div>
+
+<script>
+const q = new URLSearchParams(location.search);
+const sel = q.get("sel") === "1";
+const rows = [
+  ["invoice_acme_0921.pdf", "CASE-1042", "preparing", "Preparing", "ok go . .", "—", "just now", "", "Started 11:48"],
+  ["northwind_sept_statement.pdf", "CASE-1042", "preparing", "Preparing", "ok go . .", "—", "just now", "", "Started 11:48"],
+  ["fatura_template05_instance175_tax_invoice.pdf", "VIEWER-QA-5814", "ready", "Ready to extract", "ok ok . .", "—", "4 min ago", "extract", ""],
+  ["contoso_services_oct.pdf", "CASE-1041", "ready", "Ready to extract", "ok ok . .", "—", "1 hr ago", "extract", ""],
+  ["fatura_template10_instance175_discount_invoice.pdf", "VIEWER-QA-5814", "review", "Needs review", "ok ok ok warn", "Invoice v4", "Today, 11:52", "review", "1 validation warning"],
+  ["globex_inv_88213.pdf", "CASE-1038", "done", "Extracted", "ok ok ok ok", "Invoice v4", "Yesterday", "view", ""],
+  ["initech_q3_services.pdf", "CASE-1038", "done", "Extracted", "ok ok ok ok", "Invoice v4", "Yesterday", "view", ""],
+  ["hud_50080_voucher_2291.pdf", "CASE-0977", "done", "Extracted", "ok ok ok ok", "HUD 50080 v1", "28 Sep", "view", ""],
+  ["scan_0042_low_res.pdf", "CASE-1038", "failed", "Couldn't read", "ok bad . .", "—", "28 Sep", "retry", "Scan quality too low to read text"],
+];
+const selected = new Set(sel ? [2, 3, 1] : []);
+const actions = {
+  "": `<span class="muted" style="font-size:12.5px;display:inline-flex;gap:6px;align-items:center"><i data-i="clock" class="sm"></i>Preparing…</span>`,
+  extract: `<button class="btn sm"><i data-i="play" class="sm"></i>Extract</button>`,
+  review: `<button class="btn sm">Review<i data-i="arrow" class="sm"></i></button>`,
+  view: `<button class="btn sm ghost">View result<i data-i="arrow" class="sm"></i></button>`,
+  retry: `<button class="btn sm"><i data-i="refresh" class="sm"></i>Retry</button>`,
+};
+document.getElementById("rows").innerHTML = rows.map((r, i) => {
+  const [name, kase, cls, label, track, schema, when, act, hint] = r;
+  const on = selected.has(i);
+  const t = track.split(" ").map((s) => `<i class="${s === "." ? "" : s === "warn" ? "go" : s}"></i>`).join("");
+  return `<tr class="${on ? "sel" : ""}">
+    <td><span class="cb ${on ? "on" : ""}">${on ? '<i data-i="check"></i>' : ""}</span></td>
+    <td><div class="doc"><div class="doc-ic"><i data-i="file" class="sm"></i></div><div><div class="doc-name">${name.length > 44 ? name.slice(0, 42) + "…" : name}</div><div class="doc-meta">${kase}</div></div></div></td>
+    <td><span class="pill ${cls}">${label}</span>${hint ? `<div class="hint ${cls === "failed" ? "err" : ""}">${hint}</div>` : ""}</td>
+    <td><div class="track">${t}</div></td>
+    <td class="${schema === "—" ? "faint" : ""}">${schema}</td>
+    <td class="muted">${when}</td>
+    <td class="row-action">${actions[act]}</td>
+  </tr>`;
+}).join("");
+if (sel) {
+  document.getElementById("upload").remove();
+  document.getElementById("selbar-slot").innerHTML = `
+  <div class="selbar">
+    <span class="count">3 selected</span><span class="sep"></span>
+    <div class="select" style="min-width:230px;background:var(--panel)"><span><span class="k">Schema</span>&nbsp; Invoice · v4 <span class="faint">(latest)</span></span><i data-i="down" class="sm"></i></div>
+    <div class="note"><span style="color:var(--blue)">2 ready now.</span> 1 still preparing — it will extract automatically when ready.</div>
+    <button class="btn ghost sm">Clear</button>
+    <button class="btn primary"><i data-i="play" class="sm"></i>Extract 3 documents</button>
+  </div>`;
+}
+</script>
+<script src="shell.js"></script>
+</body>
+</html>

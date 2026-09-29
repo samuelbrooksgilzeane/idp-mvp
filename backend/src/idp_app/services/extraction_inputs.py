@@ -78,17 +78,17 @@ def resolve_extraction_inputs(
 
 
 def verify_schema_content(schema: SchemaRecord) -> None:
-    manifest = SchemaManifest(
-        schema_id=schema.schema_id,
-        schema_version=schema.schema_version,
-        display_name=schema.display_name,
-        use_case=schema.use_case,
-        status=schema.status,
-        description=schema.description,
-        instructions=schema.instructions,
-        ai_extract_schema=schema.ai_extract_schema,
-        field_policies=schema.field_policies,
-        document_rules=schema.document_rules,
-    )
+    manifest = SchemaManifest.model_validate({
+        "schema_id": schema.schema_id,
+        "schema_version": schema.schema_version,
+        "display_name": schema.display_name,
+        "use_case": schema.use_case,
+        "status": schema.status,
+        "description": schema.description,
+        "instructions": schema.instructions,
+        "ai_extract_schema": schema.ai_extract_schema,
+        "field_policies": schema.field_policies,
+        "document_rules": schema.document_rules,
+    })
     if manifest.schema_hash != schema.schema_hash:
         raise ValueError("Pinned template hash does not match its content")

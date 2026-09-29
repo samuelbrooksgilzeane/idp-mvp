@@ -845,3 +845,32 @@ def test_a_shape_with_no_invoice_leaves_projects_nothing() -> None:
     document = {"case_id": None, "source_path": "/x", "template_id": "t"}
     fields = _leaves(("account_number", "123"), ("transactions[0].amount", 5))
     assert etl.build_candidates(parameters, document, fields) == []
+
+
+def test_historical_result_keeps_parse_and_schema_after_newer_versions(tmp_path: Path) -> None:
+    client, _ = _client(tmp_path)
+    document_id = _upload(client)["document_id"]
+    first_parse = _wait_parse(client, document_id)
+    assert client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": "invoice", "schema_version": 1},
+    ).status_code == 202
+    first_run = _wait_extraction(client, document_id)
+    path = f"/api/documents/{document_id}/extractions/{first_run['extraction_run_id']}"
+    original = client.get(path).json()
+
+    second_parse = _wait_parse(client, document_id)
+    assert second_parse["parse_run_id"] != first_parse["parse_run_id"]
+    assert client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": "invoice", "schema_version": 2},
+    ).status_code == 202
+    second_run = _wait_extraction(client, document_id)
+    assert second_run["status"] == "EXTRACTED"
+    assert second_run["parse_run_id"] == second_parse["parse_run_id"]
+    assert second_run["schema_version"] == 2
+    historical = client.get(path).json()
+    assert historical == original
+    assert historical["run"]["parse_run_id"] == first_parse["parse_run_id"]
+    assert historical["run"]["schema_version"] == 1
+    assert historical["run"]["schema_hash"] == first_run["schema_hash"]

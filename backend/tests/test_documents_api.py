@@ -286,3 +286,55 @@ def test_paginated_registry_contract_and_invalid_cursor(client: TestClient) -> N
     )
     assert invalid.status_code == 422
     assert invalid.json()["error"]["code"] == "INVALID_CURSOR"
+
+
+def test_delete_storage_failure_preserves_registry_and_source(client, monkeypatch):
+    from unittest.mock import Mock
+
+    document = upload_file(client).json()["documents"][0]
+    service = client.app.state.document_service
+    stored = service._registry.get(document["document_id"])
+    with monkeypatch.context() as change:
+        change.setattr(service._storage, "delete", Mock(side_effect=PermissionError("denied")))
+        response = client.delete(f"/api/documents/{document['document_id']}")
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "FILE_DELETE_FAILED"
+    assert service._registry.get(document["document_id"]).status == "UPLOADED"
+    assert Path(stored.source_path).exists()
+    assert client.delete(f"/api/documents/{document['document_id']}").status_code == 204
+
+
+def test_delete_registry_failure_is_explicit_and_retry_recovers(client, monkeypatch):
+    from unittest.mock import Mock
+
+    document = upload_file(client).json()["documents"][0]
+    service = client.app.state.document_service
+    stored = service._registry.get(document["document_id"])
+    with monkeypatch.context() as change:
+        change.setattr(service._registry, "delete", Mock(side_effect=TimeoutError("unavailable")))
+        response = client.delete(f"/api/documents/{document['document_id']}")
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "REGISTRY_WRITE_FAILED"
+    assert not Path(stored.source_path).exists()
+    assert service._registry.get(document["document_id"]).status == "UPLOADED"
+    assert client.delete(f"/api/documents/{document['document_id']}").status_code == 204
+    assert client.get("/api/documents").json() == []
+
+
+def test_databricks_delete_tolerates_missing_file_but_preserves_other_errors():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from databricks.sdk.errors import NotFound, PermissionDenied
+
+    from idp_app.services.document_storage import DatabricksVolumeStorage
+
+    delete = Mock(side_effect=NotFound("already removed"))
+    storage = DatabricksVolumeStorage(
+        SimpleNamespace(files=SimpleNamespace(delete=delete)), "catalog", "schema", "source"
+    )
+    storage.delete("document.pdf")
+    delete.assert_called_once_with("/Volumes/catalog/schema/source/incoming/document.pdf")
+    delete.side_effect = PermissionDenied("denied")
+    with pytest.raises(PermissionDenied):
+        storage.delete("document.pdf")

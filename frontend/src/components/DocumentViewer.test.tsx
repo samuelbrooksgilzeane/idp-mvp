@@ -208,15 +208,52 @@ describe("DocumentViewer", () => {
     );
   });
 
-  it("shows an intentional empty state before parsing", () => {
-    const fetchMock = vi.fn();
+  it.each([undefined, "parse-historical"])(
+    "loads retained pages and elements despite UPLOADED status (parse %s)",
+    async (parseRunId) => {
+      const resolvedId = parseRunId ?? "parse-latest";
+      const imageUrl = `${pages[0].image_url}?parse_run_id=${resolvedId}`;
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input.toString();
+        if (url.includes("/viewer")) {
+          return { ok: true, status: 200, json: async () => ({
+            parse_run_id: resolvedId, pages: [{ ...pages[0], image_url: imageUrl }],
+          }) };
+        }
+        return { ok: true, status: 200, json: async () => pageOneElements };
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      render(<DocumentViewer documentId={documentId} documentStatus="UPLOADED" parseRunId={parseRunId} />);
+
+      const image = await screen.findByAltText("Rendered page 1");
+      expect(image).toHaveAttribute("src", imageUrl);
+      setImageDimensions(image, 1600, 2200, 800, 1100);
+      fireEvent.load(image);
+      expect(await screen.findByRole("button", { name: /text 7: Invoice number/ })).toBeInTheDocument();
+      expect(screen.queryByText("Viewer waiting")).not.toBeInTheDocument();
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/documents/${documentId}/viewer${parseRunId ? `?parse_run_id=${parseRunId}` : ""}`,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        `/api/documents/${documentId}/elements?page_id=0&parse_run_id=${resolvedId}`,
+      );
+    },
+  );
+
+  it("shows an empty state only when the server confirms no successful parse", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: false, status: 409,
+      json: async () => ({ error: { code: "DOCUMENT_NOT_PARSED", message: "No successful parse is available." } }),
+    }));
     vi.stubGlobal("fetch", fetchMock);
     render(<DocumentViewer documentId={documentId} documentStatus="UPLOADED" />);
 
-    expect(screen.getByText("Viewer waiting")).toBeInTheDocument();
-    expect(screen.getByText(/Parse this document/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await screen.findByText("Viewer waiting")).toBeInTheDocument();
+    expect(screen.getByText("No successful parse is available.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
 });
 
 function viewerFetch() {
