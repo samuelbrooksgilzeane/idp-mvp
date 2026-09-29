@@ -4,6 +4,8 @@ import type { DocumentRecord } from "../types";
 import { useCursorPage, invalidateListPages } from "./useCursorPage";
 import { rememberCursor, previousCursor } from "../lib/listNavigation";
 
+const IN_PROGRESS = ["PARSE_QUEUED", "PARSING", "EXTRACTING", "VALIDATING"];
+
 export function useDocumentPage(enabled: boolean) {
   const [params, setParams] = useSearchParams();
   const caseId = params.get("case") || null;
@@ -20,7 +22,7 @@ export function useDocumentPage(enabled: boolean) {
   const page = useCursorPage<DocumentRecord>(`/api/documents/page?${query}`, enabled, revision);
   rememberCursor(key, page.next_cursor, cursor);
   useEffect(() => {
-    if (!enabled || !page.items.some(item => ["PARSE_QUEUED", "PARSING"].includes(item.status))) return;
+    if (!enabled || !page.items.some(item => IN_PROGRESS.includes(item.status))) return;
     const timer = setInterval(() => { if (!document.hidden) setRevision(v => v + 1); }, 5000);
     return () => clearInterval(timer);
   }, [enabled, page.items]);

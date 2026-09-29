@@ -115,5 +115,6 @@ resources:
           - databricks-sdk==0.133.0
           - fastapi==0.116.1
           - pydantic-settings==2.10.1
+      # Queue rather than skip a run started while another is active (max_concurrent_runs: 1).
       queue:
-        enabled: false
+        enabled: true

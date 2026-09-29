@@ -13,11 +13,31 @@ const ids = ["doc-a", "doc-b"];
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("BatchActions", () => {
+  const voucher = { schema_id: "hud_voucher", schema_version: 1, display_name: "A voucher", status: "PRODUCTION",
+    created_at: "2026-08-01T00:00:00Z", published_at: "2026-08-01T00:00:00Z" };
+  const invoice = { schema_id: "invoice", schema_version: 4, display_name: "Invoice", status: "PUBLISHED",
+    created_at: "2026-09-20T00:00:00Z", published_at: "2026-09-27T00:00:00Z" };
+  const schemasOnly = () => vi.fn(async () => ({ ok: true, json: async () => [voucher, invoice] }));
+
+  it("defaults to the most recently published schema, not the first listed", async () => {
+    vi.stubGlobal("fetch", schemasOnly());
+    render(<BatchActions selectedIds={ids} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText(/Schema/)).toHaveValue("invoice:4"));
+  });
+
+  it("prefers the schema last chosen in this browser", async () => {
+    localStorage.setItem("idp:last-extraction-schema", "hud_voucher:1");
+    vi.stubGlobal("fetch", schemasOnly());
+    render(<BatchActions selectedIds={ids} onClear={vi.fn()} onDocumentsChanged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByLabelText(/Schema/)).toHaveValue("hud_voucher:1"));
+  });
+
   it("submits the selection as one batch and reports completion", async () => {
     vi.useFakeTimers();
     let settled = false;

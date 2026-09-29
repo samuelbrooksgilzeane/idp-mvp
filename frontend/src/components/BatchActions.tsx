@@ -31,7 +31,22 @@ type ExtractableSchema = {
   schema_version: number;
   display_name: string;
   status: string;
+  created_at?: string;
+  published_at?: string | null;
 };
+
+const LAST_SCHEMA_KEY = "idp:last-extraction-schema";
+
+/** The schema last used for extraction in this browser, else the most recently published one. */
+function defaultSchemaKey(schemas: ExtractableSchema[]): string {
+  const keyOf = (item: ExtractableSchema) => `${item.schema_id}:${item.schema_version}`;
+  let remembered: string | null = null;
+  try { remembered = localStorage.getItem(LAST_SCHEMA_KEY); } catch { /* Storage is optional. */ }
+  if (remembered && schemas.some((item) => keyOf(item) === remembered)) return remembered;
+  const newest = [...schemas].sort((a, b) =>
+    (b.published_at ?? b.created_at ?? "").localeCompare(a.published_at ?? a.created_at ?? ""))[0];
+  return newest ? keyOf(newest) : "";
+}
 
 type BatchActionsProps = {
   automaticPreparation?: boolean;
@@ -72,7 +87,7 @@ export function BatchActions({
           (item) => item.status === "PRODUCTION" || item.status === "PUBLISHED",
         );
         setSchemas(extractable);
-        setSchemaKey(extractable.length ? `${extractable[0].schema_id}:${extractable[0].schema_version}` : "");
+        setSchemaKey(defaultSchemaKey(extractable));
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -114,6 +129,9 @@ export function BatchActions({
   }, [onDocumentsChanged]);
 
   async function run(kind: BatchKind) {
+    if (kind === "extract" && schema) {
+      try { localStorage.setItem(LAST_SCHEMA_KEY, schemaKey); } catch { /* Optional. */ }
+    }
     if (kind === "extract" && bulkExtraction) {
       if (schema) await extraction.start(selectedIds, schema.schema_id, schema.schema_version);
       return;
@@ -201,7 +219,10 @@ export function BatchActions({
           id="batch-schema"
           value={schemaKey}
           disabled={busy || !schemas.length}
-          onChange={(event) => setSchemaKey(event.target.value)}
+          onChange={(event) => {
+            setSchemaKey(event.target.value);
+            try { localStorage.setItem(LAST_SCHEMA_KEY, event.target.value); } catch { /* Optional. */ }
+          }}
         >
           {schemas.length === 0 ? <option value="">No extractable schema published</option> : null}
           {schemas.map((item) => {
