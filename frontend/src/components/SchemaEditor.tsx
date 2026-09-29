@@ -210,8 +210,7 @@ export function SchemaEditor() {
     <section className="schema-editor" aria-labelledby="schema-editor-title">
       <div className="schema-heading">
         <div>
-          <p className="eyebrow">Extraction schemas</p>
-          <h2 id="schema-editor-title">Schema library</h2>
+                    <h2 id="schema-editor-title">Schema library</h2>
         </div>
         <button
           type="button"
@@ -250,7 +249,7 @@ export function SchemaEditor() {
                       >
                         <span>v{version.schema_version}</span>
                         <span className={`schema-status schema-status-${version.status.toLowerCase()}`}>
-                          {version.status}
+                          {schemaStatusLabel(version.status)}
                         </span>
                       </button>
                     </li>
@@ -536,7 +535,7 @@ function SchemaDetailPanel({
   return (
     <div className="schema-detail-panel">
       <div className="schema-provenance" aria-label="Schema provenance">
-        <span className={`schema-status schema-status-${detail.status.toLowerCase()}`}>{detail.status}</span>
+        <span className={`schema-status schema-status-${detail.status.toLowerCase()}`}>{schemaStatusLabel(detail.status)}</span>
         <span>Version {detail.schema_version}</span>
         <span>{detail.root_mode === "REPEATED_RECORDS" ? "Repeated records" : "Single record"}</span>
         <span className={depth > MAX_DEPTH ? "limit-exceeded" : ""}>Depth {depth}/{MAX_DEPTH}</span>
@@ -736,4 +735,8 @@ function ReadOnlyNode({ name, node }: { name: string; node: ApiSchemaField }) {
       {node.items?.properties ? <ReadOnlyTree tree={node.items.properties} /> : null}
     </li>
   );
+}
+
+function schemaStatusLabel(status: string): string {
+  return status === "PRODUCTION" || status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : status === "RETIRED" ? "Retired" : status;
 }

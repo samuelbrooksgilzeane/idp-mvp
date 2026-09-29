@@ -136,7 +136,7 @@ describe("DocumentsPage", () => {
         retry: vi.fn(), clear: vi.fn(), pause: vi.fn(), refresh: vi.fn() }} /></MemoryRouter>);
     const file = new File(["%PDF-test"], "test.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText(/Choose PDF files/), { target: { files: [file] } });
-    fireEvent.click(screen.getByRole("button", { name: "Register documents" }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload documents" }));
     await waitFor(() => expect(start).toHaveBeenCalledWith({ files: [file], caseId: "" }));
   });
 });

@@ -1,6 +1,6 @@
 import { FileText, RefreshCw, Trash2 } from "lucide-react";
 
-import { documentStatusLabel } from "../lib/documentStatus";
+import { documentStages, documentStatusLabel } from "../lib/documentStatus";
 import type { DocumentRecord } from "../types";
 
 type DocumentListProps = {
@@ -103,7 +103,7 @@ export function DocumentList({
                     />
                   </th>
                 ) : null}
-                <th>Document</th><th>Case</th><th>Status</th><th>Uploaded</th><th>Size</th>
+                <th>Document</th><th>Case</th><th>Status</th><th>Progress</th><th>Uploaded</th><th>Size</th>
                 {onDelete ? <th><span className="visually-hidden">Actions</span></th> : null}
               </tr>
             </thead>
@@ -139,6 +139,11 @@ export function DocumentList({
                   <td>
                     <span className={`status-label status-${document.status.toLowerCase()}`}>
                       {documentStatusLabel(document.status)}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="stage-track" aria-hidden="true">
+                      {documentStages(document.status).map((stage, index) => <i key={index} className={`stage-${stage}`} />)}
                     </span>
                   </td>
                   <td>{formatter.format(new Date(document.uploaded_at))}</td>

@@ -53,7 +53,7 @@ describe("BatchActions", () => {
     );
 
     expect(screen.getByText("2 selected")).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Parse selected/ })); });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Prepare selected/ })); });
     await act(() => vi.advanceTimersByTimeAsync(800));
     expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
     await act(() => vi.advanceTimersByTimeAsync(5000));

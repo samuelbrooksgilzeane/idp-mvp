@@ -29,9 +29,15 @@ export function UploadPanel({ uploading, notice, onUpload, resuming = false, max
     <aside className="upload-panel" aria-labelledby="upload-title">
       <div className="section-heading">
         <div className="section-icon"><FileUp size={18} aria-hidden="true" /></div>
-        <div><p className="eyebrow">New intake</p><h2 id="upload-title">Upload PDFs</h2></div>
+        <div>
+          <h2 id="upload-title">Upload PDFs</h2>
+          <p className="upload-hint">
+            Up to {maxFiles.toLocaleString()} PDFs per batch, three transferring at a time. Case ID is optional.
+          </p>
+        </div>
       </div>
-      <form onSubmit={(event) => void submit(event)}>
+      <form className="upload-form" onSubmit={(event) => void submit(event)}>
+        <div className="upload-case">
         <label className="field-label" htmlFor="case-id">Case ID <span>Optional</span></label>
         <input
           id="case-id"
@@ -41,11 +47,7 @@ export function UploadPanel({ uploading, notice, onUpload, resuming = false, max
           placeholder="e.g. CASE-1042"
           value={caseId}
         />
-
-        <p className="upload-hint">
-          Choose an extraction template after preparing your documents. Select up to {maxFiles.toLocaleString()} PDFs
-          per upload batch. Files transfer three at a time.
-        </p>
+        </div>
 
         <label className="file-picker" htmlFor="pdf-files">
           <Upload size={22} aria-hidden="true" />
@@ -70,7 +72,7 @@ export function UploadPanel({ uploading, notice, onUpload, resuming = false, max
           {uploading
             ? <LoaderCircle className="spin" size={17} aria-hidden="true" />
             : <Upload size={17} aria-hidden="true" />}
-          {uploading ? "Uploading" : resuming ? "Reselect and continue" : "Register documents"}
+          {uploading ? "Uploading" : resuming ? "Reselect and continue" : "Upload documents"}
         </button>
         {files.length > maxFiles ? <p role="alert">Select at most {maxFiles.toLocaleString()} PDFs.</p> : null}
         {notice

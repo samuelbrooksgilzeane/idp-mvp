@@ -135,7 +135,7 @@ export function ResultDetailPage() {
 
       <div className="detail-header">
         <div>
-          <p className="eyebrow">{document.file_name}</p>
+          <p className="detail-kicker">{document.file_name}</p>
           <h2 id="result-detail-title">
             {review.schema_id} · v{review.schema_version}
           </h2>

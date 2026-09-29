@@ -1,3 +1,4 @@
+import { documentStatusLabel } from "../lib/documentStatus";
 import { ReviewNavigation } from "../components/ReviewNavigation";
 import { invalidateDocumentReviews } from "../lib/extractionReviewPrefetch";
 import { ArrowLeft, Clock3, LoaderCircle, Play, RotateCcw } from "lucide-react";
@@ -178,8 +179,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
       <ReviewNavigation id={documentId} kind="documents" />
       <div className="detail-header">
         <div>
-          <p className="eyebrow">Document detail</p>
-          <h2 id="detail-title">{document.file_name}</h2>
+                    <h2 id="detail-title">{document.file_name}</h2>
           <span className="detail-identity">{document.document_id}</span>
         </div>
         <button
@@ -200,8 +200,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
             : document.status === "EXTRACTING"
               ? "Extracting"
               : retry
-                ? "Retry parse"
-                : runs.some((run) => run.status === "SUCCESS") ? "Prepare again" : "Parse document"}
+                ? "Retry preparation"
+                : runs.some((run) => run.status === "SUCCESS") ? "Prepare again" : "Prepare document"}
         </button>
       </div>
 
@@ -210,7 +210,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
           <dt>Status</dt>
           <dd>
             <span className={`status-label status-${document.status.toLowerCase()}`}>
-              {document.status}
+              {documentStatusLabel(document.status)}
             </span>
           </dd>
         </div>

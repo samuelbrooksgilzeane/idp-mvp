@@ -51,7 +51,7 @@ describe("App", () => {
 
     renderApp();
 
-    expect(screen.getByRole("heading", { name: "Upload and track documents" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Documents" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sections" })).toHaveTextContent("Documents");
     await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
@@ -76,7 +76,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("invoice-1042.pdf")).toBeInTheDocument());
     expect(screen.getByText("CASE-1042")).toBeInTheDocument();
     // The status also appears as a filter option, so assert the row's own status label.
-    expect(screen.getByText("UPLOADED", { selector: ".status-label" })).toBeInTheDocument();
+    expect(screen.getByText("Uploaded", { selector: ".status-label" })).toBeInTheDocument();
     expect(screen.queryByText(/Volumes/)).not.toBeInTheDocument();
   });
 
@@ -101,7 +101,7 @@ describe("App", () => {
 
     // The detail route renders its own heading and tabs.
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: "Inspect a document" })).toBeInTheDocument(),
+      expect(screen.getByRole("heading", { name: "invoice-1042.pdf" })).toBeInTheDocument(),
     );
     expect(await screen.findByRole("tab", { name: "Extraction" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /All documents/ })).toBeInTheDocument();
@@ -120,7 +120,7 @@ describe("App", () => {
     renderApp("/schema");
 
     expect(
-      await screen.findByRole("heading", { name: "Extraction contract" }),
+      await screen.findByRole("heading", { name: "Schemas" }),
     ).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Schema library" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents");

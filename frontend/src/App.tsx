@@ -1,6 +1,7 @@
 import { invalidateListPages } from "./hooks/useCursorPage";
 import { setCacheScope } from "./lib/requestCache";
 import { invalidateDocumentReviews } from "./lib/extractionReviewPrefetch";
+import { ChevronRight } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 
@@ -29,32 +30,28 @@ type RuntimeState =
   | { kind: "ready"; health: HealthResponse }
   | { kind: "unavailable" };
 
-const HEADINGS: Record<string, { eyebrow: string; title: string; blurb: string }> = {
+const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: string }> = {
   documents: {
-    eyebrow: "Document processing",
-    title: "Upload and track documents",
-    blurb: "Register PDFs and follow each one through parsing, extraction and validation.",
+    crumbs: ["Documents"],
+    title: "Documents",
+    blurb: "Upload PDFs, prepare them, then select documents and a schema to extract.",
   },
-  detail: {
-    eyebrow: "Document processing",
-    title: "Inspect a document",
-    blurb: "Review parsed pages, extracted fields with evidence, and validation exceptions.",
-  },
+  detail: { crumbs: ["Documents", "Document"] },
   results: {
-    eyebrow: "Reporting",
-    title: "Results and export",
-    blurb: "Review every extraction run and export the ones you need.",
+    crumbs: ["Results"],
+    title: "Results",
+    blurb: "Every extraction run. Filter, open one to review it beside its source, or export.",
   },
-  "result-detail": {
-    eyebrow: "Reporting",
-    title: "Extraction run",
-    blurb: "Review one run's result beside its source, with citations and confidence.",
+  "result-detail": { crumbs: ["Results", "Extraction run"] },
+  genie: {
+    crumbs: ["Ask Genie"],
+    title: "Ask Genie",
+    blurb: "Ask questions about your extracted results in plain English.",
   },
-  genie: { eyebrow: "Project questions", title: "Ask Genie", blurb: "Explore the project’s structured results with your Databricks identity." },
   schema: {
-    eyebrow: "Governance",
-    title: "Extraction contract",
-    blurb: "The approved, versioned schema every extraction is measured against.",
+    crumbs: ["Schemas"],
+    title: "Schemas",
+    blurb: "A schema lists the fields to extract from a document. Choose one when you extract.",
   },
 };
 
@@ -144,26 +141,28 @@ export function App() {
     runtime.kind === "ready" ? "Reachable" : runtime.kind === "loading" ? "Checking" : "Unavailable";
   const heading = HEADINGS[sectionFor(location.pathname)];
 
+  const blurb = sectionFor(location.pathname) === "documents" && upload.automaticPreparation
+    ? "Upload PDFs — they are prepared automatically. Then select documents and a schema to extract."
+    : heading.blurb;
+
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} />
+      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} />
+      <div className="app-main">
+      <header className="top-bar" aria-label="Location">
+        {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1
+          ? <strong key={crumb}>{crumb}</strong>
+          : <span className="crumb" key={crumb}>{crumb}<ChevronRight size={14} aria-hidden="true" /></span>)}
+      </header>
       <main>
-        <section className="page-heading" aria-labelledby="page-title">
-          <div>
-            <p className="eyebrow">{heading.eyebrow}</p>
-            <h1 id="page-title">{heading.title}</h1>
-            <p>{heading.blurb}</p>
-          </div>
-          <dl className="runtime-summary" aria-label="Runtime status">
-            <div><dt>Runtime</dt><dd>{runtimeMode}</dd></div>
+        {heading.title ? (
+          <section className="page-heading" aria-labelledby="page-title">
             <div>
-              <dt>API</dt>
-              <dd className={`status-${apiStatus.toLowerCase()}`}>
-                <span className="status-dot" aria-hidden="true" />{apiStatus}
-              </dd>
+              <h1 id="page-title">{heading.title}</h1>
+              <p>{blurb}</p>
             </div>
-          </dl>
-        </section>
+          </section>
+        ) : null}
 
         <Suspense fallback={<div className="results-state" role="status">Loading view…</div>}>
         <Routes key={scope}>
@@ -205,10 +204,7 @@ export function App() {
         </Routes>
         </Suspense>
       </main>
-      <footer>
-        <span>Retained parser contract 2.0</span>
-        <span>Approved schema registry enabled</span>
-      </footer>
+      </div>
     </div>
   );
 }

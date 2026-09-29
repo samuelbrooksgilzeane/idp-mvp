@@ -83,7 +83,7 @@ describe("DocumentDetailPage", () => {
 
     renderPage();
     await screen.findByText("invoice-1042.pdf");
-    fireEvent.click(screen.getByRole("button", { name: "Parse document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Prepare document" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Preparing" })).toBeDisabled());
     await waitFor(

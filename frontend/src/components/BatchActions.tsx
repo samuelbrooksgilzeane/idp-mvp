@@ -194,8 +194,8 @@ export function BatchActions({
       </div>
       <div className="batch-schema-select">
         <label htmlFor="batch-schema">
-          Extraction schema
-          <span>Applies to whichever documents are selected below.</span>
+          Schema
+          <span>Applies to every selected document.</span>
         </label>
         <select
           id="batch-schema"
@@ -216,7 +216,7 @@ export function BatchActions({
       </div>
       <div className="batch-buttons">
         {automaticPreparation ? <details>
-          <summary>Advanced preparation</summary>
+          <summary>Prepare again</summary>
         <button
           type="button"
           disabled={busy || !selectedIds.length}
@@ -227,7 +227,7 @@ export function BatchActions({
           ) : (
             <Play size={15} aria-hidden="true" />
           )}
-          Parse selected
+          Prepare selected
         </button>
         </details> : (
         <button
@@ -240,7 +240,7 @@ export function BatchActions({
           ) : (
             <Play size={15} aria-hidden="true" />
           )}
-          Parse selected
+          Prepare selected
         </button>
         )}
         <button

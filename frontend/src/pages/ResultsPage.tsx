@@ -333,7 +333,7 @@ export function ResultsPage() {
                   <td>{row.schema_display_name} · v{row.schema_version}</td>
                   <td>{formatter.format(new Date(row.started_at))}</td>
                   <td>
-                    <span className={`status-label status-${row.status.toLowerCase()}`}>{row.status}</span>
+                    <span className={`status-label status-${row.status.toLowerCase()}`}>{runStatusLabel(row.status)}</span>
                   </td>
                 </tr>
               ))}
@@ -350,4 +350,8 @@ export function ResultsPage() {
       ) : null}
     </section>
   );
+}
+
+function runStatusLabel(status: string): string {
+  return ({ EXTRACTED: "Extracted", FAILED: "Failed", RUNNING: "Running", QUEUED: "Queued" } as Record<string, string>)[status] ?? status;
 }

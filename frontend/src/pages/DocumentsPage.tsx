@@ -10,6 +10,7 @@ import { UploadPanel } from "../components/UploadPanel";
 import { documentStatusLabel } from "../lib/documentStatus";
 import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
 import type { DocumentRecord, DocumentStatus, Notice } from "../types";
+import { Check } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 type DocumentsPageProps = {
@@ -116,7 +117,8 @@ export function DocumentsPage({
 
   return (
     <section className="intake-layout" aria-label="PDF parsing workspace">
-      <div>
+      <WorkflowSteps automaticPreparation={Boolean(upload?.automaticPreparation)} maxFiles={upload?.maxFiles ?? 1000} />
+      <div className="intake-upload">
         <UploadPanel uploading={upload?.busy ?? false} notice={notice}
           onUpload={upload?.start ?? (async () => {})} resuming={Boolean(upload?.batch)}
           maxFiles={upload?.maxFiles} maxFileBytes={upload?.maxFileBytes} />
@@ -157,8 +159,7 @@ export function DocumentsPage({
             />
           </div>
           <p className="registry-filters-hint">
-            Filters change the list. Your explicit selection stays selected across pages and
-            filters (up to 1,000 documents). Clear it before starting a different selection.
+            Selections are kept across pages and filters (up to 1,000 documents).
           </p>
         </div>
         <BatchActions
@@ -199,12 +200,35 @@ export function DocumentsPage({
           deletingId={deletingId}
         />
         {pageError ? <p role="alert">{pageError} <button type="button" onClick={onReset}>Reset list</button></p> : null}
-        <nav aria-label="Document pages">
+        <nav className="list-pager" aria-label="Document pages">
           <button type="button" disabled={loading || !hasPrevious} onClick={onPrevious}>Previous page</button>
           <button type="button" disabled={loading || !hasNext} onClick={onNext}>Next page</button>
           <button type="button" disabled={loading} onClick={onReset}>First page</button>
         </nav>
       </div>
     </section>
+  );
+}
+
+function WorkflowSteps({ automaticPreparation, maxFiles }: { automaticPreparation: boolean; maxFiles: number }) {
+  const steps = [
+    { title: "Upload", detail: `PDFs, up to ${maxFiles.toLocaleString()} at a time` },
+    automaticPreparation
+      ? { title: "Prepared automatically", detail: "Starts on upload, no action needed", auto: true }
+      : { title: "Prepare", detail: "Select documents, then Prepare selected" },
+    { title: "Extract", detail: "Select documents and a schema" },
+    { title: "Review, export or ask", detail: "Open a document, Results, or Ask Genie" },
+  ];
+  return (
+    <ol className="workflow-guide" aria-label="How it works">
+      {steps.map((step, index) => (
+        <li key={step.title}>
+          <span className={step.auto ? "step-number step-auto" : "step-number"} aria-hidden="true">
+            {step.auto ? <Check size={13} /> : index + 1}
+          </span>
+          <span><strong>{step.title}</strong><small>{step.detail}</small></span>
+        </li>
+      ))}
+    </ol>
   );
 }

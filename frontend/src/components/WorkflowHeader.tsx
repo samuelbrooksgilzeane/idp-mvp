@@ -1,36 +1,45 @@
+import { Braces, FileText, MessageSquare, Table2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const NAVIGATION = [
-  { label: "Documents", to: "/", end: true },
-  { label: "Results", to: "/results", end: false },
-  { label: "Ask Genie", to: "/ask-genie", end: false },
-  { label: "Schema", to: "/schema", end: false },
+  { label: "Documents", to: "/", end: true, Icon: FileText },
+  { label: "Results", to: "/results", end: false, Icon: Table2 },
+  { label: "Ask Genie", to: "/ask-genie", end: false, Icon: MessageSquare },
+  { label: "Schemas", to: "/schema", end: false, Icon: Braces },
 ];
 
-type WorkflowHeaderProps = { appName: string };
+type WorkflowHeaderProps = { appName: string; runtimeMode?: string; apiStatus?: string };
 
-export function WorkflowHeader({ appName }: WorkflowHeaderProps) {
+/** Sidebar navigation; the runtime footer only reports live connection state. */
+export function WorkflowHeader({ appName, runtimeMode, apiStatus }: WorkflowHeaderProps) {
   return (
-    <header className="workflow-header">
+    <aside className="app-sidebar">
       <div className="brand-lockup">
         <span className="brand-mark" aria-hidden="true">IDP</span>
         <div><strong>{appName}</strong><span>Document workflow</span></div>
       </div>
       <nav aria-label="Sections">
         <ul className="workflow-steps">
-          {NAVIGATION.map((item, index) => (
-            <li key={item.to}>
-              <NavLink
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => (isActive ? "active" : undefined)}
-              >
-                <span>{String(index + 1).padStart(2, "0")}</span>{item.label}
+          {NAVIGATION.map(({ label, to, end, Icon }) => (
+            <li key={to}>
+              <NavLink to={to} end={end} className={({ isActive }) => (isActive ? "active" : undefined)}>
+                <Icon size={16} aria-hidden="true" />{label}
               </NavLink>
             </li>
           ))}
         </ul>
       </nav>
-    </header>
+      {apiStatus ? (
+        <dl className="sidebar-footer" aria-label="Runtime status">
+          <div>
+            <dt>API</dt>
+            <dd className={`status-${apiStatus.toLowerCase()}`}>
+              <span className="status-dot" aria-hidden="true" />{apiStatus}
+            </dd>
+          </div>
+          {runtimeMode === "mock" ? <div><dt>Mode</dt><dd>Local mock</dd></div> : null}
+        </dl>
+      ) : null}
+    </aside>
   );
 }

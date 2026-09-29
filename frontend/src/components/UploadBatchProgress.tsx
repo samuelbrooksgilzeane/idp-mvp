@@ -16,7 +16,8 @@ export function UploadBatchProgress({ upload }: { upload: UploadBatchController 
   const failed = items.filter((item) => item.state === "FAILED").length;
   const current = Math.min(page, Math.max(0, Math.ceil(items.length / 25) - 1));
   return <section className="upload-batch-progress" aria-label="Upload progress">
-    <h3>Upload progress</h3>
+    <h3>Upload progress <span className="upload-count">{registered} / {items.length}</span></h3>
+    {upload.busy ? <div className="activity-bar" aria-hidden="true" /> : null}
     <p role="status">{registered} of {items.length} uploaded · {queued} waiting · {transferring} uploading · {failed} need attention</p>
     {upload.batch.case_id ? <p>Case: {upload.batch.case_id}</p> : null}
     <p>Uploads continue while you navigate in this app. Closing or refreshing the tab stops unfinished transfers; reselect the original files to continue. Completed files are skipped.</p>
@@ -28,12 +29,14 @@ export function UploadBatchProgress({ upload }: { upload: UploadBatchController 
     <button type="button" disabled={upload.busy} onClick={() => {
       if (registered === items.length || window.confirm("Start a new upload batch? This batch's saved outcomes remain on the server.")) upload.clear();
     }}>New upload batch</button>
+    <details className="upload-files"><summary>Show files</summary>
     <ul>{items.slice(current * 25, current * 25 + 25).map((item) => <li key={item.client_file_id}>
       <strong>{item.name}</strong> — {labels[item.state]}
       {item.document_id ? <> · <Link to={`/documents/${item.document_id}`}>View document</Link></> : null}
       {item.error_message ? <p>{item.error_message}</p> : null}
       {item.error_code ? <details><summary>Diagnostics</summary>{item.error_code}</details> : null}
     </li>)}</ul>
+    </details>
     {items.length > 25 ? <nav aria-label="Upload file pages">
       <button type="button" disabled={current === 0} onClick={() => setPage(current - 1)}>Previous files</button>
       <span>Page {current + 1} of {Math.ceil(items.length / 25)}</span>

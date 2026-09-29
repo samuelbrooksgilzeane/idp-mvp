@@ -86,8 +86,8 @@ describe("SchemaEditor", () => {
 
     expect(await screen.findByText("Custom Form")).toBeInTheDocument();
     expect(screen.getByText("Invoice v4")).toBeInTheDocument();
-    expect(screen.getByText("DRAFT")).toBeInTheDocument();
-    expect(screen.getByText("PUBLISHED")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+    expect(screen.getByText("Published")).toBeInTheDocument();
   });
 
   it("creates a schema, edits its draft tree, validates it, and publishes it", async () => {
@@ -145,7 +145,7 @@ describe("SchemaEditor", () => {
     expect(screen.queryByRole("button", { name: "Save draft" })).not.toBeInTheDocument();
     const calls = vi.mocked(fetch).mock.calls;
     expect(calls.filter(([url]) => String(url) === "/api/schemas?status=ALL")).toHaveLength(1);
-    expect(screen.getAllByText("PUBLISHED")).toHaveLength(2);
+    expect(screen.getAllByText("Published")).toHaveLength(2);
   });
 
   it("shows a published schema read-only and clones it into a new editable draft", async () => {
