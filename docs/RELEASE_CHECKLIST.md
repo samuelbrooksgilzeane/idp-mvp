@@ -17,9 +17,11 @@ and [synthetic export benchmark](EXPORT_BENCHMARK.md).
 
 - Branch `feat/dark-blue-ui`: `4fc7a2e` commits the 29 September deployed working tree and release docs;
   `32476d5` adds the dark blue UI and 3-way parse/extract parallelism. Details in the 30 September record.
-- App is RUNNING with deployment `01f1bc5e24d710a9a997e9d6b2b5b197` (30 September); authenticated health
-  passed and deployed assets match the local build. Rollback reference: `01f1bc532ec01c13a89d8c0a68ccd4c2`.
-- Parser and extractor Jobs run up to 3 documents at a time each (combined budget 6).
+- App is RUNNING with deployment `01f1bc608256171da1298bb6378073e4` (30 September, includes `5244305`); authenticated health
+  passed and deployed assets match the local build. Rollback references: `01f1bc5e24d710a9a997e9d6b2b5b197`
+  (earlier 30 September) and `01f1bc532ec01c13a89d8c0a68ccd4c2` (29 September).
+- Parser and extractor Jobs run up to 3 documents at a time each (combined budget 6) and queue, rather
+  than skip, a run started while another is active.
 - Additive upload/work, export and viewer migrations applied; all 27 project tables/views verified (29 September).
 - Narrow app grants and dispatcher/export permissions verified; recovery schedule remains PAUSED.
 - Local checks: 252 backend and 83 frontend tests, lint/type checks, production build and configuration
@@ -37,11 +39,13 @@ export → ask Genie, on the live app, without surprises. Order matters: each st
    open a result and click citations, export XLSX, delete one disposable file. This has not been run on
    the new UI or with 3-way parallelism. Cost: a handful of parse/extract calls.
    Agent then verifies registry, volume, provenance, citations and export against the runbook.
-2. [ ] **Agent — fix the three demo papercuts found on 30 September**, then redeploy:
+2. [x] **Agent — fix the three demo papercuts found on 30 September**, then redeploy:
    the Documents list does not refresh itself while documents are extracting; the selection bar defaults
    to the alphabetically first schema (HUD voucher) instead of the invoice schema; and confirm what happens
    when two single-document runs are started at once (queueing is disabled, so the second may be skipped
    and shown as failed). Enable Job queueing if it is.
+   Done in `5244305`, deployed `01f1bc608256171da1298bb6378073e4`: Databricks documents that such a run is
+   skipped, so queueing is now enabled on both Jobs.
 3. [ ] **User approves / agent configures — attach data sources to Genie.** The live space has no data
    sources, so it cannot answer questions yet. Attach the project's structured extraction views
    (the four generic Genie views created on 29 September) to the existing space through Databricks,
