@@ -10,4 +10,4 @@ All earlier documentation, plans, status trackers and reviews are in [archive](a
 They are historical evidence, not the current release status. Application PDFs and client files
 were not moved; this cleanup concerns repository documentation only.
 
-Current execution evidence: [29 September release record](RELEASE_EVIDENCE_2026-09-29.md), [smoke runbook](RELEASE_RUNBOOK.md), [capacity procedure](CAPACITY_TEST_PROCEDURE.md), [export benchmark](EXPORT_BENCHMARK.md).
+Current execution evidence: [30 September release record](RELEASE_EVIDENCE_2026-09-30.md), [29 September release record](RELEASE_EVIDENCE_2026-09-29.md), [smoke runbook](RELEASE_RUNBOOK.md), [capacity procedure](CAPACITY_TEST_PROCEDURE.md), [export benchmark](EXPORT_BENCHMARK.md).

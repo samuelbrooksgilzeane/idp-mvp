@@ -1,6 +1,6 @@
 # Shareable app release checklist
 
-Updated: 29 September 2026. This is the current release plan and status record.
+Updated: 30 September 2026. This is the current release plan and status record.
 Historical plans and evidence are preserved in [archive](archive/README.md).
 Check a release gate only after its stated evidence is recorded; implemented code is not deployed verification.
 
@@ -10,16 +10,62 @@ Check a release gate only after its stated evidence is recorded; implemented cod
 with three concurrent transfers, retries and durable progress. No live 1,000-file test has passed.
 Uploading and parsing/extracting 1,000 documents are separate acceptance gates.
 
-Current evidence: [29 September release record](RELEASE_EVIDENCE_2026-09-29.md),
+Current evidence: [30 September release record](RELEASE_EVIDENCE_2026-09-30.md),
+[29 September release record](RELEASE_EVIDENCE_2026-09-29.md),
 [user smoke/runbook](RELEASE_RUNBOOK.md), [capacity procedure](CAPACITY_TEST_PROCEDURE.md),
 and [synthetic export benchmark](EXPORT_BENCHMARK.md).
 
-- App is RUNNING with deployment `01f1bc532ec01c13a89d8c0a68ccd4c2`; authenticated health passed.
-- Additive upload/work, export and viewer migrations applied; all 27 project tables/views verified.
+- Branch `feat/dark-blue-ui`: `4fc7a2e` commits the 29 September deployed working tree and release docs;
+  `32476d5` adds the dark blue UI and 3-way parse/extract parallelism. Details in the 30 September record.
+- App is RUNNING with deployment `01f1bc5e24d710a9a997e9d6b2b5b197` (30 September); authenticated health
+  passed and deployed assets match the local build. Rollback reference: `01f1bc532ec01c13a89d8c0a68ccd4c2`.
+- Parser and extractor Jobs run up to 3 documents at a time each (combined budget 6).
+- Additive upload/work, export and viewer migrations applied; all 27 project tables/views verified (29 September).
 - Narrow app grants and dispatcher/export permissions verified; recovery schedule remains PAUSED.
-- Bundle deployment and activation succeeded; deployed JS/CSS hashes match the local production build.
-- Local checks: 248 backend and 81 frontend tests, lint/type checks, production build and configuration
+- Local checks: 252 backend and 83 frontend tests, lint/type checks, production build and configuration
   validation passed. No agent PDF uploads or live inference calls.
+
+## Path to a demo (excluding the 1,000-file test)
+
+A demo means you can walk someone through upload → prepare → extract → review with citations →
+export → ask Genie, on the live app, without surprises. Order matters: each step uses the previous one.
+
+### Must do before a demo
+
+1. [ ] **User — run the small live workflow (section 2) on the new UI.** Upload 3–5 representative PDFs
+   (include one multi-page and one duplicate), Prepare selected, Extract selected with the invoice schema,
+   open a result and click citations, export XLSX, delete one disposable file. This has not been run on
+   the new UI or with 3-way parallelism. Cost: a handful of parse/extract calls.
+   Agent then verifies registry, volume, provenance, citations and export against the runbook.
+2. [ ] **Agent — fix the three demo papercuts found on 30 September**, then redeploy:
+   the Documents list does not refresh itself while documents are extracting; the selection bar defaults
+   to the alphabetically first schema (HUD voucher) instead of the invoice schema; and confirm what happens
+   when two single-document runs are started at once (queueing is disabled, so the second may be skipped
+   and shown as failed). Enable Job queueing if it is.
+3. [ ] **User approves / agent configures — attach data sources to Genie.** The live space has no data
+   sources, so it cannot answer questions yet. Attach the project's structured extraction views
+   (the four generic Genie views created on 29 September) to the existing space through Databricks,
+   preserving its curation, then regenerate the overlay before the next deploy. Check that the embed
+   loads inside the app for your account (allowed origins) and that 2–3 prepared questions work.
+4. [ ] **Agent — write the demo script and seed plan.** A short click-by-click script, 3–4 prepared
+   Genie questions and the documents to use, relying on retained results so a demo rerun does not
+   repeat inference. Record the rollback deployment ID (above) with it.
+
+### Should do
+
+5. [ ] **User decision — automatic preparation.** Turning it on (plus the hourly recovery schedule)
+   makes the demo "upload, then extract" with no Prepare step. Low cost for a small demo set; needs
+   your approval (section 1). If left off, the UI already explains the Prepare step.
+6. [ ] **Before each demo:** start the SQL warehouse a few minutes early (it auto-stops after 10 minutes;
+   cold starts make the first pages slow) and open each page once.
+7. [ ] **If someone else will log in:** give them app access and run the colleague check (section 5).
+   Not needed if you drive the demo from your own account.
+
+### Known limits to mention (or avoid) during a demo
+
+- Schema save/publish takes about 5–6 seconds (section 4); create schemas before the demo.
+- PDF full-text search in Genie is not enabled; Genie answers from extracted results only.
+- Capacity beyond small batches is unproven until section 3 runs.
 
 ## Responsibility and approval rules
 
@@ -150,6 +196,7 @@ Execution is underway; completed items require the linked evidence. Live user ac
 - [ ] Test batch/export ownership restrictions locally and inspect intended Genie/source permissions.
 - [x] Document start/stop, retry/recovery, support, known limitations and artifact retention/cleanup.
 - [ ] Prepare the repeatable demo, regression evidence, deployment ID and rollback procedure.
+      Deployment and rollback IDs recorded 30 September; demo script is item 4 of "Path to a demo".
 - [ ] Investigate and fix issues reported from colleague testing; do not impersonate the colleague.
 
 ### User — action or approval
@@ -167,6 +214,8 @@ May be deferred for a pilot only if users are clearly told document content sear
 - [x] Preserve the existing Genie space and prepare source-volume/structured-view setup instructions.
       The source volume exposes original files, not our extracted-result tables.
 - [ ] Verify the embed URL and inspect allowed-origin configuration; fix app integration as needed.
+- [ ] Attach the structured extraction views to the existing space; the 30 September export shows
+      `data_sources: {}`, so Genie cannot answer result questions yet. Needs user approval of the sources.
 - [ ] Prepare upload → sync → search and deletion → sync → search checks; inspect results after the
       user-operated tests. Do not assume immediate index removal or continuous synchronization.
 - [x] Document sync ownership and how index freshness is communicated.
