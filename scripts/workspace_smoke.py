@@ -1,4 +1,4 @@
-"""Three bounded metadata reads; never starts compute or submits SQL, jobs or prompts."""
+"""Two bounded metadata reads; never starts compute or submits SQL, jobs or prompts."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ def check(client: Any, host: str, warehouse: str) -> list[dict[str, Any]]:
         raise ValueError("Invalid warehouse ID")
     checks = [
         ("warehouse", f"/api/2.0/sql/warehouses/{warehouse}", {}),
-        ("genie", "/api/2.0/genie/spaces", {"page_size": 5}),
         ("apps", "/api/2.0/apps", {"page_size": 5}),
     ]
     results = []
@@ -28,11 +27,7 @@ def check(client: Any, host: str, warehouse: str) -> list[dict[str, Any]]:
             summary = (
                 {"state": value.get("state")}
                 if name == "warehouse"
-                else {
-                    "first_page_count": len(
-                        value.get("spaces" if name == "genie" else "apps", [])
-                    )
-                }
+                else {"first_page_count": len(value.get("apps", []))}
             )
             results.append({"check": name, "ok": True, **summary})
         except Exception as error:

@@ -10,7 +10,7 @@ deployed mode uses Databricks Jobs, SQL, Unity Catalog volumes and governed Delt
 
 - [Current release checklist](docs/RELEASE_CHECKLIST.md): deployment, performance, sharing and required
   1,000-file upload acceptance gates.
-- [Deployment notes](docs/DEPLOYMENT_NOTES.md): target configuration, migrations, Genie preservation
+- [Deployment notes](docs/DEPLOYMENT_NOTES.md): target configuration, migrations, chat app link
   and the exact dev deploy commands.
 - [30 September release record](docs/RELEASE_EVIDENCE_2026-09-30.md): dark blue UI, 3-way parse/extract
   parallelism and the current deployment.

@@ -30,7 +30,7 @@ and [synthetic export benchmark](EXPORT_BENCHMARK.md).
 ## Path to a demo (excluding the 1,000-file test)
 
 A demo means you can walk someone through upload → prepare → extract → review with citations →
-export → ask Genie, on the live app, without surprises. Order matters: each step uses the previous one.
+export → ask documents, on the live app, without surprises. Order matters: each step uses the previous one.
 
 ### Must do before a demo
 
@@ -46,15 +46,13 @@ export → ask Genie, on the live app, without surprises. Order matters: each st
    and shown as failed). Enable Job queueing if it is.
    Done in `5244305`, deployed `01f1bc608256171da1298bb6378073e4`: Databricks documents that such a run is
    skipped, so queueing is now enabled on both Jobs.
-3. [ ] **User approves / agent configures — attach data sources to Genie.** Result views attached
-   30 September (`be8df8b`); still to do: attach the source volume with content search in the Sources tab,
-   then check the embed and prepared questions. The live space has no data
-   sources, so it cannot answer questions yet. Attach the project's structured extraction views
-   (the four generic Genie views created on 29 September) to the existing space through Databricks,
-   preserving its curation, then regenerate the overlay before the next deploy. Check that the embed
-   loads inside the app for your account (allowed origins) and that 2–3 prepared questions work.
+3. [ ] **Agent — document chat.** The earlier embedded question-answering space was retired on
+   30 September because its volume content search excludes catalogs with workspace bindings. Chat is
+   now a separate app linked as "Ask documents" (Batches 5–7 of
+   [the implementation plan](planning/IMPLEMENTATION_PLAN.md)). On Free Edition it cannot answer from
+   documents; demo it on the US workspace or leave it out.
 4. [ ] **Agent — write the demo script and seed plan.** A short click-by-click script, 3–4 prepared
-   Genie questions and the documents to use, relying on retained results so a demo rerun does not
+   chat questions and the documents to use, relying on retained results so a demo rerun does not
    repeat inference. Record the rollback deployment ID (above) with it.
 
 ### Should do
@@ -70,7 +68,7 @@ export → ask Genie, on the live app, without surprises. Order matters: each st
 ### Known limits to mention (or avoid) during a demo
 
 - Schema save/publish takes about 5–6 seconds (section 4); create schemas before the demo.
-- PDF full-text search in Genie is not enabled; Genie answers from extracted results only.
+- Document chat cannot answer from PDF content until the managed chat (Batch 7) is live.
 - Capacity beyond small batches is unproven until section 3 runs.
 
 ## Responsibility and approval rules
@@ -85,7 +83,7 @@ Execution is underway; completed items require the linked evidence. Live user ac
   An unchecked item here is not permission to execute it automatically.
 - A dependency on a user task is not a new approval requirement: continue other independent work
   while waiting. Report platform/permission blockers with the exact action needed.
-- Preserve existing data and Genie curation. Destructive changes to retained data or expanding access
+- Preserve existing data. Destructive changes to retained data or expanding access
   beyond the intended project identities need separate approval. Use disposable agent-created schemas
   for save/publish measurements; do not modify users' schema definitions for benchmarks.
 
@@ -99,10 +97,10 @@ Execution is underway; completed items require the linked evidence. Live user ac
 - [x] Apply/verify export and viewer migrations; verify generic projections/views.
 - [x] Apply and verify narrow table/volume and dispatcher/export Job permissions for existing project
       identities. Job IDs in environment variables do not grant access; check the App resource budget.
-- [x] Refresh the existing Genie definition before bundle planning; preserve user curation and never
-      deploy the stale first-create generated overlay.
+- [x] Refresh the (now retired) question-answering space definition before bundle planning; never
+      deploy a stale generated overlay.
 - [x] Build, run release checks, inspect deployment changes, deploy and verify authenticated health,
-      actual feature flags, current frontend assets and Genie URL. Record the deployment ID.
+      actual feature flags, current frontend assets and chat link. Record the deployment ID.
 - [x] Enable viewer projections and verify their prerequisites. Prepare queue/extraction/export settings
       and explain which settings start background processing before the user-run smoke test.
 
@@ -199,7 +197,7 @@ Execution is underway; completed items require the linked evidence. Live user ac
 
 ### Agent — independent work
 
-- [ ] Test batch/export ownership restrictions locally and inspect intended Genie/source permissions.
+- [ ] Test batch/export ownership restrictions locally and inspect intended chat/source permissions.
 - [x] Document start/stop, retry/recovery, support, known limitations and artifact retention/cleanup.
 - [ ] Prepare the repeatable demo, regression evidence, deployment ID and rollback procedure.
       Deployment and rollback IDs recorded 30 September; demo script is item 4 of "Path to a demo".
@@ -207,32 +205,28 @@ Execution is underway; completed items require the linked evidence. Live user ac
 
 ### User — action or approval
 
-- [ ] Test with an ordinary colleague account: app, documents, viewer, schemas, exports and Genie.
+- [ ] Test with an ordinary colleague account: app, documents, viewer, schemas, exports and document chat.
 - [ ] Confirm project-shared visibility is intended; uploader identity is not per-user isolation.
 - [ ] Confirm support ownership/retention policy and sign off the shareable release.
 
-## 6. Genie/content search — separate eligible-workspace gate
+## 6. Document chat — separate US-workspace gate
 
 May be deferred for a pilot only if users are clearly told document content search is unavailable.
+The embedded question-answering space used until 30 September is retired; its views and live space
+are removed in Batch 8 of [the implementation plan](planning/IMPLEMENTATION_PLAN.md), which now
+tracks this gate (Knowledge Assistant, Supervisor Agent and chat app).
 
 ### Agent — independent work
 
-- [x] Preserve the existing Genie space and prepare source-volume/structured-view setup instructions.
-      The source volume exposes original files, not our extracted-result tables.
-- [ ] Verify the embed URL and inspect allowed-origin configuration; fix app integration as needed.
-- [x] Attach the structured extraction views to the existing space. Done 30 September via
-      `prepare_genie_bundle.py` (repeatable in every workspace); volume/content search remain manual.
-- [ ] Prepare upload → sync → search and deletion → sync → search checks; inspect results after the
+- [ ] Prepare upload → sync → ask and deletion → sync → ask checks; inspect results after the
       user-operated tests. Do not assume immediate index removal or continuous synchronization.
 - [x] Document sync ownership and how index freshness is communicated.
 
 ### User — action or approval
 
-- [ ] Select the eligible workspace and configure/approve the source volume and optional structured
-      extraction views in the Genie space after creation.
-- [ ] Approve preview/content-search activation and indexing budget; enable/sync through supported controls.
-- [ ] Run upload/deletion/search checks with disposable fixtures and verify colleague access.
-- [ ] Confirm ongoing sync ownership, or explicitly defer content search for the pilot.
+- [ ] Provide the US workspace and approve the Knowledge Assistant source and sync workload.
+- [ ] Run upload/deletion/ask checks with disposable fixtures and verify colleague access.
+- [ ] Confirm ongoing sync ownership, or explicitly defer document chat for the pilot.
 
 ## Deferred unless explicitly added to release scope
 

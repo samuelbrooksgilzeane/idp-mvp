@@ -1,4 +1,4 @@
-"""Public display configuration only; Genie authenticates each viewer directly."""
+"""Public display configuration only; the chat app authenticates each viewer itself."""
 
 from typing import Annotated, Any
 
@@ -15,21 +15,4 @@ def app_config(
 ) -> dict[str, Any]:
     del user
     settings = request.app.state.settings
-    return {
-        "project_name": settings.genie_project_name or settings.app_name,
-        "genie": {
-            "enabled": settings.genie_enabled,
-            "space_id": settings.genie_space_id if settings.genie_enabled else None,
-            "embed_url": settings.genie_embed_url if settings.genie_enabled else None,
-            "open_url": (
-                f"{settings.genie_workspace_origin}/genie/rooms/{settings.genie_space_id}"
-                if settings.genie_enabled
-                else None
-            ),
-            "coverage": (
-                "Answers use the sources configured for this project in Databricks. "
-                "Project maintainers manage tables, volumes and search there. "
-                "App document selections do not filter Genie."
-            ),
-        },
-    }
+    return {"project_name": settings.app_name, "chat_app_url": settings.chat_app_url}

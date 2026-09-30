@@ -16,12 +16,12 @@ def module():
     return result
 
 
-def test_smoke_is_three_metadata_gets_without_pagination() -> None:
+def test_smoke_is_two_metadata_gets_without_pagination() -> None:
     client = SimpleNamespace(config=SimpleNamespace(host="https://example.com"), api_client=Mock())
     client.api_client.do.return_value = {}
     result = module().check(client, "https://example.com", "abc")
-    assert len(result) == 3 and all(item["ok"] for item in result)
-    assert [call.args[0] for call in client.api_client.do.call_args_list] == ["GET"] * 3
+    assert len(result) == 2 and all(item["ok"] for item in result)
+    assert [call.args[0] for call in client.api_client.do.call_args_list] == ["GET"] * 2
     assert client.api_client.do.call_args_list[-1].kwargs["query"] == {"page_size": 5}
 
 

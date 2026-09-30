@@ -1,17 +1,18 @@
-import { Braces, FileText, MessageSquare, Table2 } from "lucide-react";
+import { Braces, ExternalLink, FileText, MessageSquare, Table2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const NAVIGATION = [
   { label: "Documents", to: "/", end: true, Icon: FileText },
   { label: "Results", to: "/results", end: false, Icon: Table2 },
-  { label: "Ask Genie", to: "/ask-genie", end: false, Icon: MessageSquare },
   { label: "Schemas", to: "/schema", end: false, Icon: Braces },
 ];
 
-type WorkflowHeaderProps = { appName: string; runtimeMode?: string; apiStatus?: string };
+type WorkflowHeaderProps = {
+  appName: string; runtimeMode?: string; apiStatus?: string; chatAppUrl?: string | null;
+};
 
 /** Sidebar navigation; the runtime footer only reports live connection state. */
-export function WorkflowHeader({ appName, runtimeMode, apiStatus }: WorkflowHeaderProps) {
+export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl }: WorkflowHeaderProps) {
   return (
     <aside className="app-sidebar">
       <div className="brand-lockup">
@@ -27,6 +28,15 @@ export function WorkflowHeader({ appName, runtimeMode, apiStatus }: WorkflowHead
               </NavLink>
             </li>
           ))}
+          {chatAppUrl ? (
+            <li>
+              <a href={chatAppUrl} target="_blank" rel="noopener noreferrer"
+                aria-label="Ask documents (opens in a new tab)">
+                <MessageSquare size={16} aria-hidden="true" />Ask documents
+                <ExternalLink size={12} aria-hidden="true" className="external-mark" />
+              </a>
+            </li>
+          ) : null}
         </ul>
       </nav>
       {apiStatus ? (

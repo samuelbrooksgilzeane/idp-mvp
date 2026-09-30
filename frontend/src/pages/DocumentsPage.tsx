@@ -217,7 +217,7 @@ function WorkflowSteps({ automaticPreparation, maxFiles }: { automaticPreparatio
       ? { title: "Prepared automatically", detail: "Starts on upload, no action needed", auto: true }
       : { title: "Prepare", detail: "Select documents, then Prepare selected" },
     { title: "Extract", detail: "Select documents and a schema" },
-    { title: "Review, export or ask", detail: "Open a document, Results, or Ask Genie" },
+    { title: "Review, export or ask", detail: "Open a document, Results, or Ask documents" },
   ];
   return (
     <ol className="workflow-guide" aria-label="How it works">

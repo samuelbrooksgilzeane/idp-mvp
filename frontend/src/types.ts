@@ -169,6 +169,5 @@ export type InvoiceSummary = {
 
 export type AppConfig = {
   project_name: string;
-  genie: { enabled: boolean; space_id: string | null; embed_url: string | null;
-    open_url: string | null; coverage: string };
+  chat_app_url: string | null;
 };

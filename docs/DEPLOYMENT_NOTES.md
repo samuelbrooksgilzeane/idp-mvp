@@ -5,10 +5,11 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
 - Publish through the bundle to resolve target-specific environment values and resource IDs.
   Standalone `app.yaml` contains development-specific defaults and is not the production configuration.
 - New workspace deployments need their own resources, grants and deployment state.
-- Before planning or deploying the native Genie resource, regenerate its overlay from the existing
-  space using `scripts/prepare_genie_bundle.py --space-id SPACE_ID --profile PROFILE --host HOST`.
-  Never reuse a first-create overlay: it can overwrite user curation with an empty definition.
-  Preserve the established resource identity and avoid concurrent Genie edits during export/deploy.
+- **Retired chat space (dev only):** a checkout that still has a gitignored
+  `databricks_etl/resources/*.generated.yml` overlay from the retired question-answering space
+  includes it in the bundle, and deploying without it later deletes that space. Before the next dev
+  deploy, unbind the resource or delete the space deliberately; see the Caution in
+  [the implementation plan](planning/IMPLEMENTATION_PLAN.md).
 - Review the bundle plan before applying migrations/resources. Creating Job definitions does not
   execute migrations. Verify grants again after replacing views; earlier replacements revoked grants.
 - Bulk intake needs upload-batch tables even when automatic preparation is off. Queue, bulk extraction,
@@ -21,8 +22,9 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
   warehouses and schedules; it is not a shutdown mechanism for all project compute.
 - The source volume contains uploaded PDFs. App deletion removes the PDF then marks its registry row
   deleted; it does not purge retained results or generated artifacts. Direct SQL deletion is different.
-- Genie volume attachment/content-search activation remain workspace setup tasks. Source documents
-  and extracted structured results are separate sources. Verify sync behavior and ordinary-user access.
+- Document chat is a separate app (see [the implementation plan](planning/IMPLEMENTATION_PLAN.md)).
+  Set the bundle variable `chat_app_url` to its HTTPS URL to show "Ask documents" in the sidebar;
+  blank hides the link. The bootstrap creates read-only `<prefix>_chat_*` views for its SQL functions.
 
 ## Deploying the existing dev target
 
@@ -31,24 +33,16 @@ below match the live `dev` deployment (non-secret). Omitting `viewer_projection_
 turn viewer projections off, so always pass the full set and review the plan.
 
 ```bash
-uv run --project backend python scripts/prepare_genie_bundle.py \
-  --space-id 01f1ba8f44851508b81fcc9c9a013451 --profile idp-mvp \
-  --host https://dbc-97e4a372-40b1.cloud.databricks.com \
-  --catalog workspace --project-schema idp_mvp --table-prefix idp_dev
 make check
 cd databricks_etl
 VARS=(--var catalog=workspace --var project_schema=idp_mvp --var source_volume_name=idp_source
       --var artifacts_volume_name=idp_artifacts --var warehouse_id=647704f77f24020a
       --var validation_endpoint=unused --var evaluation_experiment=unused
-      --var viewer_projection_enabled=true --var genie_project_name="IDP project")
+      --var viewer_projection_enabled=true)
 databricks bundle plan   -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle deploy -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle run    -t dev -p idp-mvp "${VARS[@]}" idp_app   # activates the new app code
 ```
-
-The Genie script adds the four `<prefix>_genie_*` result views to the space definition if missing. In a new
-workspace run the bootstrap Job first so those views exist before the Genie resource is deployed. Attach the
-source volume and enable content search manually in the space's Sources tab.
 
 `make check` rebuilds `frontend/dist`, which is what the app serves. Parse/extract parallelism is set by
 the bundle variables `parse_concurrency`, `extraction_concurrency` (default 3 each) and
@@ -75,12 +69,12 @@ SCHEMA=idp_mvp
 WAREHOUSE=YOUR_WAREHOUSE_ID
 
 make check                                          # tests, then rebuilds frontend/dist
-rm -f databricks_etl/resources/genie.generated.yml  # never deploy another workspace's Genie overlay
+ls databricks_etl/resources/*.generated.yml 2>/dev/null && echo "remove per-workspace overlays first"
 cd databricks_etl
 VARS=(--var catalog=$CATALOG --var project_schema=$SCHEMA --var source_volume_name=idp_source
       --var artifacts_volume_name=idp_artifacts --var warehouse_id=$WAREHOUSE
       --var validation_endpoint=unused --var evaluation_experiment=unused
-      --var viewer_projection_enabled=true --var genie_project_name="IDP project")
+      --var viewer_projection_enabled=true)
 sql() {  # run one statement on the warehouse and print its state
   python3 -c 'import json,sys; print(json.dumps({"warehouse_id": sys.argv[1], "statement": sys.argv[2], "wait_timeout": "50s"}))' "$WAREHOUSE" "$1" |
     databricks api post /api/2.0/sql/statements -p "$PROFILE" --json @/dev/stdin |
@@ -106,17 +100,9 @@ sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_manifest TO \`
 sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_elements TO \`$APP_SP\`"
 ```
 
-Every later deployment to that workspace is step 4's plan, deploy and run (after the Genie overlay
-refresh below, if the workspace has a space). If the bootstrap is run again, deploy afterwards: replacing
+Every later deployment to that workspace is step 4's plan, deploy and run. If the bootstrap is run again, deploy afterwards: replacing
 views drops the grants the App binding applied.
 
-Genie is optional and off unless an overlay is deployed. After step 2, from the repository root, create
-the space with `scripts/prepare_genie_bundle.py --new-space --profile $PROFILE --host https://YOUR-WORKSPACE
---catalog $CATALOG --project-schema $SCHEMA --table-prefix $PREFIX`, then plan and deploy. Record the new
-space ID from `databricks bundle summary`, delete the overlay, and before every later deployment
-regenerate it with `--space-id NEW_SPACE_ID`. Attaching the source volume and enabling content search stay
-manual steps in the space's Sources tab.
-
-Historical detailed instructions and evidence: [Genie lifecycle](archive/GENIE_AUTOMATION_STATUS.md),
-[Genie setup](archive/GENIE_SETUP.md), and [implementation handoff](archive/performance/intake-implementation-progress.md).
+Historical detailed instructions and evidence, including the retired chat space: see
+[docs/archive](archive/) and [implementation handoff](archive/performance/intake-implementation-progress.md).
 These archived notes contain superseded checkpoints; reconcile them with current code and live state.

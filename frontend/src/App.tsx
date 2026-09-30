@@ -10,11 +10,10 @@ const DocumentDetailPage = lazy(() => import("./pages/DocumentDetailPage").then(
 import { DocumentsPage } from "./pages/DocumentsPage";
 const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(module => ({ default: module.ResultDetailPage })));
 import { ResultsPage } from "./pages/ResultsPage";
-const AskGeniePage = lazy(() => import("./pages/AskGeniePage").then(module => ({ default: module.AskGeniePage })));
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useDocumentPage } from "./hooks/useDocumentPage";
-import type { HealthResponse } from "./types";
+import type { AppConfig, HealthResponse } from "./types";
 
 export type {
   ApiError,
@@ -43,11 +42,6 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
     blurb: "Every extraction run. Filter, open one to review it beside its source, or export.",
   },
   "result-detail": { crumbs: ["Results", "Extraction run"] },
-  genie: {
-    crumbs: ["Ask Genie"],
-    title: "Ask Genie",
-    blurb: "Ask questions about your extracted results in plain English.",
-  },
   schema: {
     crumbs: ["Schemas"],
     title: "Schemas",
@@ -66,6 +60,7 @@ export function App() {
   const [scopeSettled, setScopeSettled] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
+  const [chatAppUrl, setChatAppUrl] = useState<string | null>(null);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
 
@@ -135,6 +130,18 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
+    fetch("/api/app-config", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error("Configuration request failed");
+        return response.json() as Promise<AppConfig>;
+      })
+      .then((config) => setChatAppUrl(config.chat_app_url ?? null))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
     if (!isRegistryRoute) return;
     const controller = new AbortController();
     void loadCaseIds(controller.signal);
@@ -153,7 +160,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} />
+      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatAppUrl={chatAppUrl} />
       <div className="app-main">
       <header className="top-bar" aria-label="Location">
         {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1
@@ -206,7 +213,6 @@ export function App() {
           />
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:runId" element={<ResultDetailPage />} />
-          <Route path="/ask-genie" element={<AskGeniePage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
         )}
@@ -221,7 +227,6 @@ function sectionFor(pathname: string): string {
   if (pathname.startsWith("/documents/")) return "detail";
   if (pathname.startsWith("/results/")) return "result-detail";
   if (pathname.startsWith("/results")) return "results";
-  if (pathname.startsWith("/ask-genie")) return "genie";
   if (pathname.startsWith("/schema")) return "schema";
   return "documents";
 }

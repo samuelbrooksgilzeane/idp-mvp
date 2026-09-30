@@ -212,13 +212,13 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
-        - task_key: create_genie_views
+        - task_key: create_chat_views
           depends_on:
             - task_key: migrate_generic_extraction_fields
           sql_task:
             warehouse_id: ${var.warehouse_id}
             file:
-              path: ../sql/create_genie_views.sql
+              path: ../sql/create_chat_views.sql
             parameters:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}

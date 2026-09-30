@@ -17,7 +17,7 @@ Before testing, record the workspace, app URL/deployment ID, release snapshot, t
 catalog/schema/prefix, resource IDs and authenticated identity. Confirm health, required
 migrations/grants and actual deployed settings. Authenticated `/api/upload-batches/limits`
 reports upload limits and automatic preparation/bulk extraction/export flags;
-`/api/app-config` reports Genie display configuration. Viewer projections and recovery schedule
+`/api/app-config` reports the document chat link (`chat_app_url`). Viewer projections and recovery schedule
 state also require deployment/resource inspection; do not infer them from a visible page.
 
 - `IDP_AUTO_PREPARE_ENABLED` permits upload-triggered background preparation; uploads may consume
@@ -85,7 +85,7 @@ can be regenerated from retained successful results without repeating document i
 | Registry, parse/extraction results, work/batch records | Durable retained data; app stop/start and code rollback do not purge it. | User must confirm retention policy and name a maintainer before release sign-off. Preserve historical provenance. |
 | Page images/viewer artifacts | Retained separately in artifacts volume; deleting a source is not a full purge. | Maintainer performs separately approved scoped cleanup after checking references. |
 | Durable export artifacts | API expiry is calculated from request creation, default 24 hours (`IDP_EXPORT_RETENTION_HOURS`, allowed 1–168). Expired downloads return 410. | Expiry prevents API download; no scheduled artifact purge is established by this implementation. Maintainer owns physical cleanup of expired artifacts and orphan reconciliation. Never describe expiry as guaranteed file deletion. |
-| Genie/index copies | Source deletion does not establish immediate index removal. | Designated Genie maintainer owns supported sync, freshness checks and deletion verification. |
+| Chat/index copies | Source deletion does not establish immediate index removal. | Designated chat maintainer owns supported sync, freshness checks and deletion verification. |
 
 Support owner and escalation channel: **to be assigned by the user before release acceptance**.
 For support, record deployment ID/snapshot, sanitized feature flags, timestamp, route, request/
@@ -94,22 +94,21 @@ raw PDFs, SQL credentials and client document content out of logs shared for tri
 
 Batch/export ownership restrictions are distinct from project document visibility: uploader
 identity is audit metadata, not per-user document isolation. An ordinary colleague must verify
-app, documents, viewer, schemas, exports and Genie with their own identity. Do not impersonate
+app, documents, viewer, schemas, exports and document chat with their own identity. Do not impersonate
 them or infer colleague access from the deployment service principal's successful test.
 
 ## Rollback and repeatable demonstration
 
 Before deployment retain the previous known-good release snapshot, app deployment ID,
-resolved non-secret bundle configuration and resource IDs, plus a freshly exported existing
-Genie definition. Record local check results with the candidate snapshot. Use the same target
+resolved non-secret bundle configuration and resource IDs. Record local check results with the candidate snapshot. Use the same target
 and existing resource identities; preserve migrations and persisted data.
 
 For code rollback, prepare the known-good snapshot in an isolated checkout, restore the
-reviewed target configuration, refresh/preserve the current Genie overlay, inspect the bundle
+reviewed target configuration, inspect the bundle
 plan, and deploy that snapshot through the same bundle flow. Verify authenticated health,
 frontend assets, feature flags and access to retained results. Confirm the old code understands
 current additive schema before rolling back. Do not use `bundle destroy`, drop tables/volumes,
-or deploy a stale Genie overlay as rollback. Code rollback cannot undo inference costs,
+or deploy a stale per-workspace overlay as rollback. Code rollback cannot undo inference costs,
 source deletion, prior writes or external index changes. If compatibility is uncertain, stop
 new submissions and apply a forward fix rather than mutate retained data.
 
@@ -118,33 +117,23 @@ viewer and citations, open its published schema, review the saved extraction and
 unexpired export. Record the deployment ID and regression evidence alongside the demo. Leave
 upload/inference optional and user-operated so repeated demos do not multiply consumption.
 
-## Genie and content-search handoff
+## Document chat handoff
 
-Preserve the existing space ID and human curation. Follow the overlay refresh procedure in
-[deployment notes](DEPLOYMENT_NOTES.md) before bundle planning. In the existing space's supported
-Databricks controls, the user/maintainer selects the approved source volume and, optionally,
-the project's curated structured extraction views. The volume contains original files;
-it is not the retained extraction tables. Verify scope and intended colleague grants before
-attachment; app selections do not filter Genie questions.
+Document chat is a separate app linked from the sidebar ("Ask documents", set by `chat_app_url`).
+Its sources and rollout are tracked in [the implementation plan](planning/IMPLEMENTATION_PLAN.md).
+App selections do not filter chat questions. Verify scope and intended colleague grants before
+connecting a document source, and test the link with the ordinary colleague account.
 
-The maintainer verifies workspace eligibility and obtains approval for preview/indexing workload
-before enabling content search. Copy the supported embed URL from the space controls, verify
-the configured workspace origin/space ID, and inspect allowed embedding origins for the actual
-app origin. Test the `Open in Databricks` fallback with the ordinary colleague account if the
-frame is unavailable. A functioning embed or structured-table answer does not prove PDF content
-search is enabled.
-
-For an approved content-search test, reuse the disposable user fixture with a distinctive
+For an approved document-search test, reuse the disposable user fixture with a distinctive
 non-sensitive phrase: upload → record source ID/time → request supported sync → record sync
-completion/freshness → search and inspect its cited source. Then delete the source in the app,
-verify volume/registry outcomes, sync again, and confirm the source is absent from subsequent
-search results. Record observed lag and failed syncs; do not assume continuous synchronization
-or immediate removal. The agent inspects these outcomes after the user-operated test.
+completion/freshness → ask about it and inspect its cited source. Then delete the source in the
+app, verify volume/registry outcomes, sync again, and confirm the source is absent from subsequent
+answers. Record observed lag and failed syncs; do not assume continuous synchronization or
+immediate removal. The agent inspects these outcomes after the user-operated test.
 
 Sync owner and cadence: **user to confirm**. Communicate the last verified sync time and known
-coverage in the release handoff. Until configured and verified, tell pilot users: **PDF content
-search is unavailable; Genie uses only its currently configured sources.** A separate content
-search gate may remain deferred without claiming that gate passed.
+coverage in the release handoff. Until configured and verified, tell pilot users: **the chat
+cannot answer from PDF content yet.**
 
 ## Evidence boundary
 

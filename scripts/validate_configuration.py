@@ -7,8 +7,7 @@ from idp_app.core.config import IdpMode, Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
-    "genie_enabled", "genie_space_id", "genie_embed_url",
-    "genie_workspace_origin", "genie_project_name",
+    "chat_app_url",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
     "project_schema",
@@ -159,7 +158,7 @@ def validate_data_bootstrap() -> None:
         "migrate_generic_schema_registry",
         "migrate_generic_extraction_records",
         "migrate_generic_extraction_fields",
-        "create_genie_views",
+        "create_chat_views",
         "migrate_work_batches",
     ]
     if (
@@ -560,25 +559,24 @@ def validate_application_resource() -> None:
 
 
 
-def validate_genie_configuration() -> None:
+def validate_chat_configuration() -> None:
     bundle = load_yaml(ROOT / "databricks_etl/databricks.yml")
-    if bundle["variables"]["genie_enabled"]["default"] != "false":
-        raise ValueError("Genie must default off until provisioned")
+    if bundle["variables"]["chat_app_url"]["default"].strip():
+        raise ValueError("The chat app link must default to blank until the chat app exists")
     resource = load_yaml(ROOT / "databricks_etl/resources/application.app.yml")
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
-    for name in ("enabled", "space_id", "embed_url", "workspace_origin", "project_name"):
-        if env.get("IDP_GENIE_" + name.upper()) != "${var.genie_" + name + "}":
-            raise ValueError("Genie app setting must use its bundle variable: " + name)
+    if env.get("IDP_CHAT_APP_URL") != "${var.chat_app_url}":
+        raise ValueError("IDP_CHAT_APP_URL must use the chat_app_url bundle variable")
     bootstrap = load_yaml(ROOT / "databricks_etl/resources/bootstrap.job.yml")
     jobs = bootstrap["resources"]["jobs"]
     tasks = next(iter(jobs.values()))["tasks"]
-    task = next(item for item in tasks if item["task_key"] == "create_genie_views")
+    task = next(item for item in tasks if item["task_key"] == "create_chat_views")
     if task["depends_on"] != [{"task_key": "migrate_generic_extraction_fields"}]:
-        raise ValueError("Genie views must follow generic migrations")
+        raise ValueError("Chat views must follow generic migrations")
 
 
 def main() -> None:
-    validate_genie_configuration()
+    validate_chat_configuration()
     validate_app_config()
     validate_bundle_config()
     validate_data_bootstrap()

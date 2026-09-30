@@ -68,18 +68,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     f'sql;dur={metrics.sql_duration_ms:.1f};desc="{statement_count} statements"'
                 )
             response.headers["Server-Timing"] = ", ".join(timings)
-            frame_source = (
-                resolved_settings.genie_workspace_origin
-                if resolved_settings.genie_enabled
-                else "'none'"
-            )
             existing = response.headers.get("Content-Security-Policy", "")
             directives = [
                 item.strip()
                 for item in existing.split(";")
                 if item.strip() and not item.strip().startswith("frame-src ")
             ]
-            directives.append(f"frame-src {frame_source}")
+            directives.append("frame-src 'none'")
             response.headers["Content-Security-Policy"] = "; ".join(directives)
             return response
         finally:
