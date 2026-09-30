@@ -293,6 +293,7 @@ def test_upload_limits_follow_deployment_configuration(tmp_path: Path):
             "max_files": 12,
             "max_file_bytes": 1024,
             "parallel_transfers": 6,
+            "folder_import": True,  # Mock mode imports from a local folder.
             "automatic_preparation": False,
             "bulk_extraction": False,
             "bulk_export": False,

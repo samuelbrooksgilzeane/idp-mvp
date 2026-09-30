@@ -12,6 +12,7 @@ const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(modu
 import { ResultsPage } from "./pages/ResultsPage";
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
+import { useFolderImport } from "./hooks/useFolderImport";
 import { useDocumentPage } from "./hooks/useDocumentPage";
 import type { AppConfig, HealthResponse } from "./types";
 
@@ -91,6 +92,13 @@ export function App() {
   }, [isRegistryRoute, loadCaseIds, refreshRegistry]);
 
   const upload = useUploadBatch(() => {
+    if (refreshTimer.current) return;
+    refreshTimer.current = setTimeout(() => {
+      refreshTimer.current = null; invalidateDocumentReviews(); void refreshDocuments();
+    }, 750);
+  });
+  // Polls server-side progress; owned here so it keeps going while the user navigates.
+  const folderImport = useFolderImport(() => {
     if (refreshTimer.current) return;
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null; invalidateDocumentReviews(); void refreshDocuments();
@@ -186,6 +194,7 @@ export function App() {
               <DocumentsPage
                 key={appName}
                 upload={upload}
+                folderImport={folderImport}
                 documents={registry.documents}
                 loading={registry.loading}
                 caseIds={caseIds}

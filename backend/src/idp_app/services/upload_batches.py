@@ -43,13 +43,15 @@ class UploadBatchService:
         client_request_id: str,
         case_id: str | None,
         files: list[dict[str, Any]],
+        origin: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """``origin`` adds header fields describing where the files come from (folder import)."""
         if not 1 <= len(files) <= self.max_files:
             raise DocumentServiceError("TOO_MANY_FILES", f"Select 1–{self.max_files} PDFs.", 422)
         if len({item["client_file_id"] for item in files}) != len(files):
             raise DocumentServiceError("DUPLICATE_FILE_ID", "File identities must be unique.", 422)
         digest = hashlib.sha256(json.dumps([case_id, files], sort_keys=True).encode()).hexdigest()
-        batch_id = str(uuid5(NAMESPACE_URL, f"idp-upload:{requester}:{client_request_id}"))
+        batch_id = self.batch_id_for(requester, client_request_id)
         now = now_iso()
         header = {
             "batch_id": batch_id,
@@ -58,6 +60,7 @@ class UploadBatchService:
             "case_id": case_id,
             "created_at": now,
             "file_count": len(files),
+            **(origin or {}),
         }
         items = [
             {
@@ -94,6 +97,10 @@ class UploadBatchService:
             )
         return {**summary, "items": self.repository.items(batch_id, -1, self.max_files)}
 
+    @staticmethod
+    def batch_id_for(requester: str, client_request_id: str) -> str:
+        return str(uuid5(NAMESPACE_URL, f"idp-upload:{requester}:{client_request_id}"))
+
     def authorize(self, batch_id: str, requester: str) -> dict[str, Any]:
         header = self.repository.header(batch_id)
         if header is None or header["requester"] != requester:
@@ -107,6 +114,8 @@ class UploadBatchService:
             "case_id": header["case_id"],
             "created_at": header["created_at"],
             "file_count": header["file_count"],
+            "source": header.get("source", "browser"),
+            "folder": header.get("folder"),
             "counts": self.repository.counts(batch_id),
         }
 

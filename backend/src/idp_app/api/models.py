@@ -520,6 +520,7 @@ class CreateUploadBatchRequest(BaseModel):
 class UploadItemResponse(BaseModel):
     client_file_id: str
     name: str
+    relative_path: str | None = None
     size: int
     last_modified: int | None = None
     ordinal: int
@@ -537,6 +538,8 @@ class UploadBatchSummary(BaseModel):
     case_id: str | None
     created_at: datetime
     file_count: int
+    source: Literal["browser", "folder"] = "browser"
+    folder: str | None = None
     counts: dict[str, int]
 
 
@@ -547,6 +550,25 @@ class CreatedUploadBatch(UploadBatchSummary):
 class UploadItemPage(BaseModel):
     items: list[UploadItemResponse]
     next_cursor: str | None
+
+
+class StartFolderImportRequest(BaseModel):
+    client_request_id: str = Field(min_length=1, max_length=100)
+    folder: str = Field(min_length=1, max_length=255)
+    case_id: str | None = Field(default=None, max_length=200)
+
+
+class ImportFolder(BaseModel):
+    name: str
+
+
+class ImportFolderList(BaseModel):
+    root: str
+    folders: list[ImportFolder]
+
+
+class StartedFolderImport(CreatedUploadBatch):
+    skipped_files: int
 
 
 class UploadTransportFailure(BaseModel):

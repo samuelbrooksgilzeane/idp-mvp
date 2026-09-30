@@ -669,6 +669,13 @@ footer { min-height: 54px; padding: 0 clamp(24px, 4vw, 64px); display: flex; ali
 .batch-schema-select label span { color: var(--faint); font-size: 11px; font-weight: 450; }
 .batch-schema-select select { height: 34px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: 4px; background: var(--panel); font-size: 12.5px; }
 .upload-hint { margin: 16px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.folder-import { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border); font-size: 13px; }
+.folder-import summary { display: inline-flex; align-items: center; gap: 8px; font-weight: 650; cursor: pointer; }
+.folder-import code { overflow-wrap: anywhere; font-size: 11.5px; }
+.folder-import-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+.folder-import-row .field-label { grid-column: 1 / -1; margin-bottom: 0; }
+.folder-import-row select { min-width: 0; height: 38px; padding: 0 10px; border: 1px solid var(--border-2); border-radius: 4px; background: var(--panel); color: var(--text); }
+.folder-import-row button { padding: 7px 10px; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--text); }
 
 @media (max-width: 720px) {
   .schema-editor-layout { grid-template-columns: 1fr; }

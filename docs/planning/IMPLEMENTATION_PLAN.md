@@ -98,7 +98,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 1 | Branch and Genie removal | 1 | Done (user to run the Genie unbind locally) |
 | 2 | Upload speed | 1 | Done (live DML result shape unconfirmed) |
 | 3 | Upload robustness | 1 | Done (live check L3 open) |
-| 4 | Folder import | 2 | Not started |
+| 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
 | 5 | Chat foundation on Free Edition | 2 | Not started |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
 | 7 | Managed chat on US | 2 | Blocked: Batch 6 |
@@ -133,6 +133,7 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | L1 | Batch 1 step 5 | User's CLI, profile `idp-mvp`, local `genie.generated.yml` | `databricks bundle deployment unbind project_genie -t dev -p idp-mvp` with the old `genie_*` vars, then delete the overlay. **Blocks every deploy.** | Open |
 | L2 | Batch 2 step 2 | Dev warehouse `647704f77f24020a`, scratch schema | One `UPDATE` and one `MERGE` on a throwaway table through the Statement Execution API; confirm each returns a one-row result whose manifest columns include `num_affected_rows` (MERGE also `num_inserted_rows`). If not, uploads stay correct but fall back to read-backs (slower). | Open |
 | L3 | Batch 3 step 7 | Browser signed in to the dev app | Let the session expire (or clear the app cookie), then trigger an API call with `redirect: "manual"`; record whether the Apps gateway answers 401, 403 or a redirect (opaque redirect in the browser). The frontend treats all three as sign-in loss. | Open |
+| L4 | Batch 4 step 7 | L1 done; user's CLI; user's OK (quota) | Deploy dev (`bundle deploy`, run bootstrap for the `idp_import` volume, deploy again), apply DEPLOYMENT_NOTES steps 6–7, copy ≤20 PDFs (include one non-PDF and one duplicate) to `idp_import/smoke/`, start **Import from folder**. Expect all registered or already registered, the non-PDF skipped, the folder emptied of PDFs. Record the job run time here. | Open |
 
 ## Batch 1 — Branch and Genie removal
 
@@ -231,7 +232,26 @@ alone and the next full run. Make that test's lookup robust if it recurs.
 
 ## Batch 4 — Folder import (2 sessions)
 
-Status: Not started
+Status: Done 30 September 2026 in one session, except step 7 (live check **L4**; no Databricks
+credentials in the cloud session, and L1 blocks deploys).
+
+Notes for next batch: a folder import is an upload batch whose header carries
+`source: "folder"` and `folder`; items carry `relative_path` and `client_file_id` =
+sha256(relative path)[:40]. `services/folder_import.py` holds the sources (local
+`<local_data_dir>/import_volume` in mock mode, `/Volumes/<catalog>/<schema>/<import volume>` on
+Databricks), `FolderImportService` and the Job runner. The Job (`resources/import.job.yml`,
+`src/import_folder.py`, job parameter `batch_id`) builds the same services through
+`api/dependencies.build_*` and pushes each file through `UploadBatchService.upload` as an
+`UploadFile`, so claims, dedupe, attempts and outcomes are the browser path's; concurrency is an
+anyio limiter (bundle var `import_concurrency`, default 8). Import-only failure codes:
+`IMPORT_FILE_MISSING` (retryable), `IMPORT_FILE_CHANGED` (size or content changed after start; not
+retryable). Deviations: the App is at the 20-resource binding cap, so the import volume (READ only;
+the App only lists it) and CAN_MANAGE_RUN on the import Job are **direct grants**
+(DEPLOYMENT_NOTES steps 6–7), not bindings; the group grant is `READ VOLUME, WRITE VOLUME` on
+`idp_import` plus USE CATALOG/SCHEMA. `app.yaml` (UI deploys) leaves folder import off, because the
+import Job ID is only known after a bundle deploy. Mock mode always offers folder import
+(`/upload-batches/limits` → `folder_import`). `import_volume_name` is now a bootstrap parameter, so
+Batch 6's `us` target needs it (default `idp_import`).
 
 Design: users copy PDFs into `/Volumes/<catalog>/<schema>/idp_import/<folder>/` (Databricks CLI
 `databricks fs cp -r ./invoices dbfs:/Volumes/.../idp_import/<folder>`, or Catalog Explorer upload),

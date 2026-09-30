@@ -1,5 +1,6 @@
-import { FileUp, LoaderCircle, Upload } from "lucide-react";
+import { FileUp, FolderInput, LoaderCircle, Upload } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
+import type { FolderImportController } from "../hooks/useFolderImport";
 
 export type UploadInput = { files: File[]; caseId: string };
 
@@ -10,9 +11,11 @@ type UploadPanelProps = {
   maxFileBytes?: number | null;
   notice: { kind: "success" | "error"; message: string } | null;
   onUpload: (input: UploadInput) => Promise<void>;
+  // Shown when the deployment has folder import configured.
+  folderImport?: FolderImportController;
 };
 
-export function UploadPanel({ uploading, notice, onUpload, resuming = false, maxFiles = 1000, maxFileBytes = null }: UploadPanelProps) {
+export function UploadPanel({ uploading, notice, onUpload, resuming = false, maxFiles = 1000, maxFileBytes = null, folderImport }: UploadPanelProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [caseId, setCaseId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,6 +82,42 @@ export function UploadPanel({ uploading, notice, onUpload, resuming = false, max
           ? <p className={`notice notice-${notice.kind}`} role="status">{notice.message}</p>
           : null}
       </form>
+      {folderImport ? <FolderImportForm folderImport={folderImport} caseId={caseId} maxFiles={maxFiles} /> : null}
     </aside>
+  );
+}
+
+function FolderImportForm({ folderImport, caseId, maxFiles }: { folderImport: FolderImportController; caseId: string; maxFiles: number }) {
+  const [folder, setFolder] = useState("");
+  const { folders, root, busy, batch } = folderImport;
+  const chosen = folders?.includes(folder) ? folder : "";
+  return (
+    <details className="folder-import" onToggle={(event) => {
+      if (event.currentTarget.open && folders === null && !busy) void folderImport.loadFolders();
+    }}>
+      <summary><FolderInput size={16} aria-hidden="true" /> Import from folder</summary>
+      <p className="upload-hint">
+        For large batches: copy a folder of PDFs (up to {maxFiles.toLocaleString()}) into{" "}
+        <code>{root ?? "the import volume"}</code>, for example with{" "}
+        <code>databricks fs cp -r ./invoices dbfs:{root ?? "/Volumes/…/idp_import"}/invoices</code>{" "}
+        or Catalog Explorer, then choose it here. The server imports it; no browser needed after start.
+      </p>
+      <div className="folder-import-row">
+        <label className="field-label" htmlFor="import-folder">Folder</label>
+        <select id="import-folder" value={chosen} disabled={busy || !folders?.length}
+          onChange={(event) => setFolder(event.target.value)}>
+          <option value="">{folders === null ? "Loading folders…" : folders.length ? "Choose a folder" : "No folders found"}</option>
+          {folders?.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
+        <button type="button" disabled={busy} onClick={() => void folderImport.loadFolders()}>Refresh folders</button>
+      </div>
+      <button className="primary-action" type="button" disabled={!chosen || busy || Boolean(batch)}
+        onClick={() => void folderImport.start(chosen, caseId)}>
+        {busy ? <LoaderCircle className="spin" size={17} aria-hidden="true" /> : <FolderInput size={17} aria-hidden="true" />}
+        Import folder
+      </button>
+      {batch ? <p className="upload-hint">Finish or clear the current folder import to start another.</p> : null}
+      {folderImport.error && !batch ? <p role="alert">{folderImport.error}</p> : null}
+    </details>
   );
 }

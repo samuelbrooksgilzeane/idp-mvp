@@ -1,0 +1,53 @@
+resources:
+  jobs:
+    folder_importer:
+      name: ${var.app_name}-${bundle.target}-folder-importer
+      description: Registers the PDFs of one folder-import batch from the import volume.
+      # Each run owns one batch; item claims keep two runs on the same batch safe.
+      max_concurrent_runs: 4
+      queue:
+        enabled: true
+      parameters:
+      - name: batch_id
+        default: ""
+      tasks:
+      - task_key: import_folder
+        spark_python_task:
+          python_file: ../src/import_folder.py
+          parameters:
+          - --batch-id
+          - "{{job.parameters.batch_id}}"
+          - --catalog
+          - ${var.catalog}
+          - --project-schema
+          - ${var.project_schema}
+          - --table-prefix
+          - ${var.table_prefix}
+          - --source-volume-name
+          - ${var.source_volume_name}
+          - --artifacts-volume-name
+          - ${var.artifacts_volume_name}
+          - --import-volume-name
+          - ${var.import_volume_name}
+          - --warehouse-id
+          - ${var.warehouse_id}
+          - --concurrency
+          - ${var.import_concurrency}
+          - --auto-prepare-enabled
+          - ${var.auto_prepare_enabled}
+          - --dispatch-job-id
+          - ${resources.jobs.work_dispatcher.id}
+        timeout_seconds: 14400
+        max_retries: 0
+        environment_key: default
+      environments:
+      - environment_key: default
+        spec:
+          environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0
+          - fastapi==0.116.1
+          - pydantic-settings==2.10.1
+          # The run builds its services through idp_app.api.dependencies, which imports these.
+          - openpyxl==3.1.5
+          - python-multipart==0.0.32

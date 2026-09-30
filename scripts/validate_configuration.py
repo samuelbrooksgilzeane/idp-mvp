@@ -15,6 +15,8 @@ TRUSTED_VARIABLES = {
     "table_prefix",
     "source_volume_name",
     "artifacts_volume_name",
+    "import_volume_name",
+    "import_concurrency",
     "warehouse_id",
     "validation_endpoint",
     "evaluation_experiment",
@@ -33,6 +35,7 @@ EXPECTED_BOOTSTRAP_PARAMETERS = {
     "table_prefix": "${var.table_prefix}",
     "source_volume_name": "${var.source_volume_name}",
     "artifacts_volume_name": "${var.artifacts_volume_name}",
+    "import_volume_name": "${var.import_volume_name}",
 }
 EXPECTED_PARSING_MIGRATION_PARAMETERS = {
     "catalog": "${var.catalog}",
@@ -506,6 +509,26 @@ def validate_dispatch_job() -> None:
         raise ValueError("Default stage concurrency exceeds the combined budget")
 
 
+def validate_import_job() -> None:
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "import.job.yml")
+    job = resource["resources"]["jobs"]["folder_importer"]
+    if job.get("parameters") != [{"name": "batch_id", "default": ""}]:
+        raise ValueError("The import Job must take only the batch_id chosen by the app")
+    (task,) = job["tasks"]
+    parameters = task["spark_python_task"]["parameters"]
+    if task["spark_python_task"]["python_file"] != "../src/import_folder.py":
+        raise ValueError("The import Job must run the reviewed import script")
+    pairs = dict(zip(parameters[::2], parameters[1::2], strict=True))
+    if pairs.get("--batch-id") != "{{job.parameters.batch_id}}" or pairs.get(
+        "--import-volume-name"
+    ) != "${var.import_volume_name}":
+        raise ValueError("The import Job must read one batch from the configured import volume")
+    resource = load_yaml(ROOT / "databricks_etl" / "resources" / "application.app.yml")
+    env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
+    if env.get("IDP_IMPORT_JOB_ID") != "${resources.jobs.folder_importer.id}":
+        raise ValueError("The App must start the bundle's import Job")
+
+
 def validate_application_resource() -> None:
     resource = load_yaml(ROOT / "databricks_etl" / "resources" / "application.app.yml")
     apps = resource.get("resources", {}).get("apps", {})
@@ -584,6 +607,7 @@ def main() -> None:
     validate_parsing_job()
     validate_dispatch_job()
     validate_extraction_job()
+    validate_import_job()
     validate_application_resource()
     if Settings.model_fields["mode"].default is not IdpMode.MOCK:
         raise ValueError("Default local application mode must be mock")

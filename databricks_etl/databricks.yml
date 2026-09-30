@@ -56,6 +56,12 @@ variables:
     description: Existing or future source-document volume name
   artifacts_volume_name:
     description: Existing or future derived-artifact volume name
+  import_volume_name:
+    description: Volume users copy PDF folders into for folder import
+    default: idp_import
+  import_concurrency:
+    description: Files registered in parallel within one folder-import run (1-32)
+    default: 8
   warehouse_id:
     description: SQL warehouse identifier
   validation_endpoint:

@@ -6,6 +6,7 @@ from idp_app.api.documents import documents_router
 from idp_app.api.export_requests import router as export_requests_router
 from idp_app.api.extraction import extraction_router
 from idp_app.api.extraction_batches import router as extraction_batches_router
+from idp_app.api.imports import imports_router
 from idp_app.api.models import HealthResponse
 from idp_app.api.parsing import parsing_router
 from idp_app.api.results import results_router
@@ -21,6 +22,7 @@ api_router.include_router(app_config_router)
 api_router.include_router(export_requests_router)
 api_router.include_router(documents_router)
 api_router.include_router(upload_batches_router)
+api_router.include_router(imports_router)
 api_router.include_router(batches_router)
 api_router.include_router(extraction_batches_router)
 api_router.include_router(parsing_router)

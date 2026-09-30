@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { UploadInput } from "../components/UploadPanel";
 
 export type UploadItem = {
-  client_file_id: string; name: string; size: number; last_modified: number | null;
+  client_file_id: string; name: string; relative_path?: string | null; size: number; last_modified: number | null;
   ordinal: number; state: "QUEUED" | "UPLOADING" | "REGISTERED" | "ALREADY_REGISTERED" | "FAILED";
   document_id: string | null; attempts: number; error_code: string | null;
   error_message: string | null; retryable: boolean; updated_at: string;
@@ -12,7 +12,7 @@ type SavedBatch = {
   client_request_id: string; case_id: string | null; files: Manifest[];
   batch_id: string | null; items: UploadItem[];
 };
-type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; signInRequired?: boolean; retryingSoon?: boolean; automaticPreparation?: boolean; bulkExtraction?: boolean };
+type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; signInRequired?: boolean; retryingSoon?: boolean; automaticPreparation?: boolean; bulkExtraction?: boolean; folderImport?: boolean };
 const STORAGE_KEY = "idp:upload-batch:v1"; // Storage is isolated by this project's app origin.
 const complete = (item: UploadItem) => item.state === "REGISTERED" || item.state === "ALREADY_REGISTERED";
 const signature = (file: { name: string; size: number; lastModified?: number; last_modified?: number | null }) =>
@@ -88,12 +88,13 @@ export class UploadTransferManager {
     if (this.restored) return;
     this.restored = true;
     try {
-      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; parallel_transfers?: number; automatic_preparation?: boolean; bulk_extraction?: boolean }>(await fetch("/api/upload-batches/limits"));
+      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; parallel_transfers?: number; automatic_preparation?: boolean; bulk_extraction?: boolean; folder_import?: boolean }>(await fetch("/api/upload-batches/limits"));
       if (Number.isInteger(limits.max_files) && limits.max_files > 0 && Number.isInteger(limits.max_file_bytes) && limits.max_file_bytes > 0) {
         const parallel = limits.parallel_transfers;
         this.update({ maxFiles: Math.min(1000, limits.max_files), maxFileBytes: limits.max_file_bytes,
           parallelTransfers: Number.isInteger(parallel) && parallel! >= 1 ? Math.min(MAX_PARALLEL_TRANSFERS, parallel!) : DEFAULT_PARALLEL_TRANSFERS,
-          automaticPreparation: Boolean(limits.automatic_preparation), bulkExtraction: Boolean(limits.bulk_extraction) });
+          automaticPreparation: Boolean(limits.automatic_preparation), bulkExtraction: Boolean(limits.bulk_extraction),
+          folderImport: Boolean(limits.folder_import) });
       }
     } catch { /* The API still enforces limits when configuration is unavailable. */ }
     if (this.snapshot.busy) return;

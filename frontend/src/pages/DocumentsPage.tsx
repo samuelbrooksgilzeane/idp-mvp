@@ -6,6 +6,7 @@ import { BatchActions } from "../components/BatchActions";
 import { DocumentList } from "../components/DocumentList";
 import { UploadBatchProgress } from "../components/UploadBatchProgress";
 import type { UploadBatchController } from "../hooks/useUploadBatch";
+import type { FolderImportController } from "../hooks/useFolderImport";
 import { UploadPanel } from "../components/UploadPanel";
 import { documentStatusLabel } from "../lib/documentStatus";
 import { prefetchDocumentExtractionReview } from "../lib/extractionReviewPrefetch";
@@ -15,6 +16,7 @@ import { useEffect, useMemo, useState } from "react";
 
 type DocumentsPageProps = {
   upload?: UploadBatchController;
+  folderImport?: FolderImportController;
   documents: DocumentRecord[];
   loading: boolean;
   caseIds: string[];
@@ -37,6 +39,7 @@ type DocumentsPageProps = {
 
 export function DocumentsPage({
   upload,
+  folderImport,
   documents,
   loading,
   caseIds,
@@ -121,8 +124,12 @@ export function DocumentsPage({
       <div className="intake-upload">
         <UploadPanel uploading={upload?.busy ?? false} notice={notice}
           onUpload={upload?.start ?? (async () => {})} resuming={Boolean(upload?.batch)}
-          maxFiles={upload?.maxFiles} maxFileBytes={upload?.maxFileBytes} />
+          maxFiles={upload?.maxFiles} maxFileBytes={upload?.maxFileBytes}
+          folderImport={upload?.folderImport ? folderImport : undefined} />
         {upload ? <UploadBatchProgress upload={upload} /> : null}
+        {folderImport?.batch
+          ? <UploadBatchProgress upload={{ ...folderImport, automaticPreparation: upload?.automaticPreparation }} source="folder" />
+          : null}
       </div>
       <div className="registry-workspace">
         <div className="registry-filters">

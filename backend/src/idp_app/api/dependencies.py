@@ -9,6 +9,7 @@ from idp_app.services.work_batches import WorkRepository
 
 if TYPE_CHECKING:
     from idp_app.services.batch_repository import BatchRepository
+    from idp_app.services.folder_import import FolderImportService
     from idp_app.services.upload_batches import UploadBatchService
 
 from databricks.sdk import WorkspaceClient
@@ -552,13 +553,23 @@ def build_reporting_service(settings: Settings) -> ReportingService:
 
 
 def get_upload_batch_service(request: Request) -> "UploadBatchService":
-    from idp_app.services.batch_repository import DatabricksBatchRepository, SQLiteBatchRepository
     from idp_app.services.upload_batches import UploadBatchService
 
     existing = getattr(request.app.state, "upload_batch_service", None)
     if isinstance(existing, UploadBatchService):
         return existing
     settings = cast(Settings, request.app.state.settings)
+    service = build_upload_batch_service(settings, get_document_service(request))
+    request.app.state.upload_batch_service = service
+    return service
+
+
+def build_upload_batch_service(
+    settings: Settings, documents: DocumentService
+) -> "UploadBatchService":
+    from idp_app.services.batch_repository import DatabricksBatchRepository, SQLiteBatchRepository
+    from idp_app.services.upload_batches import UploadBatchService
+
     repository: BatchRepository
     if settings.mode is IdpMode.MOCK:
         repository = SQLiteBatchRepository(settings.local_data_dir / "registry.sqlite3")
@@ -574,14 +585,69 @@ def get_upload_batch_service(request: Request) -> "UploadBatchService":
             prefix,
         )
         repository = DatabricksBatchRepository(sql, f"{catalog}.{schema}.{prefix}")
-    service = UploadBatchService(
+    return UploadBatchService(
         repository,
-        get_document_service(request),
+        documents,
         settings.max_upload_batch_files,
         settings.max_upload_attempts,
         settings.upload_claim_seconds,
     )
-    request.app.state.upload_batch_service = service
+
+
+def get_folder_import_service(request: Request) -> "FolderImportService":
+    from idp_app.services.folder_import import FolderImportService
+
+    existing = getattr(request.app.state, "folder_import_service", None)
+    if isinstance(existing, FolderImportService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    if not settings.folder_import_enabled:
+        raise DocumentServiceError(
+            "FOLDER_IMPORT_DISABLED", "Folder import is not configured for this app.", 404
+        )
+    service = build_folder_import_service(settings, get_upload_batch_service(request))
+    request.app.state.folder_import_service = service
+    return service
+
+
+def build_folder_import_service(
+    settings: Settings, uploads: "UploadBatchService", *, start_runs: bool = True
+) -> "FolderImportService":
+    """``start_runs=False`` builds the Job side, which only runs imports."""
+    from idp_app.services.folder_import import (
+        DatabricksImportJobRunner,
+        DatabricksImportSource,
+        FolderImportService,
+        ImportSource,
+        LocalImportSource,
+        background_runner,
+    )
+
+    source: ImportSource
+    if settings.mode is IdpMode.MOCK:
+        source = LocalImportSource(settings.local_data_dir / "import_volume")
+    else:
+        source = DatabricksImportSource(
+            WorkspaceClient(),
+            _required(settings.catalog, "IDP_CATALOG"),
+            _required(settings.project_schema, "IDP_PROJECT_SCHEMA"),
+            _required(settings.import_volume_name, "IDP_IMPORT_VOLUME_NAME"),
+        )
+
+    def not_startable(batch_id: str, resume: bool) -> None:
+        raise RuntimeError("This process runs imports; it does not start them")
+
+    service = FolderImportService(source, uploads, not_startable, settings.import_concurrency)
+    if start_runs:
+        if settings.mode is IdpMode.MOCK:
+            service.start_run = background_runner(service.run)
+        else:
+            job_id = settings.import_job_id
+            if job_id is None:
+                raise DocumentServiceError(
+                    "FOLDER_IMPORT_DISABLED", "Folder import is not configured for this app.", 404
+                )
+            service.start_run = DatabricksImportJobRunner(WorkspaceClient(), job_id)
     return service
 
 

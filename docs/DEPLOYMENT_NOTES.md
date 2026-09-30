@@ -98,7 +98,25 @@ databricks bundle run    -t $TARGET -p $PROFILE "${VARS[@]}" idp_app
 APP_SP=$(databricks apps get idp-mvp-$TARGET -p $PROFILE -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["service_principal_client_id"])')
 sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_manifest TO \`$APP_SP\`"
 sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_elements TO \`$APP_SP\`"
+# 6. Folder import, also outside the 20 bindings: the App lists the import volume and starts the
+#    import Job. The Job itself runs as the deploying identity, which owns the volumes and tables.
+sql "GRANT READ VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$APP_SP\`"
+IMPORT_JOB=$(databricks jobs list -p $PROFILE -o json --name "idp-mvp-$TARGET-folder-importer" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["job_id"])')
+databricks jobs update-permissions $IMPORT_JOB -p $PROFILE --json "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE_RUN\"}]}"
+# 7. Who may drop folders in: users need to write into the import volume (and to see it).
+USERS_GROUP='account users'   # or the workspace's all-users group
+sql "GRANT USE CATALOG ON CATALOG $CATALOG TO \`$USERS_GROUP\`"
+sql "GRANT USE SCHEMA ON SCHEMA $CATALOG.$SCHEMA TO \`$USERS_GROUP\`"
+sql "GRANT READ VOLUME, WRITE VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$USERS_GROUP\`"
 ```
+
+Folder import in use: copy a folder of PDFs with `databricks fs cp -r ./invoices
+dbfs:/Volumes/$CATALOG/$SCHEMA/idp_import/invoices -p PROFILE` (or upload it in Catalog Explorer), then
+choose **Import from folder** on the Documents page. The import Job registers each PDF exactly as a
+browser upload would (same dedupe, same outcomes, same automatic preparation) and deletes each file
+once it is registered; failed files stay in the folder with their reason in the app. **Retry
+unfinished files** starts another run; re-running is safe. Only the App and Jobs write `idp_source`.
+Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pending files there.
 
 Every later deployment to that workspace is step 4's plan, deploy and run. If the bootstrap is run again, deploy afterwards: replacing
 views drops the grants the App binding applied.

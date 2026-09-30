@@ -152,6 +152,12 @@ resources:
             value: ${var.auto_prepare_enabled}
           - name: IDP_DISPATCH_JOB_ID
             value: ${resources.jobs.work_dispatcher.id}
+          # Folder import. The App is at the 20-resource binding cap, so READ VOLUME on the import
+          # volume and CAN_MANAGE_RUN on the import Job are granted directly (DEPLOYMENT_NOTES.md).
+          - name: IDP_IMPORT_VOLUME_NAME
+            value: ${var.import_volume_name}
+          - name: IDP_IMPORT_JOB_ID
+            value: ${resources.jobs.folder_importer.id}
           - name: IDP_PARSE_DISPATCH_SIZE
             value: ${var.parse_dispatch_size}
           - name: IDP_MODE

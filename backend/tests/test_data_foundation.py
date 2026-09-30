@@ -54,7 +54,7 @@ def test_migration_is_idempotent_prefixed_and_non_destructive() -> None:
     normalized = " ".join(sql.upper().split())
 
     assert normalized.count("CREATE TABLE IF NOT EXISTS") == len(TABLE_NAMES)
-    assert normalized.count("CREATE VOLUME IF NOT EXISTS") == 2
+    assert normalized.count("CREATE VOLUME IF NOT EXISTS") == 3  # source, artifacts, import
     assert "CREATE SCHEMA IF NOT EXISTS" in normalized
     assert normalized.count("CREATE OR REPLACE VIEW") == len(VIEW_NAMES)
     assert "CREATE CATALOG" not in normalized
@@ -95,6 +95,7 @@ def test_bundle_bootstrap_uses_only_trusted_parameters() -> None:
         "table_prefix": "${var.table_prefix}",
         "source_volume_name": "${var.source_volume_name}",
         "artifacts_volume_name": "${var.artifacts_volume_name}",
+        "import_volume_name": "${var.import_volume_name}",
     }
     assert tasks[1]["depends_on"] == [{"task_key": "create_governed_objects"}]
     assert tasks[1]["sql_task"]["file"]["path"] == "../sql/migrate_parsing.sql"

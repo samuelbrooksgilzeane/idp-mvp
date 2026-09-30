@@ -14,6 +14,11 @@ CREATE VOLUME IF NOT EXISTS IDENTIFIER(
 )
 COMMENT 'Derived page images and retained processing artifacts for the IDP application';
 
+CREATE VOLUME IF NOT EXISTS IDENTIFIER(
+  :catalog || '.' || :project_schema || '.' || :import_volume_name
+)
+COMMENT 'Folder import staging: users copy PDF folders here; the import Job registers and removes them';
+
 CREATE TABLE IF NOT EXISTS IDENTIFIER(
   :catalog || '.' || :project_schema || '.' || :table_prefix || '_documents'
 ) (

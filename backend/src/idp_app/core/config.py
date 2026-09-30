@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     # The claim starts once the whole body has arrived, so it only covers storing and registering.
     upload_claim_seconds: PositiveInt = 300
     upload_parallel_transfers: int = Field(default=3, ge=1, le=8)
+    # Folder import: users copy PDFs into this volume; a Job registers them. Off in databricks
+    # mode until both the volume and the import Job are configured. Mock mode uses a local folder.
+    import_volume_name: str | None = None
+    import_job_id: PositiveInt | None = None
+    import_concurrency: int = Field(default=8, ge=1, le=32)
+
+    @property
+    def folder_import_enabled(self) -> bool:
+        return self.mode is IdpMode.MOCK or bool(self.import_volume_name and self.import_job_id)
 
     @field_validator(
         "catalog",
@@ -59,6 +68,7 @@ class Settings(BaseSettings):
         "table_prefix",
         "source_volume_name",
         "artifacts_volume_name",
+        "import_volume_name",
         mode="before",
     )
     @classmethod
@@ -119,6 +129,8 @@ class Settings(BaseSettings):
             required["IDP_DISPATCH_JOB_ID"] = self.dispatch_job_id
         if self.bulk_export_enabled:
             required["IDP_EXPORT_JOB_ID"] = self.export_job_id
+        if self.import_volume_name:
+            required["IDP_IMPORT_JOB_ID"] = self.import_job_id
         missing = [name for name, value in required.items() if not value]
         if missing:
             raise ValueError("IDP_MODE=databricks requires configuration: " + ", ".join(missing))
