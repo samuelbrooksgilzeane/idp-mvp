@@ -211,6 +211,9 @@ upload-path API call uses `redirect: "manual"`; 401, 403 or an opaque redirect p
 with `signInRequired` and the retry button becomes "Resume"; 409 `UPLOAD_BUSY` waits 5, 15, 30 s;
 after the queue drains, retryable failures get one pass 30 s later (`retryingSoon`); a
 `beforeunload` warning and a screen wake lock are held only while transfers run.
+Known flaky (pre-existing, not changed here): `DocumentViewer.test.tsx` "renders labelled
+overlays…" failed once in `make check` under load (element button not found), then passed 5 runs
+alone and the next full run. Make that test's lookup robust if it recurs.
 
 1. Default `upload_claim_seconds` 300 (lease starts after the body has arrived).
 2. Frontend: 409 `UPLOAD_BUSY` is retryable with backoff (about 5 s, 15 s, 30 s).
