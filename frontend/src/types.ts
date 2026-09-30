@@ -16,7 +16,8 @@ export type DocumentStatus =
   | "EXTRACT_FAILED"
   | "VALIDATING"
   | "VALIDATED_PASS"
-  | "REVIEW_REQUIRED";
+  | "REVIEW_REQUIRED"
+  | "DELETED";
 
 export type DocumentRecord = {
   document_id: string;

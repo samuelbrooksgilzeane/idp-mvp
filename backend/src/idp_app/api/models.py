@@ -49,6 +49,8 @@ class DocumentResponse(BaseModel):
         "VALIDATING",
         "VALIDATED_PASS",
         "REVIEW_REQUIRED",
+        # Deleted documents keep their results, which are still reviewed through this model.
+        "DELETED",
     ]
     uploaded_by: str
     uploaded_at: datetime

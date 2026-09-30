@@ -329,3 +329,20 @@ def test_records_are_persisted_during_extraction_and_review_reads_are_read_only(
     assert review.json()["result"]["total"]["value"] == 114.0
     assert review.json()["fields"] == first.json()["fields"]
     assert len(calls) == 0
+
+
+def test_review_of_a_deleted_documents_retained_result_still_loads(tmp_path: Path) -> None:
+    """Deleting a document keeps its results; their review must not fail on the DELETED status."""
+    client = _client(tmp_path)
+    document_id = _upload_and_parse(client)
+    schema = _create_and_publish_flat_schema(client)
+    client.post(
+        f"/api/documents/{document_id}/extract",
+        json={"schema_id": schema["schema_id"], "schema_version": schema["schema_version"]},
+    )
+    run_id = _wait_extraction(client, document_id)["extraction_run_id"]
+    assert client.delete(f"/api/documents/{document_id}").status_code in (200, 204)
+
+    review = client.get(f"/api/extractions/{run_id}/review")
+    assert review.status_code == 200
+    assert review.json()["document"]["status"] == "DELETED"
