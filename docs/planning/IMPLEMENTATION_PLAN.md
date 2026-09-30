@@ -102,7 +102,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
 | 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
-| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | Blocked: gate G7 (user) |
+| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7 done (decision below); 7a next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Blocked: Batch 7 |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -132,10 +132,10 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | # | From | Needs | Check | Status |
 |---|---|---|---|---|
 | L1 | Batch 1 step 5 | User's CLI, profile `idp-mvp`, local `genie.generated.yml` | `databricks bundle deployment unbind project_genie -t dev -p idp-mvp` with the old `genie_*` vars, then delete the overlay. **Blocks every deploy.** | Open |
-| L2 | Batch 2 step 2 | Dev warehouse `647704f77f24020a`, scratch schema | One `UPDATE` and one `MERGE` on a throwaway table through the Statement Execution API; confirm each returns a one-row result whose manifest columns include `num_affected_rows` (MERGE also `num_inserted_rows`). If not, uploads stay correct but fall back to read-backs (slower). | Open |
-| L3 | Batch 3 step 7 | Browser signed in to the dev app | Let the session expire (or clear the app cookie), then trigger an API call with `redirect: "manual"`; record whether the Apps gateway answers 401, 403 or a redirect (opaque redirect in the browser). The frontend treats all three as sign-in loss. | Open |
+| L2 | Batch 2 step 2 | Dev warehouse `647704f77f24020a`, scratch schema | One `UPDATE` and one `MERGE` on a throwaway table through the Statement Execution API; confirm each returns a one-row result whose manifest columns include `num_affected_rows` (MERGE also `num_inserted_rows`). If not, uploads stay correct but fall back to read-backs (slower). | **Done 1 Oct:** UPDATE returns `num_affected_rows`; MERGE returns `num_affected_rows, num_updated_rows, num_deleted_rows, num_inserted_rows` (values are strings; `execute_dml` casts with `int`). Fast path works. |
+| L3 | Batch 3 step 7 | Browser signed in to the dev app | Let the session expire (or clear the app cookie), then trigger an API call with `redirect: "manual"`; record whether the Apps gateway answers 401, 403 or a redirect (opaque redirect in the browser). The frontend treats all three as sign-in loss. | Open. 1 Oct: dev app returned 503 to every call (valid token too): `compute_status` STOPPED, \"App compute was stopped due to workspace or account status\" (likely Free Edition usage limit). Retry when the app runs. |
 | L4 | Batch 4 step 7 | L1 done; user's CLI; user's OK (quota) | Deploy dev (`bundle deploy`, run bootstrap for the `idp_import` volume, deploy again), apply DEPLOYMENT_NOTES steps 6–7, copy ≤20 PDFs (include one non-PDF and one duplicate) to `idp_import/smoke/`, start **Import from folder**. Expect all registered or already registered, the non-PDF skipped, the folder emptied of PDFs. Record the job run time here. | Open |
-| G7 | Batch 7 gate | Free Edition workspace UI, CLI | KA and Supervisor feasibility on Free Edition; answers go in Batch 7's G7 table. **Blocks 7a/7b.** | Open |
+| G7 | Batch 7 gate | Free Edition workspace UI, CLI | KA and Supervisor feasibility on Free Edition; answers go in Batch 7's G7 table. **Blocks 7a/7b.** | Done 1 Oct (see G7 table). Probe KA, Supervisor and `idp_source/ka_probe/` still exist: user to delete. |
 | L5 | Batch 7 live | L1, G7, 7a, 7b | Provision, deploy, 10 set questions, restart and per-user history checks (see Batch 7). | Open |
 | L6 | Batch 7 live | L5 | Automatic KA Sync after upload and delete. | Open |
 
@@ -311,7 +311,10 @@ Needs from the user: US workspace host and CLI profile, admin rights, all-users 
 
 ## Batch 7 — Managed chat on Free Edition: KA + Supervisor (gate + 2 code sessions + live)
 
-Status: Blocked: gate G7 (user, in the Free Edition workspace)
+Status: G7 run 1 October 2026; 7a and 7b unblocked. **Decision (user, 1 October):** build 7a/7b
+as if the KA works; write provisioning and sync against the recorded API shapes; the KA is
+exercised for real on the US workspace. Free Edition queries fail (row a), so L5/L6 KA checks
+run on US; Free Edition can still run the Supervisor with the UC functions.
 
 Replaces the earlier "Managed chat on US" batch and absorbs Batch 5. Work is split by who can do it:
 code sessions need no workspace access (fakes and unit tests); the user runs the gate and the live
@@ -340,15 +343,23 @@ g. **API shapes for provisioning:** from the UI's network tab or `databricks api
    create/get/update calls and JSON for KA and Supervisor (name, sources, instructions, subagents).
    7a writes `scripts/provision_chat.py` against exactly these.
 
+Run 2026-10-01 from the CLI (v1.14.1, `knowledge-assistants` / `supervisor-agents`, both Beta).
+Probe KA `idp-ka-probe` (id `921c152f-f4b9-4ce6-b524-e369134e9958`), Supervisor
+`idp-supervisor-probe` (id `0297dd39-6f8a-43e8-8e92-967a6f0683ba`); source
+`/Volumes/workspace/idp_mvp/idp_source/ka_probe/` (4 dev PDFs + 2 sample invoices).
+
 | Check | Result |
 |---|---|
-| a KA on Free Edition | |
-| b `workspace` catalog accepted | |
-| c Sync by API (method, path, body) | |
-| d Deletion propagates | |
-| e Supervisor on Free Edition | |
-| f Endpoint names, limits, quota used | |
-| g Create/get/update calls and JSON | |
+| a KA on Free Edition | **Creates and indexes, but queries fail.** Create accepted; KA `ACTIVE` and source `UPDATED` after ~20 min. Every query returns HTTP 500; the stream shows `Vector search failed for index 'ka_probe': Model is unavailable for clientId ai-builder-interactive. Failed check: EDC. Error Code: NO_AVAILABLE_PHAROS_DEPLOYMENTS` (retrieval model not served for this workspace, likely region/compliance). Non-stream responses hide it; use `"stream": true` to debug. |
+| b `workspace` catalog accepted | Yes: files source on the `workspace` catalog volume created and indexed. |
+| c Sync by API (method, path, body) | Yes (sync of 6 files took over 6 min): `POST /api/2.1/knowledge-assistants/{ka_id}/knowledge-sources:sync`, empty body (`databricks knowledge-assistants sync-knowledge-sources knowledge-assistants/{id}`). Source goes `UPDATING` then `UPDATED`. |
+| d Deletion propagates | Not testable while queries fail. |
+| e Supervisor on Free Edition | Yes: creates, endpoint `READY`, answers, and calls the KA tool (which fails as in a). Answers come back with no annotations when the tool fails. |
+| f Endpoint names, limits, quota used | KA `ka-921c152f-endpoint`, Supervisor `mas-0297dd39-endpoint` (task `agent/v1/responses`, request body `{"input":[{"role":"user","content":"..."}]}`; `messages` rejected). Endpoint names are generated, not chosen; the provisioning script must read `endpoint_name` back. Quota: check the Usage page. |
+| g Create/get/update calls and JSON | KA: `create-knowledge-assistant NAME DESC --instructions` → `{id, name: "knowledge-assistants/{id}", endpoint_name, state}`; get `GET /api/2.1/knowledge-assistants/{id}`; update `update-knowledge-assistant NAME UPDATE_MASK DISPLAY_NAME DESCRIPTION`; list `list-knowledge-assistants`. Source: `create-knowledge-source knowledge-assistants/{id} --json '{"display_name","description","source_type":"files","files":{"path":"/Volumes/.../"}}'`. Supervisor: `create-supervisor-agent NAME --description --instructions` → `{supervisor_agent_id, endpoint_name}`; tool: `create-tool supervisor-agents/{id} TOOL_ID --json '{"tool_type":"knowledge_assistant","description","knowledge_assistant":{"knowledge_assistant_id"}}'` (also `uc_function`, `genie_space`, `app`, ...); list `GET /api/2.1/supervisor-agents/{id}/tools`. With `--json`, only the path arguments stay positional. |
+
+Source files are stored as `<document_id>.pdf`, so KA citations name UUIDs; 7b rewrites them to
+`idp_dev_documents.file_name`.
 
 If (a) fails: Free Edition keeps the foundation-model chat (Batch 5 as first written, done in 7b),
 and KA + Supervisor move back to the US workspace after Batch 6 using 7a's code unchanged except
@@ -361,7 +372,8 @@ for the recorded API shapes.
    document, documents by case. New `databricks_etl/sql/create_chat_functions.sql`
    (`CREATE OR REPLACE FUNCTION`, prefixed names, parameters typed, no dynamic SQL) as a bootstrap
    task after `create_chat_views`; validator and `test_data_foundation.py` checks. Each returns
-   `document_id` so answers can link to the viewer.
+   the extracted data points themselves (field name, value, confidence where stored) plus
+   `document_id` and the original file name, so the chat answer shows the values directly.
 2. **`scripts/provision_chat.py`**, idempotent: find-or-create the KA (source
    `idp_source/incoming`, instructions: cite file names, invoices only, say when unsure) and the
    Supervisor (KA + the functions; instructions on when to use each), then print endpoint names.
@@ -383,9 +395,10 @@ for the recorded API shapes.
    `resources/chat.app.yml` (serving endpoint resource CAN_QUERY, Lakebase database resource),
    serving endpoint name from a bundle variable `chat_endpoint` (Supervisor, else KA, else a
    foundation-model endpoint per G7). Two of three Free Edition apps; one Lakebase project.
-2. Citations: map `<document_id>.pdf` (and `document_id` values returned by functions) to links to
-   `<IDP app URL>/documents/<document_id>`; the IDP URL comes from a bundle variable. Unit test the
-   mapping.
+2. Citations are plain text, not links to the PDF viewer. Source PDFs are stored as
+   `<document_id>.pdf`, so rewrite cited UUID file names to the document's original file name
+   (lookup through a chat view or function). Extracted data points returned by functions render
+   in the answer as a small table (document, field, value). Unit test the rewrite.
 3. Set `chat_app_url` so the "Ask documents" link appears (bundle variable, per target).
 4. `make check` covers the chat app's lint/typecheck/tests; its build stays out of `frontend/dist`.
 
@@ -393,7 +406,8 @@ for the recorded API shapes.
 
 - **L5** (after L1, 7a, 7b): run bootstrap (functions), `provision_chat.py`, deploy both apps,
   apply grants; ask 10 set questions (5 document questions, 5 exact questions answered by
-  functions); check citations open the viewer; a conversation survives an app restart; history
+  functions); check citations show original file names and exact answers show the extracted
+  values; a conversation survives an app restart; history
   lists earlier chats; a second user cannot see the first user's chats; record quota per question.
 - **L6**: upload 3 PDFs and delete 1; confirm the automatic Sync fires once, the new documents are
   answerable and the deleted one is no longer cited; record sync latency.
