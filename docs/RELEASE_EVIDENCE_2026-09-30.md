@@ -7,7 +7,7 @@ or recovery-schedule activation were performed. Target unchanged from the
 
 ## Branch and commits
 
-Branch `feat/dark-blue-ui`, created from `feat/project-genie-lifecycle` at `c4ea9e8`. Not pushed.
+Branch `feat/dark-blue-ui`, created from `feat/project-genie-lifecycle` at `c4ea9e8`. Pushed to `origin` on 30 September.
 
 | Commit | Contents |
 | --- | --- |
@@ -18,6 +18,9 @@ Branch `feat/dark-blue-ui`, created from `feat/project-genie-lifecycle` at `c4ea
 
 | `be8df8b` fix(ui): background refresh; Genie result views | The document list no longer flashes to "Loading registry…" every 5 s: a background refetch keeps the current rows (`useCursorPage` reports `loading` only when the URL has no data yet). Same fix removes the flash on Results refresh. `prepare_genie_bundle.py` now requires `--catalog/--project-schema/--table-prefix` and adds the four `<prefix>_genie_*` views to the space definition if missing, preserving exported curation and other sources. |
 | `fa24422` fix: citation spotlight; deleted-document review | Clicking an extracted value now fades element boxes, dims the rest of the page and scrolls the cited region into view (the box was drawn but lost among 24 similarly coloured element overlays). Reviewing a retained result whose document was deleted returned HTTP 500 (`DocumentResponse` rejected `DELETED`); this affected every invoice run in dev. Regression test added. |
+| `0490558` fix(ui): remove citation spotlight | Reverts the `fa24422` spotlight. Its dimming was a 9999px shadow per cited region, so a multi-region citation stacked several and darkened the page; element boxes were faded to 18%. The viewer looks as it did at `c4ea9e8`. |
+| `f908d45` fix(viewer): show the extraction's own parse | See [Viewer citations](#viewer-citations-root-cause-fix-and-load-time). |
+| `89e1b3c` fix(ui): mount pages once | Pages rendered under the placeholder cache scope and were remounted when `/limits` answered, so every page load requested its data twice. Routes now render once the first scope answer settles. |
 
 ## Local validation
 
@@ -46,7 +49,7 @@ mode against the design mockups (`output/design-review/`).
 `queue.enabled` false→true on the parser and extractor Jobs, plus app source files. Deployment
 `01f1bc608256171da1298bb6378073e4` SUCCEEDED; app RUNNING; health 200; served `index-C49QaGhw.js`
 matches the local build. Both Jobs read back `queue.enabled: true`, `max_concurrent_runs: 1`,
-`for_each` concurrency 3. This is now the current deployment.
+`for_each` concurrency 3.
 
 ## Genie data sources and latest deployment
 
@@ -55,7 +58,7 @@ none to `workspace.idp_mvp.idp_dev_genie_{documents,extractions,fields,records}`
 Read back from the live space afterwards: four tables, instructions intact. The next plan (for `fa24422`)
 showed no Genie change, confirming the views are not duplicated on re-export.
 
-Current deployment `01f1bc638992197ab9ac800e6a7c6bd6` (includes `fa24422`): app RUNNING. Live checks:
+Deployment `01f1bc638992197ab9ac800e6a7c6bd6` (includes `fa24422`): app RUNNING. Live checks:
 review endpoint 200 for three invoice runs that previously returned 500 and for an SF 2823 run; a
 browser session on `/results/9c2fa309…` showed the spotlighted citation after clicking a value.
 Citations for tabular data cite the whole table element (model granularity), not the single cell.
@@ -66,6 +69,45 @@ Citations for tabular data cite the whole table element (model granularity), not
 release's entry point (and its JS) after a deploy. The entry point and client-route fallbacks now send
 `no-cache`; hashed assets send `max-age=31536000, immutable`. Deployment `01f1bc645d3f117290eafb94fde8145f`:
 headers verified live; served assets match the local build; invoice review returns 200.
+
+## Viewer citations: root cause, fix and load time
+
+Symptom: on a document's page, clicking an extracted value reloaded the viewer for about 7 s, and the
+citation did not line up with a parsed element.
+
+Root cause: data, not a code change since `c4ea9e8`. The Document page viewer showed the document's
+latest successful parse until a value was cited, then switched to the parse the extraction read (its
+`parseRunId` came only from the citation). Four documents were parsed again around 22:30 on
+29 September, after their extractions, and `ai_parse_document` segmented the pages differently: extraction
+`03ce3c8f` cites `[76,444,1634,761]`, an element of its parse `0a003f1b`, which matches no element of the
+newer parse `86df31e7`. The older parses also had no viewer projection, so the switch read the whole
+retained parse.
+
+- `f908d45`: the Document page resolves the selected extraction run's parse first (the run history is
+  requested alongside the document), so the viewer opens on the elements the values were read from and
+  citing only moves the highlight. Validation evidence carries its extraction's parse. The viewer never
+  reloads the parse on screen and selects the element a value was read from. The viewer endpoints issue
+  the document check, parse metadata, projection manifest and page elements together, keep immutable
+  parse metadata and manifests per process, and still check the document on every request.
+- Data: `backfill_viewer_projection.py` built projections for the 17 successful parses that had none
+  (no inference). Every successful parse now has one.
+- Deployments, each planned as the app only (0 add, 1 change, 0 delete): `01f1bc66afb91b17876fede631594d47`
+  (`0490558`), `01f1bc6bdabf13fca16416d4bd72b727` (`f908d45`) and `01f1bc6cc5201f189195481b47d5b3aa`
+  (`89e1b3c`, current). `make check`: 258 backend and 92 frontend tests. Rollback reference:
+  `01f1bc645d3f117290eafb94fde8145f`.
+
+Live checks in headless Chromium with the CLI user's OAuth token; only extracted values were clicked.
+
+| Measure | Before | After |
+| --- | --- | --- |
+| Click a value until the citation shows | ~7 s reload onto another parse | 36–83 ms, no requests |
+| Viewer request, warm | 1.4–2.5 s (3–4 statements in sequence) | ~0.5 s (image ~0.8 s) |
+| Document page open until the viewer is ready | ~8.8 s | ~5.0 s |
+| Result page open until the viewer is ready | ~9.8 s | ~6.0 s |
+
+The citation box and the selected element have identical on-screen rectangles (`table #5` on 90052.pdf,
+`table #10` on SF2823-14). Opening times include about 2 s of app start-up from the test machine; the
+Results page also waits on its review request (three statement rounds, about 1.8 s).
 
 ## Behaviour confirmed from code (not a live test)
 
