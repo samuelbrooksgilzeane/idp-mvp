@@ -16,6 +16,9 @@ Branch `feat/dark-blue-ui`, created from `feat/project-genie-lifecycle` at `c4ea
 
 | `5244305` fix: demo papercuts | Parser and extractor Jobs now **queue** a run started while another is active instead of skipping it (Databricks skips it when `max_concurrent_runs` is 1 and queueing is off, which the app showed as a failure). Documents list keeps refreshing while documents are extracting or validating. The selection bar defaults to the schema last used in this browser, else the most recently published schema. Two regression tests added. |
 
+| `be8df8b` fix(ui): background refresh; Genie result views | The document list no longer flashes to "Loading registry…" every 5 s: a background refetch keeps the current rows (`useCursorPage` reports `loading` only when the URL has no data yet). Same fix removes the flash on Results refresh. `prepare_genie_bundle.py` now requires `--catalog/--project-schema/--table-prefix` and adds the four `<prefix>_genie_*` views to the space definition if missing, preserving exported curation and other sources. |
+| `fa24422` fix: citation spotlight; deleted-document review | Clicking an extracted value now fades element boxes, dims the rest of the page and scrolls the cited region into view (the box was drawn but lost among 24 similarly coloured element overlays). Reviewing a retained result whose document was deleted returned HTTP 500 (`DocumentResponse` rejected `DELETED`); this affected every invoice run in dev. Regression test added. |
+
 ## Local validation
 
 `make check` passed: 252 backend tests, 83 frontend tests, Python/frontend lint, mypy, TypeScript,
@@ -45,6 +48,18 @@ mode against the design mockups (`output/design-review/`).
 matches the local build. Both Jobs read back `queue.enabled: true`, `max_concurrent_runs: 1`,
 `for_each` concurrency 3. This is now the current deployment.
 
+## Genie data sources and latest deployment
+
+Plan for `be8df8b` showed the Genie space updated in place with only `data_sources.tables` going from
+none to `workspace.idp_mvp.idp_dev_genie_{documents,extractions,fields,records}`; instructions unchanged.
+Read back from the live space afterwards: four tables, instructions intact. The next plan (for `fa24422`)
+showed no Genie change, confirming the views are not duplicated on re-export.
+
+Current deployment `01f1bc638992197ab9ac800e6a7c6bd6` (includes `fa24422`): app RUNNING. Live checks:
+review endpoint 200 for three invoice runs that previously returned 500 and for an SF 2823 run; a
+browser session on `/results/9c2fa309…` showed the spotlighted citation after clicking a value.
+Citations for tabular data cite the whole table element (model granularity), not the single cell.
+
 ## Behaviour confirmed from code (not a live test)
 
 - Parse and extraction work runs in Databricks Jobs, and each document task records its own
@@ -57,9 +72,9 @@ matches the local build. Both Jobs read back `queue.enabled: true`, `max_concurr
 
 ## Findings
 
-- **The Genie space has no data sources.** The exported definition contains `"data_sources": {}`.
-  The embed loads, but Genie cannot answer questions about extracted results until the project's
-  structured views are attached. See the demo plan in the [checklist](RELEASE_CHECKLIST.md).
+- Fixed in `be8df8b`: the Genie space had no data sources (`"data_sources": {}`); the four result
+  views are now attached. The source volume and content search remain a manual step in the space's
+  Sources tab (not exposed in the documented space definition).
 - Fixed in `5244305`: the Documents list did not refresh while extracting; the selection bar defaulted
   to the first schema alphabetically; concurrent single-document runs could be skipped.
 - The local mock SQLite registry predates a column the current code writes (`invoice_candidates.invoice_index`),

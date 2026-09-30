@@ -29,7 +29,8 @@ turn viewer projections off, so always pass the full set and review the plan.
 ```bash
 uv run --project backend python scripts/prepare_genie_bundle.py \
   --space-id 01f1ba8f44851508b81fcc9c9a013451 --profile idp-mvp \
-  --host https://dbc-97e4a372-40b1.cloud.databricks.com
+  --host https://dbc-97e4a372-40b1.cloud.databricks.com \
+  --catalog workspace --project-schema idp_mvp --table-prefix idp_dev
 make check
 cd databricks_etl
 VARS=(--var catalog=workspace --var project_schema=idp_mvp --var source_volume_name=idp_source
@@ -40,6 +41,10 @@ databricks bundle plan   -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle deploy -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle run    -t dev -p idp-mvp "${VARS[@]}" idp_app   # activates the new app code
 ```
+
+The Genie script adds the four `<prefix>_genie_*` result views to the space definition if missing. In a new
+workspace run the bootstrap Job first so those views exist before the Genie resource is deployed. Attach the
+source volume and enable content search manually in the space's Sources tab.
 
 `make check` rebuilds `frontend/dist`, which is what the app serves. Parse/extract parallelism is set by
 the bundle variables `parse_concurrency`, `extraction_concurrency` (default 3 each) and

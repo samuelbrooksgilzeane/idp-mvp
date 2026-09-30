@@ -17,8 +17,8 @@ and [synthetic export benchmark](EXPORT_BENCHMARK.md).
 
 - Branch `feat/dark-blue-ui`: `4fc7a2e` commits the 29 September deployed working tree and release docs;
   `32476d5` adds the dark blue UI and 3-way parse/extract parallelism. Details in the 30 September record.
-- App is RUNNING with deployment `01f1bc608256171da1298bb6378073e4` (30 September, includes `5244305`); authenticated health
-  passed and deployed assets match the local build. Rollback references: `01f1bc5e24d710a9a997e9d6b2b5b197`
+- App is RUNNING with deployment `01f1bc638992197ab9ac800e6a7c6bd6` (30 September, includes `fa24422`); authenticated health
+  passed. Rollback references: `01f1bc608256171da1298bb6378073e4`, `01f1bc5e24d710a9a997e9d6b2b5b197`
   (earlier 30 September) and `01f1bc532ec01c13a89d8c0a68ccd4c2` (29 September).
 - Parser and extractor Jobs run up to 3 documents at a time each (combined budget 6) and queue, rather
   than skip, a run started while another is active.
@@ -46,7 +46,9 @@ export → ask Genie, on the live app, without surprises. Order matters: each st
    and shown as failed). Enable Job queueing if it is.
    Done in `5244305`, deployed `01f1bc608256171da1298bb6378073e4`: Databricks documents that such a run is
    skipped, so queueing is now enabled on both Jobs.
-3. [ ] **User approves / agent configures — attach data sources to Genie.** The live space has no data
+3. [ ] **User approves / agent configures — attach data sources to Genie.** Result views attached
+   30 September (`be8df8b`); still to do: attach the source volume with content search in the Sources tab,
+   then check the embed and prepared questions. The live space has no data
    sources, so it cannot answer questions yet. Attach the project's structured extraction views
    (the four generic Genie views created on 29 September) to the existing space through Databricks,
    preserving its curation, then regenerate the overlay before the next deploy. Check that the embed
@@ -218,8 +220,8 @@ May be deferred for a pilot only if users are clearly told document content sear
 - [x] Preserve the existing Genie space and prepare source-volume/structured-view setup instructions.
       The source volume exposes original files, not our extracted-result tables.
 - [ ] Verify the embed URL and inspect allowed-origin configuration; fix app integration as needed.
-- [ ] Attach the structured extraction views to the existing space; the 30 September export shows
-      `data_sources: {}`, so Genie cannot answer result questions yet. Needs user approval of the sources.
+- [x] Attach the structured extraction views to the existing space. Done 30 September via
+      `prepare_genie_bundle.py` (repeatable in every workspace); volume/content search remain manual.
 - [ ] Prepare upload → sync → search and deletion → sync → search checks; inspect results after the
       user-operated tests. Do not assume immediate index removal or continuous synchronization.
 - [x] Document sync ownership and how index freshness is communicated.
