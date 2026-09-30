@@ -52,7 +52,7 @@ describe("App", () => {
     renderApp();
 
     expect(screen.getByRole("heading", { name: "Documents" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sections" })).toHaveTextContent("Documents");
     await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
     await waitFor(() => expect(screen.getByText("No documents registered")).toBeInTheDocument());
@@ -125,6 +125,30 @@ describe("App", () => {
     expect(await screen.findByRole("heading", { name: "Schema library" })).toBeInTheDocument();
     expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents");
     expect(fetchMock.mock.calls.map(([input]) => input.toString())).not.toContain("/api/documents/cases");
+  });
+
+  it("mounts a page once, under the resolved cache scope", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      return {
+        ok: true,
+        json: async () => (
+          url.endsWith("/health") ? health
+            : url.endsWith("/limits") ? { cache_scope: "user-scope" }
+              : url.startsWith("/api/extractions") ? { items: [], next_cursor: null } : []
+        ),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderApp("/results");
+
+    expect(await screen.findByText("No extraction runs")).toBeInTheDocument();
+    // Resolving the scope after the page had mounted used to remount it and request it again.
+    const listings = fetchMock.mock.calls.filter(([input]) =>
+      input.toString().startsWith("/api/extractions?"),
+    );
+    expect(listings).toHaveLength(1);
   });
 
   it("does not load the registry when Results is opened directly", async () => {

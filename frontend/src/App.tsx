@@ -55,9 +55,15 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
   },
 };
 
+const viewLoading = <div className="results-state" role="status">Loading view…</div>;
+
 export function App() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
   const [scope, setScope] = useState("initial");
+  // Pages wait for the first scope answer (no warehouse work, so it is quick). Rendering them
+  // under the placeholder scope meant remounting them under the real one moments later, and
+  // every page requested all of its data twice on each load.
+  const [scopeSettled, setScopeSettled] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
   const location = useLocation();
@@ -106,7 +112,7 @@ export function App() {
         if (active && typeof value.cache_scope === "string") {
           setCacheScope(value.cache_scope); setScope(value.cache_scope);
         }
-      }).catch(() => undefined);
+      }).catch(() => undefined).finally(() => { if (active) setScopeSettled(true); });
     };
     updateScope(); window.addEventListener("focus", updateScope);
     return () => { active = false; window.removeEventListener("focus", updateScope); };
@@ -164,7 +170,8 @@ export function App() {
           </section>
         ) : null}
 
-        <Suspense fallback={<div className="results-state" role="status">Loading view…</div>}>
+        <Suspense fallback={viewLoading}>
+        {!scopeSettled ? viewLoading : (
         <Routes key={scope}>
           <Route
             path="/"
@@ -202,6 +209,7 @@ export function App() {
           <Route path="/ask-genie" element={<AskGeniePage />} />
           <Route path="/schema" element={<SchemaPage />} />
         </Routes>
+        )}
         </Suspense>
       </main>
       </div>
