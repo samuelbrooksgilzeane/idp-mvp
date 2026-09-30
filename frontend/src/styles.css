@@ -911,11 +911,3 @@ tbody tr:hover td { background: var(--hover); }
 .schema-provenance { font-size: 11.5px; }
 .production-badge { border-radius: 999px; border: 0; background: var(--success-soft); color: var(--success); }
 .genie-workspace > p { padding: 20px; border: 1px dashed var(--border-2); border-radius: 12px; background: var(--panel); color: var(--muted); }
-
-/* Citation spotlight: while a value's evidence is shown, fade detected-element boxes and dim the
-   rest of the page so the cited region is unmistakable. */
-.page-sheet.citing .element-box { opacity: .18; box-shadow: none; }
-.page-sheet.citing .element-box > span { display: none; }
-.page-sheet.citing .citation-overlay { overflow: hidden; }
-.page-sheet.citing .citation-box { border-width: 3px; box-shadow: 0 0 0 9999px rgb(0 0 0 / 42%), 0 0 0 5px color-mix(in srgb, var(--accent) 35%, transparent); animation: none; }
-.page-sheet.citing .citation-box > span { font-size: 11px; padding: 4px 7px; }

@@ -91,7 +91,6 @@ export function DocumentViewer({
   const [naturalSize, setNaturalSize] = useState<Size>({ width: 0, height: 0 });
   const [renderedSize, setRenderedSize] = useState<Size>({ width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
-  const citationRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -177,13 +176,6 @@ export function DocumentViewer({
     () => elements.filter((element) => selectedTypes.has(element.element_type)),
     [elements, selectedTypes],
   );
-  // Bring the cited region into view each time a value is selected (a new nonce), even when the
-  // page is zoomed or scrolled away from it.
-  useEffect(() => {
-    if (imageState !== "ready" || !citationTarget) return;
-    citationRef.current?.scrollIntoView?.({ block: "center", inline: "center", behavior: "smooth" });
-  }, [citationTarget, imageState]);
-
   const citationBoxes = useMemo(
     () =>
       citationTarget && currentPage
@@ -358,7 +350,7 @@ export function DocumentViewer({
                 </div>
               ) : null}
               <div
-                className={`page-sheet page-sheet-${imageState}${citationTarget && citationBoxes.length > 0 ? " citing" : ""}`}
+                className={`page-sheet page-sheet-${imageState}`}
                 style={{ width: `${zoom}%` }}
                 data-testid="page-sheet"
               >
@@ -412,7 +404,6 @@ export function DocumentViewer({
                       return (
                         <div
                           className="citation-box"
-                          ref={index === 0 ? citationRef : undefined}
                           style={boxStyle(scaled)}
                           key={`citation-${citationTarget.nonce}-${index}`}
                           role="img"
