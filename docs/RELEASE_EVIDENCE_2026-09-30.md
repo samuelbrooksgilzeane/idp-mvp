@@ -60,6 +60,13 @@ review endpoint 200 for three invoice runs that previously returned 500 and for 
 browser session on `/results/9c2fa309…` showed the spotlighted citation after clicking a value.
 Citations for tabular data cite the whole table element (model granularity), not the single cell.
 
+## Browser caching fix
+
+`aa39f64`: the app served `index.html` without `Cache-Control`, so browsers could keep a previous
+release's entry point (and its JS) after a deploy. The entry point and client-route fallbacks now send
+`no-cache`; hashed assets send `max-age=31536000, immutable`. Deployment `01f1bc645d3f117290eafb94fde8145f`:
+headers verified live; served assets match the local build; invoice review returns 200.
+
 ## Behaviour confirmed from code (not a live test)
 
 - Parse and extraction work runs in Databricks Jobs, and each document task records its own

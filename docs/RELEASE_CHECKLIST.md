@@ -17,8 +17,8 @@ and [synthetic export benchmark](EXPORT_BENCHMARK.md).
 
 - Branch `feat/dark-blue-ui`: `4fc7a2e` commits the 29 September deployed working tree and release docs;
   `32476d5` adds the dark blue UI and 3-way parse/extract parallelism. Details in the 30 September record.
-- App is RUNNING with deployment `01f1bc638992197ab9ac800e6a7c6bd6` (30 September, includes `fa24422`); authenticated health
-  passed. Rollback references: `01f1bc608256171da1298bb6378073e4`, `01f1bc5e24d710a9a997e9d6b2b5b197`
+- App is RUNNING with deployment `01f1bc645d3f117290eafb94fde8145f` (30 September, includes `aa39f64`); authenticated health
+  passed. Rollback references: `01f1bc638992197ab9ac800e6a7c6bd6`, `01f1bc608256171da1298bb6378073e4`, `01f1bc5e24d710a9a997e9d6b2b5b197`
   (earlier 30 September) and `01f1bc532ec01c13a89d8c0a68ccd4c2` (29 September).
 - Parser and extractor Jobs run up to 3 documents at a time each (combined budget 6) and queue, rather
   than skip, a run started while another is active.
