@@ -23,9 +23,10 @@ Created 30 September 2026 on `feat/dark-blue-ui`. One chat per batch.
 - **Genie is dropped:** Volume Content Search excludes catalogs with workspace bindings.
 - **Chat:** Knowledge Assistant (KA) + Supervisor Agent + Databricks chat template
   `e2e-chatbot-app-next` with Lakebase history (option B in `DOCUMENT_CHAT_OPTIONS.md`; its
-  preference for option A assumed Free Edition only). KA is unavailable on Free Edition in every
-  region, so Free Edition gets the chat app and history against a foundation-model endpoint; KA and
-  Supervisor are built on the US workspace.
+  preference for option A assumed Free Edition only). **Revised 30 September:** the user expects
+  KA to work on Free Edition, so Batch 7 builds KA + Supervisor there first, behind gate **G7**
+  (Batch 7). The docs checked on 30 September said Free Edition excludes KA; G7 settles it in the
+  workspace. The US workspace later reuses the same provisioning script.
 - **Access:** everyone. Apps access data as their service principals. An all-users group gets
   CAN USE on both apps, WRITE on a new import volume `idp_import`, READ on `idp_source`. Only the app
   and jobs write `idp_source`, so nothing unregistered is indexed by KA.
@@ -75,7 +76,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 (`databricks bundle deployment unbind <resource-key>`) or delete it deliberately with the user's OK.
 
 **Platform**
-- Free Edition: no KA; up to 3 apps, each stopped 24 h after start/deploy; one AI Search endpoint;
+- Free Edition: KA listed as excluded in the docs on 30 September (re-check in gate G7); up to 3 apps, each stopped 24 h after start/deploy; one AI Search endpoint;
   one Lakebase project; one 2X-Small SQL warehouse; quota overrun shuts compute down for the rest
   of the day; no commercial use. The dev app was stopped by "workspace or account status" on
   30 September.
@@ -99,9 +100,9 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 2 | Upload speed | 1 | Done (live DML result shape unconfirmed) |
 | 3 | Upload robustness | 1 | Done (live check L3 open) |
 | 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
-| 5 | Chat foundation on Free Edition | 2 | Not started |
+| 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
-| 7 | Managed chat on US | 2 | Blocked: Batch 6 |
+| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | Blocked: gate G7 (user) |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Blocked: Batch 7 |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -134,6 +135,9 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | L2 | Batch 2 step 2 | Dev warehouse `647704f77f24020a`, scratch schema | One `UPDATE` and one `MERGE` on a throwaway table through the Statement Execution API; confirm each returns a one-row result whose manifest columns include `num_affected_rows` (MERGE also `num_inserted_rows`). If not, uploads stay correct but fall back to read-backs (slower). | Open |
 | L3 | Batch 3 step 7 | Browser signed in to the dev app | Let the session expire (or clear the app cookie), then trigger an API call with `redirect: "manual"`; record whether the Apps gateway answers 401, 403 or a redirect (opaque redirect in the browser). The frontend treats all three as sign-in loss. | Open |
 | L4 | Batch 4 step 7 | L1 done; user's CLI; user's OK (quota) | Deploy dev (`bundle deploy`, run bootstrap for the `idp_import` volume, deploy again), apply DEPLOYMENT_NOTES steps 6–7, copy ≤20 PDFs (include one non-PDF and one duplicate) to `idp_import/smoke/`, start **Import from folder**. Expect all registered or already registered, the non-PDF skipped, the folder emptied of PDFs. Record the job run time here. | Open |
+| G7 | Batch 7 gate | Free Edition workspace UI, CLI | KA and Supervisor feasibility on Free Edition; answers go in Batch 7's G7 table. **Blocks 7a/7b.** | Open |
+| L5 | Batch 7 live | L1, G7, 7a, 7b | Provision, deploy, 10 set questions, restart and per-user history checks (see Batch 7). | Open |
+| L6 | Batch 7 live | L5 | Automatic KA Sync after upload and delete. | Open |
 
 ## Batch 1 — Branch and Genie removal
 
@@ -277,7 +281,8 @@ then choose the folder in the app. A Databricks Job registers them; no browser n
 
 ## Batch 5 — Chat foundation on Free Edition (2 sessions)
 
-Status: Not started
+Status: Merged into Batch 7 on 30 September. Steps 1–3 are built in Batch 7's code sessions
+(7a, 7b); step 4 is live check L5; step 5 no longer applies if gate G7 passes.
 
 1. UC SQL functions over the `_chat_*` views for exact questions (for example invoice totals by
    supplier and date range, find documents by field value, fields of one document). Read the view
@@ -304,24 +309,103 @@ Needs from the user: US workspace host and CLI profile, admin rights, all-users 
    bulk extraction, bulk export).
 4. Smoke test with a few files: browser upload, folder import, prepare, extract, chat link.
 
-## Batch 7 — Managed chat on US (2 sessions)
+## Batch 7 — Managed chat on Free Edition: KA + Supervisor (gate + 2 code sessions + live)
 
-Status: Blocked: Batch 6
+Status: Blocked: gate G7 (user, in the Free Edition workspace)
 
-1. Feasibility checks, stop if any fails: KA accepts `idp_source/incoming` in the new catalog with
-   5 test PDFs; Sync can be triggered through the SDK or REST API (else a scheduled job or an admin
-   button); a deleted document disappears after Sync; record cost per question.
-2. Create the KA (source `idp_source/incoming`) and a Supervisor (KA + Batch 5 UC functions; MCP
-   servers later). Put creation in an idempotent `scripts/provision_chat.py` where the SDK allows.
-3. Grants: chat app principal CAN QUERY on Supervisor and KA; EXECUTE on functions.
-4. Point the chat app endpoint at the Supervisor.
-5. Trigger KA Sync after each completed upload batch or import run (one sync at a time, debounced).
-6. Citations: tweak the template to turn `<document_id>.pdf` into links to the IDP viewer
-   `/documents/<document_id>`.
+Replaces the earlier "Managed chat on US" batch and absorbs Batch 5. Work is split by who can do it:
+code sessions need no workspace access (fakes and unit tests); the user runs the gate and the live
+checks. Nothing in 7a/7b starts before G7 passes, because the provisioning code depends on the API
+shapes G7 records.
+
+### Gate G7 — feasibility on Free Edition (user, about 30 minutes, small quota)
+
+Stop Batch 7 if (a) or (b) fails; record every answer in the table below.
+
+a. **KA exists:** create a Knowledge Assistant in the Agents UI with source directory
+   `/Volumes/workspace/idp_mvp/idp_source/ka_probe/` holding 5 dev PDFs (copy them; do not point
+   the probe at `incoming/`). Ask 3 questions; note whether answers cite `<file>.pdf`.
+b. **Catalog accepted:** the `workspace` catalog volume is accepted as a source (Genie's content
+   search refused bound catalogs; KA may differ).
+c. **Sync by API:** after adding a sixth PDF, trigger Sync from the CLI/REST, not the UI
+   (`databricks api` against the endpoint the UI's network tab shows, or the SDK method). Record the
+   exact method/path and request body. If only the UI can sync, 7a falls back to an admin button
+   that opens the KA page plus a scheduled reminder.
+d. **Deletion:** delete one probe PDF, Sync, confirm it is no longer cited.
+e. **Supervisor exists:** create a Supervisor Agent with the probe KA as its only subagent. If
+   unavailable, the chat app talks to the KA endpoint directly and UC functions wait for US.
+f. **Endpoints and limits:** record the KA and Supervisor serving endpoint names, whether they
+   count against a Free Edition endpoint limit, and the quota used for the probe (Usage page).
+g. **API shapes for provisioning:** from the UI's network tab or `databricks api`, record the
+   create/get/update calls and JSON for KA and Supervisor (name, sources, instructions, subagents).
+   7a writes `scripts/provision_chat.py` against exactly these.
+
+| Check | Result |
+|---|---|
+| a KA on Free Edition | |
+| b `workspace` catalog accepted | |
+| c Sync by API (method, path, body) | |
+| d Deletion propagates | |
+| e Supervisor on Free Edition | |
+| f Endpoint names, limits, quota used | |
+| g Create/get/update calls and JSON | |
+
+If (a) fails: Free Edition keeps the foundation-model chat (Batch 5 as first written, done in 7b),
+and KA + Supervisor move back to the US workspace after Batch 6 using 7a's code unchanged except
+for the recorded API shapes.
+
+### 7a — Functions, provisioning and sync (code session, no workspace)
+
+1. **UC SQL functions** over the `_chat_*` views (read `create_chat_views.sql` columns first):
+   invoice totals by supplier and date range, find documents by field value, fields of one
+   document, documents by case. New `databricks_etl/sql/create_chat_functions.sql`
+   (`CREATE OR REPLACE FUNCTION`, prefixed names, parameters typed, no dynamic SQL) as a bootstrap
+   task after `create_chat_views`; validator and `test_data_foundation.py` checks. Each returns
+   `document_id` so answers can link to the viewer.
+2. **`scripts/provision_chat.py`**, idempotent: find-or-create the KA (source
+   `idp_source/incoming`, instructions: cite file names, invoices only, say when unsure) and the
+   Supervisor (KA + the functions; instructions on when to use each), then print endpoint names.
+   Uses `scripts/workspace_auth.py`; `--dry-run` prints the plan; bundle-style names
+   `<app_name>-<target>-documents-ka` / `-chat-supervisor`. Unit tests with a fake API client
+   (create, re-run no-op, drifted instructions updated).
+3. **KA Sync trigger** (`services/chat_sync.py`), off by default: settings
+   `IDP_KA_SYNC_ENABLED`, `IDP_KA_ID`. After an upload batch finishes (last item terminal), a folder
+   import run ends, or a document is deleted, request a sync: coalesced (one in flight, at most one
+   per 10 minutes, a trailing request is kept), best-effort like `work_wakeup.py`. Import Job calls
+   it at the end of `run()`. If G7c found no API, this becomes a "Sync documents" admin action
+   that records the request instead. Tests with a fake clock and fake client.
+4. Grants documented in `DEPLOYMENT_NOTES.md`: chat app principal CAN QUERY on KA and Supervisor,
+   EXECUTE on the functions; IDP app principal permission to sync the KA (level from G7).
+
+### 7b — Chat app (code session, no workspace)
+
+1. Add `e2e-chatbot-app-next` under `chat_app/` (pin the template commit), bundle resource
+   `resources/chat.app.yml` (serving endpoint resource CAN_QUERY, Lakebase database resource),
+   serving endpoint name from a bundle variable `chat_endpoint` (Supervisor, else KA, else a
+   foundation-model endpoint per G7). Two of three Free Edition apps; one Lakebase project.
+2. Citations: map `<document_id>.pdf` (and `document_id` values returned by functions) to links to
+   `<IDP app URL>/documents/<document_id>`; the IDP URL comes from a bundle variable. Unit test the
+   mapping.
+3. Set `chat_app_url` so the "Ask documents" link appears (bundle variable, per target).
+4. `make check` covers the chat app's lint/typecheck/tests; its build stays out of `frontend/dist`.
+
+### Live (user)
+
+- **L5** (after L1, 7a, 7b): run bootstrap (functions), `provision_chat.py`, deploy both apps,
+  apply grants; ask 10 set questions (5 document questions, 5 exact questions answered by
+  functions); check citations open the viewer; a conversation survives an app restart; history
+  lists earlier chats; a second user cannot see the first user's chats; record quota per question.
+- **L6**: upload 3 PDFs and delete 1; confirm the automatic Sync fires once, the new documents are
+  answerable and the deleted one is no longer cited; record sync latency.
+
+### On the US workspace (after Batch 6)
+
+Run `provision_chat.py` against the `us` target, deploy the chat app there, repeat L5/L6 briefly.
+No new code expected.
 
 ## Batch 8 — US capacity runs, access, retirement
 
-Status: Blocked: Batch 7
+Status: Blocked: Batch 6 (US workspace) and Batch 7
 
 1. User runs `docs/CAPACITY_TEST_PROCEDURE.md` on US: browser 100 and 300 files; folder import 100,
    500 and 1,000. Record results in a new evidence doc.
