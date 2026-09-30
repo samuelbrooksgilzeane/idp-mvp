@@ -12,7 +12,7 @@ type SavedBatch = {
   client_request_id: string; case_id: string | null; files: Manifest[];
   batch_id: string | null; items: UploadItem[];
 };
-type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; automaticPreparation?: boolean; bulkExtraction?: boolean };
+type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; automaticPreparation?: boolean; bulkExtraction?: boolean };
 const STORAGE_KEY = "idp:upload-batch:v1"; // Storage is isolated by this project's app origin.
 const complete = (item: UploadItem) => item.state === "REGISTERED" || item.state === "ALREADY_REGISTERED";
 const signature = (file: { name: string; size: number; lastModified?: number; last_modified?: number | null }) =>
@@ -35,9 +35,13 @@ async function jsonResponse<T>(response: Response): Promise<T> {
   return payload as T;
 }
 
+// Deployments set the transfer count (IDP_UPLOAD_PARALLEL_TRANSFERS); the server caps it at 8.
+const DEFAULT_PARALLEL_TRANSFERS = 3;
+const MAX_PARALLEL_TRANSFERS = 8;
+
 // Owned above the list route: navigating to Results does not discard File objects or transfers.
 export class UploadTransferManager {
-  private snapshot: Snapshot = { batch: null, busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null };
+  private snapshot: Snapshot = { batch: null, busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null, parallelTransfers: DEFAULT_PARALLEL_TRANSFERS };
   private listeners = new Set<() => void>();
   private files = new Map<string, File>();
   private stop = false;
@@ -68,9 +72,12 @@ export class UploadTransferManager {
     if (this.restored) return;
     this.restored = true;
     try {
-      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; automatic_preparation?: boolean; bulk_extraction?: boolean }>(await fetch("/api/upload-batches/limits"));
+      const limits = await jsonResponse<{ max_files: number; max_file_bytes: number; parallel_transfers?: number; automatic_preparation?: boolean; bulk_extraction?: boolean }>(await fetch("/api/upload-batches/limits"));
       if (Number.isInteger(limits.max_files) && limits.max_files > 0 && Number.isInteger(limits.max_file_bytes) && limits.max_file_bytes > 0) {
-        this.update({ maxFiles: Math.min(1000, limits.max_files), maxFileBytes: limits.max_file_bytes, automaticPreparation: Boolean(limits.automatic_preparation), bulkExtraction: Boolean(limits.bulk_extraction) });
+        const parallel = limits.parallel_transfers;
+        this.update({ maxFiles: Math.min(1000, limits.max_files), maxFileBytes: limits.max_file_bytes,
+          parallelTransfers: Number.isInteger(parallel) && parallel! >= 1 ? Math.min(MAX_PARALLEL_TRANSFERS, parallel!) : DEFAULT_PARALLEL_TRANSFERS,
+          automaticPreparation: Boolean(limits.automatic_preparation), bulkExtraction: Boolean(limits.bulk_extraction) });
       }
     } catch { /* The API still enforces limits when configuration is unavailable. */ }
     if (this.snapshot.busy) return;
@@ -157,7 +164,7 @@ export class UploadTransferManager {
         await this.transfer(item);
       }
     };
-    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(this.snapshot.parallelTransfers, queue.length) }, worker));
     await this.refresh();
     this.onFinished();
   }

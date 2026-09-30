@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from pathlib import Path
@@ -10,12 +11,22 @@ from typing import Any, Protocol
 
 from idp_app.services.document_registry import DatabricksDocumentRegistry
 
+logger = logging.getLogger(__name__)
+DELTA_CONFLICTS = (
+    "DELTA_CONCURRENT",
+    "ConcurrentAppendException",
+    "ConcurrentWriteException",
+    "ConcurrentDeleteReadException",
+)
 
 class BatchRepository(Protocol):
     def create(self, header: dict[str, Any], items: list[dict[str, Any]]) -> None: ...
     def header(self, batch_id: str) -> dict[str, Any] | None: ...
     def items(self, batch_id: str, after: int, limit: int) -> list[dict[str, Any]]: ...
     def item(self, batch_id: str, client_file_id: str) -> dict[str, Any] | None: ...
+    def header_and_item(
+        self, batch_id: str, client_file_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]: ...
     def counts(self, batch_id: str) -> dict[str, int]: ...
     def compare_and_set(self, old: dict[str, Any], new: dict[str, Any]) -> bool: ...
 
@@ -91,6 +102,19 @@ class SQLiteBatchRepository:
             ).fetchone()
         return json.loads(row[0]) if row else None
 
+    def header_and_item(
+        self, batch_id: str, client_file_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT h.payload, i.payload FROM upload_batches h LEFT JOIN upload_items i "
+                "ON i.batch_id = h.batch_id AND i.client_file_id = ? WHERE h.batch_id = ?",
+                (client_file_id, batch_id),
+            ).fetchone()
+        if row is None:
+            return None, None
+        return json.loads(row[0]), json.loads(row[1]) if row[1] else None
+
     def counts(self, batch_id: str) -> dict[str, int]:
         with self.connect() as connection:
             rows = connection.execute(
@@ -122,24 +146,22 @@ class DatabricksBatchRepository:
         self.headers = f"{namespace}_upload_batches"
         self.members = f"{namespace}_upload_items"
 
-    def write(self, statement: str, values: dict[str, object]) -> None:
+    def write(self, statement: str, values: dict[str, object]) -> dict[str, int]:
+        """Run one DML statement and return its row counts (empty when none were reported)."""
         # Serializable Delta conflicts are retryable; authentication/schema errors are not.
         for attempt in range(3):
             try:
-                self.sql.execute_sql(statement, values)
-                return
+                return self.sql.execute_dml(statement, values)
             except Exception as error:
-                if attempt == 2 or not any(
-                    code in str(error)
-                    for code in (
-                        "DELTA_CONCURRENT",
-                        "ConcurrentAppendException",
-                        "ConcurrentWriteException",
-                        "ConcurrentDeleteReadException",
-                    )
-                ):
+                code = next((code for code in DELTA_CONFLICTS if code in str(error)), None)
+                if attempt == 2 or code is None:
                     raise
+                logger.warning(
+                    "Delta conflict on upload metadata write; retrying",
+                    extra={"error_code": code, "attempt": attempt + 1},
+                )
                 time.sleep(0.1 * 2**attempt)
+        raise AssertionError("unreachable")
 
     def create(self, header: dict[str, Any], items: list[dict[str, Any]]) -> None:
         self.write(
@@ -200,6 +222,21 @@ class DatabricksBatchRepository:
             raise RuntimeError("Duplicate upload identity requires reconciliation")
         return json.loads(rows[0][0]) if rows else None
 
+    def header_and_item(
+        self, batch_id: str, client_file_id: str
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        rows = self.sql.execute_sql(
+            f"SELECT h.payload, i.payload FROM {self.headers} h LEFT JOIN {self.members} i "
+            "ON i.batch_id = h.batch_id AND i.client_file_id = :client_file_id "
+            "WHERE h.batch_id = :batch_id LIMIT 2",
+            {"batch_id": batch_id, "client_file_id": client_file_id},
+        )
+        if len(rows) > 1:
+            raise RuntimeError("Duplicate batch or upload identity requires reconciliation")
+        if not rows:
+            return None, None
+        return json.loads(rows[0][0]), json.loads(rows[0][1]) if rows[0][1] else None
+
     def counts(self, batch_id: str) -> dict[str, int]:
         rows = self.sql.execute_sql(
             f"SELECT state, COUNT(*) FROM {self.members} WHERE batch_id = :batch_id GROUP BY state",
@@ -208,18 +245,35 @@ class DatabricksBatchRepository:
         return {row[0]: int(row[1]) for row in rows}
 
     def compare_and_set(self, old: dict[str, Any], new: dict[str, Any]) -> bool:
-        self.write(
-            f"UPDATE {self.members} SET state = :state, revision = CAST(:next_revision AS INT), "
-            "payload = :payload WHERE batch_id = :batch_id AND client_file_id = :client_file_id "
-            "AND revision = CAST(:revision AS INT)",
-            {
-                "state": new["state"],
-                "next_revision": new["revision"],
-                "payload": json.dumps(new),
-                "batch_id": old["batch_id"],
-                "client_file_id": old["client_file_id"],
-                "revision": old["revision"],
-            },
-        )
-        saved = self.item(old["batch_id"], old["client_file_id"])
-        return saved is not None and saved["transition_id"] == new["transition_id"]
+        try:
+            counts = self.write(
+                f"UPDATE {self.members} SET state = :state, "
+                "revision = CAST(:next_revision AS INT), payload = :payload "
+                "WHERE batch_id = :batch_id AND client_file_id = :client_file_id "
+                "AND revision = CAST(:revision AS INT)",
+                {
+                    "state": new["state"],
+                    "next_revision": new["revision"],
+                    "payload": json.dumps(new),
+                    "batch_id": old["batch_id"],
+                    "client_file_id": old["client_file_id"],
+                    "revision": old["revision"],
+                },
+            )
+        except Exception as error:
+            # The statement may have committed before the error reached us; only a read-back
+            # of this transition's own ID can tell. Anything else is the original failure.
+            try:
+                saved = self.item(old["batch_id"], old["client_file_id"])
+            except Exception:
+                raise error from None
+            if saved is not None and saved["transition_id"] == new["transition_id"]:
+                return True
+            raise
+        affected = counts.get("num_affected_rows")
+        if affected is None:  # No counts reported: fall back to confirming by transition ID.
+            saved = self.item(old["batch_id"], old["client_file_id"])
+            return saved is not None and saved["transition_id"] == new["transition_id"]
+        if affected > 1:
+            raise RuntimeError("Duplicate upload identity requires reconciliation")
+        return affected == 1

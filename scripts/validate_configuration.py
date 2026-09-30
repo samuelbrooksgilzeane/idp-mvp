@@ -8,6 +8,7 @@ from idp_app.core.config import IdpMode, Settings
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
     "chat_app_url",
+    "upload_parallel_transfers",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
     "project_schema",

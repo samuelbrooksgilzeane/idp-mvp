@@ -35,6 +35,9 @@ command:
   - --port
   - "8000"
 env:
+  # Browser upload transfers in flight per batch (1-8).
+  - name: IDP_UPLOAD_PARALLEL_TRANSFERS
+    value: "3"
   # HTTPS URL of the document chat app; the "Ask documents" link is hidden when empty.
   - name: IDP_CHAT_APP_URL
     value: ""

@@ -96,7 +96,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | Batch | Title | Sessions (est.) | Status |
 |---|---|---|---|
 | 1 | Branch and Genie removal | 1 | Done (user to run the Genie unbind locally) |
-| 2 | Upload speed | 1 | Not started |
+| 2 | Upload speed | 1 | Done (live DML result shape unconfirmed) |
 | 3 | Upload robustness | 1 | Not started |
 | 4 | Folder import | 2 | Not started |
 | 5 | Chat foundation on Free Edition | 2 | Not started |
@@ -136,7 +136,20 @@ Done when: `make check` passes; `git grep -il genie` only hits the excluded path
 
 ## Batch 2 — Upload speed
 
-Status: Not started
+Status: Done 30 September 2026, except the live check in step 2. A new file now costs 5 statements
+(join SELECT, UPLOADING UPDATE with hash, `find_by_hash`, registry MERGE, outcome UPDATE), asserted
+in `backend/tests/test_upload_statement_budget.py` against a fake Statement Execution API.
+
+Notes for next batch: `DatabricksDocumentRegistry.execute_dml` returns row counts by manifest
+column name (`num_affected_rows`, MERGE also `num_inserted_rows`), assuming DML returns a one-row
+result. If counts are missing, `compare_and_set` and `add` fall back to the old read-back, so a
+wrong assumption costs speed, not correctness. **Still open:** confirm on the dev warehouse with one
+UPDATE and one MERGE on a throwaway table in a scratch schema (user's OK needed; this cloud session
+has no Databricks CLI or credentials). `add` skips the read-back only on `num_inserted_rows` ≥ 1,
+because a revived deleted row keeps its old `document_id`. A body that fails validation (type,
+size, signature) is now recorded as FAILED before any storage work. `upload_parallel_transfers`
+(env `IDP_UPLOAD_PARALLEL_TRANSFERS`, bundle var, 1–8) reaches the browser through
+`/upload-batches/limits` as `parallel_transfers`.
 
 Goal: at most 5 SQL statements per new file, configurable parallel transfers.
 

@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -162,17 +162,48 @@ def test_claim_compare_and_set_has_one_winner_after_restart(client: TestClient, 
 
 def test_databricks_creation_bulk_writes_and_claim_uses_revision():
     sql = MagicMock()
+    sql.execute_dml.return_value = {"num_affected_rows": 1}
     repository = DatabricksBatchRepository(sql, "catalog.project.idp")
     repository.header = MagicMock(return_value={"manifest_hash": "hash"})
     repository.create({"batch_id": "b", "manifest_hash": "hash"}, [])
-    assert sql.execute_sql.call_count == 2
-    assert "explode(from_json(:items" in sql.execute_sql.call_args.args[0]
+    assert sql.execute_dml.call_count == 2
+    assert "explode(from_json(:items" in sql.execute_dml.call_args.args[0]
+    repository.item = MagicMock(side_effect=AssertionError("counts decide the claim"))
+    old = {"batch_id": "b", "client_file_id": "i", "revision": 0}
+    new = {"state": "UPLOADING", "revision": 1, "transition_id": "winner"}
+    assert repository.compare_and_set(old, new)
+    assert "AND revision = CAST(:revision AS INT)" in sql.execute_dml.call_args.args[0]
+    sql.execute_dml.return_value = {"num_affected_rows": 0}
+    assert not repository.compare_and_set(old, new)
+
+
+def test_databricks_claim_reads_back_only_when_outcome_is_unknown():
+    sql = MagicMock()
+    repository = DatabricksBatchRepository(sql, "catalog.project.idp")
+    old = {"batch_id": "b", "client_file_id": "i", "revision": 0}
+    new = {"state": "UPLOADING", "revision": 1, "transition_id": "winner"}
+    sql.execute_dml.side_effect = TimeoutError("connection lost after submit")
     repository.item = MagicMock(return_value={"transition_id": "winner"})
-    assert repository.compare_and_set(
-        {"batch_id": "b", "client_file_id": "i", "revision": 0},
-        {"state": "UPLOADING", "revision": 1, "transition_id": "winner"},
-    )
-    assert "AND revision = CAST(:revision AS INT)" in sql.execute_sql.call_args.args[0]
+    assert repository.compare_and_set(old, new)
+    repository.item = MagicMock(return_value={"transition_id": "someone-else"})
+    with pytest.raises(TimeoutError):
+        repository.compare_and_set(old, new)
+    sql.execute_dml.side_effect = None
+    sql.execute_dml.return_value = {}  # No counts reported: confirm by transition ID.
+    repository.item = MagicMock(return_value={"transition_id": "winner"})
+    assert repository.compare_and_set(old, new)
+    repository.item.assert_called_once()
+
+
+def test_delta_conflict_retries_are_logged(caplog: pytest.LogCaptureFixture):
+    sql = MagicMock()
+    sql.execute_dml.side_effect = [RuntimeError("[DELTA_CONCURRENT_APPEND] conflict"), {}]
+    repository = DatabricksBatchRepository(sql, "catalog.project.idp")
+    with caplog.at_level("WARNING"), patch("idp_app.services.batch_repository.time.sleep"):
+        repository.write("UPDATE t SET x = 1", {})
+    [record] = caplog.records
+    assert record.error_code == "DELTA_CONCURRENT"  # type: ignore[attr-defined]
+    assert record.attempt == 1  # type: ignore[attr-defined]
 
 
 def test_gateway_failure_is_durable_but_cannot_overwrite_success(client: TestClient):
@@ -225,6 +256,7 @@ def test_upload_limits_follow_deployment_configuration(tmp_path: Path):
                 local_data_dir=tmp_path,
                 max_upload_batch_files=12,
                 max_upload_bytes=1024,
+                upload_parallel_transfers=6,
             )
         )
     ) as client:
@@ -233,6 +265,7 @@ def test_upload_limits_follow_deployment_configuration(tmp_path: Path):
         assert limits == {
             "max_files": 12,
             "max_file_bytes": 1024,
+            "parallel_transfers": 6,
             "automatic_preparation": False,
             "bulk_extraction": False,
             "bulk_export": False,

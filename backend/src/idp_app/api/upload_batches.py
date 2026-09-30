@@ -42,6 +42,7 @@ def get_upload_limits(request: Request, user: User) -> dict[str, int | bool | st
         ).hexdigest(),
         "max_files": min(1000, settings.max_upload_batch_files),
         "max_file_bytes": settings.max_upload_bytes,
+        "parallel_transfers": settings.upload_parallel_transfers,
         "automatic_preparation": settings.auto_prepare_enabled,
         "bulk_extraction": settings.bulk_extraction_enabled,
         "bulk_export": settings.bulk_export_enabled,

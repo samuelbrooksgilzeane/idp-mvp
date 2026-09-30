@@ -132,7 +132,7 @@ describe("DocumentsPage", () => {
     const start = vi.fn().mockResolvedValue(undefined);
     render(<MemoryRouter><DocumentsPage documents={[]} loading={false} caseIds={[]}
       selectedCaseId={null} onCaseChanged={vi.fn()} onDocumentsChanged={vi.fn()}
-      upload={{ batch: null, busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null, start,
+      upload={{ batch: null, busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null, parallelTransfers: 3, start,
         retry: vi.fn(), clear: vi.fn(), pause: vi.fn(), refresh: vi.fn() }} /></MemoryRouter>);
     const file = new File(["%PDF-test"], "test.pdf", { type: "application/pdf" });
     fireEvent.change(screen.getByLabelText(/Choose PDF files/), { target: { files: [file] } });

@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     max_upload_batch_files: PositiveInt = 1000
     max_upload_attempts: PositiveInt = 5
     upload_claim_seconds: PositiveInt = 1800
+    upload_parallel_transfers: int = Field(default=3, ge=1, le=8)
 
     @field_validator(
         "catalog",

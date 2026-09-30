@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -11,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from idp_app.services.batch_repository import BatchRepository
 from idp_app.services.document_models import DocumentRecord, UploadMetadata
-from idp_app.services.documents import DocumentService, DocumentServiceError
+from idp_app.services.documents import DocumentService, DocumentServiceError, StagedUpload
 
 TERMINAL_UPLOAD_STATES = {"REGISTERED", "ALREADY_REGISTERED"}
 
@@ -157,8 +158,14 @@ class UploadBatchService:
     async def upload(
         self, batch_id: str, client_file_id: str, requester: str, upload: UploadFile
     ) -> DocumentRecord:
-        header = await run_in_threadpool(self.authorize, batch_id, requester)
-        found = await run_in_threadpool(self.repository.item, batch_id, client_file_id)
+        """Register one batch file. A new file costs five SQL statements: the batch and item
+        read, the UPLOADING claim (which also records the content hash), the registry duplicate
+        check, the registry MERGE and the final outcome."""
+        header, found = await run_in_threadpool(
+            self.repository.header_and_item, batch_id, client_file_id
+        )
+        if header is None or header["requester"] != requester:
+            raise DocumentServiceError("BATCH_NOT_FOUND", "Upload batch not found.", 404)
         if found is None:
             raise DocumentServiceError(
                 "ITEM_NOT_FOUND", "This file is not in the upload batch.", 404
@@ -166,8 +173,54 @@ class UploadBatchService:
         item: dict[str, Any] = found
         if item["state"] in TERMINAL_UPLOAD_STATES:
             return await self.documents.get_document(item["document_id"])
+        if upload.filename != item["name"] or upload.size != item["size"]:
+            raise DocumentServiceError(
+                "FILE_MANIFEST_MISMATCH",
+                "Reselect the original file with the same name and size.",
+                422,
+            )
+        try:
+            staged = await self.documents.stage(upload)
+        except DocumentServiceError as error:
+            await run_in_threadpool(self.record_rejected_content, item, error)
+            raise
+        with staged:
+            return await self._register(header, item, requester, staged)
+
+    def record_rejected_content(self, item: dict[str, Any], error: DocumentServiceError) -> None:
+        """Keep a durable outcome for a body that failed validation, unless another request
+        currently owns the item. The original error is what the caller sees either way."""
+        if item["state"] == "UPLOADING" and item["lease_expires_at"] > now_iso():
+            return
+        with suppress(DocumentServiceError):  # Lost a race: the other request's outcome stands.
+            self.transition(
+                item,
+                state="FAILED",
+                attempts=item["attempts"] + 1,
+                lease_owner=None,
+                lease_expires_at=None,
+                error_code=error.code,
+                error_message=error.message,
+                retryable=error.status_code >= 500 or error.status_code == 429,
+            )
+
+    async def _register(
+        self,
+        header: dict[str, Any],
+        item: dict[str, Any],
+        requester: str,
+        staged: StagedUpload,
+    ) -> DocumentRecord:
+        content_hash = staged.content_sha256
         if item["content_sha256"]:
-            registered = await self.documents.find_registered_content(item["content_sha256"])
+            if item["content_sha256"] != content_hash:
+                raise DocumentServiceError(
+                    "FILE_CONTENT_MISMATCH",
+                    "The reselected PDF has different content. Start a new batch for it.",
+                    409,
+                )
+            # A retry: an earlier attempt may have registered before its outcome was saved.
+            registered = await self.documents.find_registered_content(content_hash)
             if registered is not None:
                 await run_in_threadpool(
                     self.transition,
@@ -181,12 +234,6 @@ class UploadBatchService:
                     retryable=False,
                 )
                 return registered
-        if upload.filename != item["name"] or upload.size != item["size"]:
-            raise DocumentServiceError(
-                "FILE_MANIFEST_MISMATCH",
-                "Reselect the original file with the same name and size.",
-                422,
-            )
         if item["state"] == "UPLOADING" and item["lease_expires_at"] > now_iso():
             raise DocumentServiceError(
                 "UPLOAD_BUSY", "This file is already uploading. Retry after it finishes.", 409
@@ -197,41 +244,27 @@ class UploadBatchService:
                 "Upload retry limit reached. Start a new batch after resolving the failure.",
                 409,
             )
+        lease_expires = datetime.now(UTC) + timedelta(seconds=self.lease_seconds)
         item = await run_in_threadpool(
             self.transition,
             item,
             state="UPLOADING",
             attempts=item["attempts"] + 1,
+            content_sha256=content_hash,
             lease_owner=str(uuid4()),
-            lease_expires_at=(
-                datetime.now(UTC) + timedelta(seconds=self.lease_seconds)
-            ).isoformat(),
+            lease_expires_at=lease_expires.isoformat(),
             error_code=None,
             error_message=None,
         )
 
-        async def bind_content(content_hash: str) -> None:
-            nonlocal item
-            if item["content_sha256"] and item["content_sha256"] != content_hash:
-                raise DocumentServiceError(
-                    "FILE_CONTENT_MISMATCH",
-                    "The reselected PDF has different content. Start a new batch for it.",
-                    409,
-                )
-            if item["lease_expires_at"] <= now_iso():
-                raise DocumentServiceError(
-                    "UPLOAD_LEASE_EXPIRED", "The transfer took too long. Retry this file.", 503
-                )
-            item = await run_in_threadpool(self.transition, item, content_sha256=content_hash)
-
         try:
-            document = await self.documents.upload(
-                upload,
+            document = await self.documents.store_and_register(
+                staged,
                 UploadMetadata(
                     case_id=header["case_id"], template_id="invoice_v1", use_case="invoice"
                 ),
                 requester,
-                on_content=bind_content,
+                register_by=lease_expires,
             )
             state = "REGISTERED"
         except DocumentServiceError as error:

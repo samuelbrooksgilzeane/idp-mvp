@@ -400,7 +400,11 @@ class DatabricksDocumentRegistry:
             + f" WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})"
         )
         values = dict(zip(DOCUMENT_COLUMNS, _document_values(document), strict=True))
-        self.execute_sql(statement, {name: values[name] for name in parameter_names})
+        counts = self.execute_dml(statement, {name: values[name] for name in parameter_names})
+        # An inserted row is this document. A revived deleted row keeps its own (possibly legacy)
+        # document_id and nothing written means another row holds the hash, so read those back.
+        if counts.get("num_inserted_rows", 0) >= 1:
+            return
 
         registered = self.find_by_hash(document.content_sha256)
         if registered is None:
@@ -570,6 +574,35 @@ class DatabricksDocumentRegistry:
     def execute_sql(
         self, statement: str, values: dict[str, object] | None = None
     ) -> list[list[str]]:
+        response = self._execute(statement, values)
+        if not response.result or not response.result.data_array:
+            return []
+        return cast(list[list[str]], response.result.data_array)
+
+    def execute_dml(
+        self, statement: str, values: dict[str, object] | None = None
+    ) -> dict[str, int]:
+        """Run UPDATE/MERGE/INSERT/DELETE and return its row counts by column name, for example
+        ``num_affected_rows`` and, for MERGE, ``num_inserted_rows``. Empty when the warehouse
+        returned no counts, so callers must treat a missing key as unknown, not as zero."""
+        response = self._execute(statement, values)
+        columns = (
+            response.manifest.schema.columns
+            if response.manifest and response.manifest.schema
+            else None
+        )
+        rows = response.result.data_array if response.result else None
+        if not columns or not rows:
+            return {}
+        counts: dict[str, int] = {}
+        for column, value in zip(columns, rows[0], strict=False):
+            if column.name and value is not None:
+                counts[column.name] = int(value)
+        return counts
+
+    def _execute(
+        self, statement: str, values: dict[str, object] | None
+    ) -> sql.StatementResponse:
         started_at = time.perf_counter()
         try:
             parameters = [
@@ -604,9 +637,7 @@ class DatabricksDocumentRegistry:
                     else "Databricks SQL statement failed"
                 )
                 raise RuntimeError(message)
-            if not response.result or not response.result.data_array:
-                return []
-            return cast(list[list[str]], response.result.data_array)
+            return response
         finally:
             record_sql_statement((time.perf_counter() - started_at) * 1000)
 

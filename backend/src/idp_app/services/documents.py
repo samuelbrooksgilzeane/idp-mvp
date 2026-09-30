@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import hashlib
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from tempfile import SpooledTemporaryFile
@@ -38,6 +41,25 @@ class DocumentServiceError(Exception):
         self.document_id = document_id
 
 
+@dataclass
+class StagedUpload:
+    """A fully received, validated PDF body waiting to be stored."""
+
+    file_name: str
+    size: int
+    content_sha256: str
+    file: SpooledTemporaryFile[bytes]
+
+    def close(self) -> None:
+        self.file.close()
+
+    def __enter__(self) -> StagedUpload:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
 class DocumentService:
     def __init__(
         self,
@@ -56,9 +78,15 @@ class DocumentService:
         upload: UploadFile,
         metadata: UploadMetadata,
         uploaded_by: str,
-        *,
-        on_content: Callable[[str], Awaitable[None]] | None = None,
     ) -> DocumentRecord:
+        with await self.stage(upload) as staged:
+            return await self.store_and_register(staged, metadata, uploaded_by)
+
+    async def stage(self, upload: UploadFile) -> StagedUpload:
+        """Read the whole body into a spooled file, checking type, size and PDF signature.
+
+        No storage or registry work happens here, so callers can record the content hash in the
+        same write that claims the upload. Close the result (it is a context manager)."""
         safe_name = sanitize_pdf_filename(upload.filename)
         if upload.content_type != "application/pdf":
             raise DocumentServiceError(
@@ -70,7 +98,11 @@ class DocumentService:
         digest = hashlib.sha256()
         size = 0
         signature = b""
-        with SpooledTemporaryFile(max_size=min(self._max_upload_bytes, 4 * 1024 * 1024)) as staged:
+        # Closed on failure below, otherwise by the caller through StagedUpload.
+        spooled = SpooledTemporaryFile(  # noqa: SIM115
+            max_size=min(self._max_upload_bytes, 4 * 1024 * 1024)
+        )
+        try:
             while chunk := await upload.read(1024 * 1024):
                 size += len(chunk)
                 if size > self._max_upload_bytes:
@@ -82,7 +114,7 @@ class DocumentService:
                 if len(signature) < len(PDF_SIGNATURE):
                     signature += chunk[: len(PDF_SIGNATURE) - len(signature)]
                 digest.update(chunk)
-                staged.write(chunk)
+                spooled.write(chunk)
 
             if signature != PDF_SIGNATURE:
                 raise DocumentServiceError(
@@ -90,49 +122,68 @@ class DocumentService:
                     "The uploaded file does not contain a valid PDF signature.",
                     415,
                 )
+        except BaseException:
+            spooled.close()
+            raise
+        spooled.seek(0)
+        return StagedUpload(safe_name, size, digest.hexdigest(), spooled)
 
-            content_sha256 = digest.hexdigest()
-            if on_content is not None:
-                await on_content(content_sha256)
+    async def store_and_register(
+        self,
+        staged: StagedUpload,
+        metadata: UploadMetadata,
+        uploaded_by: str,
+        *,
+        register_by: datetime | None = None,
+    ) -> DocumentRecord:
+        """Store a staged PDF in the source volume and add its registry row.
+
+        ``register_by`` is a local deadline checked just before the registry write, so an upload
+        whose claim has lapsed while storing does not register behind another request."""
+        safe_name = staged.file_name
+        size = staged.size
+        content_sha256 = staged.content_sha256
+        duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
+        if duplicate is not None:
+            raise _duplicate_error(duplicate)
+
+        document_id = str(uuid5(NAMESPACE_URL, f"idp-document:{content_sha256}"))
+        object_name = f"{document_id}.pdf"
+        try:
+            source_path = await run_in_threadpool(
+                self._storage.store,
+                object_name,
+                cast(BinaryIO, staged.file),
+            )
+        except FileExistsError as error:
             duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
             if duplicate is not None:
-                raise _duplicate_error(duplicate)
-
-            document_id = str(uuid5(NAMESPACE_URL, f"idp-document:{content_sha256}"))
-            object_name = f"{document_id}.pdf"
+                raise _duplicate_error(duplicate) from error
+            # Recover only a byte-for-byte verified object; ambiguous or partial files stay put.
             try:
                 source_path = await run_in_threadpool(
-                    self._storage.store,
+                    self._storage.verify_existing,
                     object_name,
-                    cast(BinaryIO, staged),
+                    content_sha256,
+                    size,
                 )
-            except FileExistsError as error:
-                duplicate = await run_in_threadpool(self._registry.find_by_hash, content_sha256)
-                if duplicate is not None:
-                    raise _duplicate_error(duplicate) from error
-                # Recover only a byte-for-byte verified object; ambiguous or partial files stay put.
-                try:
-                    source_path = await run_in_threadpool(
-                        self._storage.verify_existing,
-                        object_name,
-                        content_sha256,
-                        size,
-                    )
-                except Exception as recovery_error:
-                    raise DocumentServiceError(
-                        "FILE_STORAGE_FAILED",
-                        "An existing source PDF could not be verified. It needs reconciliation.",
-                        502,
-                    ) from recovery_error
-            except Exception as error:
+            except Exception as recovery_error:
                 raise DocumentServiceError(
                     "FILE_STORAGE_FAILED",
-                    "The PDF could not be stored.",
+                    "An existing source PDF could not be verified. It needs reconciliation.",
                     502,
-                ) from error
+                ) from recovery_error
+        except Exception as error:
+            raise DocumentServiceError(
+                "FILE_STORAGE_FAILED",
+                "The PDF could not be stored.",
+                502,
+            ) from error
 
-        if on_content is not None:
-            await on_content(content_sha256)
+        if register_by is not None and datetime.now(UTC) >= register_by:
+            raise DocumentServiceError(
+                "UPLOAD_LEASE_EXPIRED", "The transfer took too long. Retry this file.", 503
+            )
         now = datetime.now(UTC)
         document = DocumentRecord(
             document_id=document_id,

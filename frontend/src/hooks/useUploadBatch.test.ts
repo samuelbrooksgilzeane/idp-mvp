@@ -4,7 +4,7 @@ import { UploadTransferManager, type UploadItem } from "./useUploadBatch";
 
 function file(name: string) { return new File(["%PDF-small"], name, { type: "application/pdf", lastModified: 123 }); }
 function reply(payload: unknown, status = 200) { return { ok: status < 400, status, json: async () => payload } as Response; }
-function server(upload: (id: string, items: UploadItem[]) => Promise<Response>) {
+function server(upload: (id: string, items: UploadItem[]) => Promise<Response>, limits?: unknown) {
   let items: UploadItem[] = [];
   let manifest: unknown;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -17,6 +17,7 @@ function server(upload: (id: string, items: UploadItem[]) => Promise<Response>) 
         error_message: null, retryable: true, updated_at: "2026-09-26T00:00:00Z" }));
       return reply({ batch_id: "batch-1", items });
     }
+    if (url === "/api/upload-batches/limits" && limits) return reply(limits);
     if (url === "/api/documents") return upload((init!.body as FormData).get("client_file_id") as string, items);
     if (url.endsWith("/transport-failure")) return reply({});
     if (url.includes("/items?")) {
@@ -112,6 +113,27 @@ describe("durable upload transfers", () => {
       if (url === "/api/documents") expect((init!.body as FormData).getAll("files")).toHaveLength(1);
     }
     expect(manager.getSnapshot().batch!.items.every((item) => item.state === "REGISTERED")).toBe(true);
+  });
+
+  it("runs the deployment's configured number of parallel transfers, capped at eight", async () => {
+    for (const [configured, expected] of [[5, 5], [20, 8]]) {
+      const pending: (() => void)[] = [];
+      let active = 0; let peak = 0;
+      server(async (id, items) => {
+        active++; peak = Math.max(peak, active);
+        await new Promise<void>((resolve) => pending.push(() => { active--; resolve(); }));
+        return finish(id, items);
+      }, { max_files: 1000, max_file_bytes: 1024, parallel_transfers: configured });
+      const manager = new UploadTransferManager();
+      await manager.restore();
+      expect(manager.getSnapshot().parallelTransfers).toBe(expected);
+      const running = manager.start({ files: Array.from({ length: 12 }, (_, i) => file(`${i}.pdf`)), caseId: "" });
+      await waitFor(() => expect(pending).toHaveLength(expected));
+      while (pending.length) { pending.splice(0).forEach((resolve) => resolve()); await new Promise((r) => setTimeout(r, 0)); }
+      await running;
+      expect(peak).toBe(expected);
+      localStorage.clear(); vi.unstubAllGlobals();
+    }
   });
 
   it("restores outcomes after refresh and reselects only unfinished files", async () => {

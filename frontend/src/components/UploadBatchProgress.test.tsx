@@ -13,7 +13,7 @@ describe("large upload progress", () => {
     }));
     const upload: UploadBatchController = {
       batch: { client_request_id: "synthetic", case_id: null, batch_id: "batch", files: items, items },
-      busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null,
+      busy: false, paused: false, error: null, maxFiles: 1000, maxFileBytes: null, parallelTransfers: 3,
       start: vi.fn(), retry: vi.fn(), pause: vi.fn(), clear: vi.fn(), refresh: vi.fn(),
     };
     render(<MemoryRouter><UploadBatchProgress upload={upload} /></MemoryRouter>);
