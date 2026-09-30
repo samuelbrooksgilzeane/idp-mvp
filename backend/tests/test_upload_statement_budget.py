@@ -11,6 +11,7 @@ from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from databricks.sdk.service import sql
@@ -23,7 +24,7 @@ from idp_app.services.document_registry import (
     DuplicateDocumentError,
 )
 from idp_app.services.document_storage import LocalVolumeStorage
-from idp_app.services.documents import DocumentService
+from idp_app.services.documents import DocumentService, DocumentServiceError
 from idp_app.services.upload_batches import UploadBatchService
 
 NAMESPACE = "cat.sch.idp"
@@ -59,8 +60,17 @@ class FakeWarehouse:
         self.items: dict[tuple[str, str], dict[str, Any]] = {}
         self.documents: dict[str, dict[str, Any]] = {}
         self.statements: list[str] = []
+        # statement prefix -> error raised once after the statement applied (answer lost)
+        self.lose_answer: dict[str, BaseException] = {}
 
     def execute_statement(self, *, statement: str, parameters: list[Any], **_: Any) -> Any:
+        answer = self.apply(statement, parameters)
+        for prefix in list(self.lose_answer):
+            if statement.startswith(prefix):
+                raise self.lose_answer.pop(prefix)
+        return answer
+
+    def apply(self, statement: str, parameters: list[Any]) -> Any:
         self.statements.append(statement)
         p = {item.name: item.value for item in parameters}
         if statement.startswith(f"MERGE INTO {NAMESPACE}_upload_batches"):
@@ -225,3 +235,59 @@ def test_revived_deleted_row_is_read_back(setup) -> None:
         registry.add(document)
     assert raised.value.document.document_id == "legacy-id"
     assert warehouse.statements[-1].startswith("SELECT")
+
+
+def item_state(warehouse: FakeWarehouse, batch_id: str) -> dict[str, Any]:
+    return json.loads(warehouse.items[(batch_id, "f0")]["payload"])
+
+
+def test_lost_registry_answer_is_retried_and_read_back(setup) -> None:
+    from databricks.sdk.errors import TemporarilyUnavailable
+
+    warehouse, service = setup
+    batch_id = create_batch(service, 1)
+    warehouse.lose_answer[f"MERGE INTO {DOCUMENTS}"] = TemporarilyUnavailable("lost")
+    with patch("idp_app.services.sql_retry.time.sleep"):
+        document = asyncio.run(
+            service.upload(batch_id, "f0", "user@example.com", pdf_upload("f0.pdf"))
+        )
+    assert item_state(warehouse, batch_id)["state"] == "REGISTERED"
+    assert warehouse.documents[document.content_sha256]["document_id"] == document.document_id
+
+
+def test_failed_outcome_write_leaves_retryable_failure_not_uploading(setup) -> None:
+    warehouse, service = setup
+    batch_id = create_batch(service, 1)
+    original = service.transition
+
+    def lose_final(item: dict[str, Any], **changes: Any) -> dict[str, Any]:
+        if changes.get("state") == "REGISTERED":
+            raise RuntimeError("warehouse stopped")
+        return original(item, **changes)
+
+    service.transition = lose_final
+    with pytest.raises(DocumentServiceError, match="interrupted"):
+        asyncio.run(service.upload(batch_id, "f0", "user@example.com", pdf_upload("f0.pdf")))
+    item = item_state(warehouse, batch_id)
+    assert (item["state"], item["retryable"]) == ("FAILED", True)
+    service.transition = original
+    asyncio.run(service.upload(batch_id, "f0", "user@example.com", pdf_upload("f0.pdf")))
+    assert item_state(warehouse, batch_id)["state"] == "ALREADY_REGISTERED"
+
+
+def test_cancelled_request_leaves_retryable_failure(setup) -> None:
+    warehouse, service = setup
+    batch_id = create_batch(service, 1)
+
+    async def disconnected(*_: Any, **__: Any) -> Any:
+        raise asyncio.CancelledError
+
+    service.documents.store_and_register = disconnected
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(service.upload(batch_id, "f0", "user@example.com", pdf_upload("f0.pdf")))
+    item = item_state(warehouse, batch_id)
+    assert (item["state"], item["retryable"], item["error_code"]) == (
+        "FAILED",
+        True,
+        "UPLOAD_INTERRUPTED",
+    )

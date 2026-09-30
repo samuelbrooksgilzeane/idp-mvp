@@ -12,7 +12,7 @@ type SavedBatch = {
   client_request_id: string; case_id: string | null; files: Manifest[];
   batch_id: string | null; items: UploadItem[];
 };
-type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; automaticPreparation?: boolean; bulkExtraction?: boolean };
+type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; signInRequired?: boolean; retryingSoon?: boolean; automaticPreparation?: boolean; bulkExtraction?: boolean };
 const STORAGE_KEY = "idp:upload-batch:v1"; // Storage is isolated by this project's app origin.
 const complete = (item: UploadItem) => item.state === "REGISTERED" || item.state === "ALREADY_REGISTERED";
 const signature = (file: { name: string; size: number; lastModified?: number; last_modified?: number | null }) =>
@@ -20,6 +20,15 @@ const signature = (file: { name: string; size: number; lastModified?: number; la
 
 class UploadHttpError extends Error {
   constructor(message: string, readonly status: number, readonly code: string) { super(message); }
+}
+export const SIGN_IN_MESSAGE = "Your sign-in has expired. Sign in again (reload this app in another tab), then Resume.";
+class SignInRequiredError extends Error { constructor() { super(SIGN_IN_MESSAGE); } }
+// A lapsed Apps session answers 401/403 or redirects to the login page. With redirect "manual" the
+// redirect arrives as an opaque response instead of the login page's HTML.
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(url, { ...init, redirect: "manual" });
+  if (response.type === "opaqueredirect" || response.status === 401 || response.status === 403) throw new SignInRequiredError();
+  return response;
 }
 async function jsonResponse<T>(response: Response): Promise<T> {
   let payload: { error?: { message?: string; code?: string } } | null = null;
@@ -38,6 +47,10 @@ async function jsonResponse<T>(response: Response): Promise<T> {
 // Deployments set the transfer count (IDP_UPLOAD_PARALLEL_TRANSFERS); the server caps it at 8.
 const DEFAULT_PARALLEL_TRANSFERS = 3;
 const MAX_PARALLEL_TRANSFERS = 8;
+// 409 UPLOAD_BUSY: an earlier request for the same file still holds its claim.
+export const BUSY_RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
+// One automatic pass over retryable failures after the queue drains.
+export const AUTO_RETRY_DELAY_MS = 30_000;
 
 // Owned above the list route: navigating to Results does not discard File objects or transfers.
 export class UploadTransferManager {
@@ -46,6 +59,9 @@ export class UploadTransferManager {
   private files = new Map<string, File>();
   private stop = false;
   private restored = false;
+  private sleepers = new Set<() => void>();
+  private guarding = false;
+  private wakeLock: WakeLockSentinel | null = null;
   constructor(private readonly onFinished: () => void = () => {}) {
     try {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as SavedBatch | null;
@@ -87,7 +103,23 @@ export class UploadTransferManager {
       finally { this.update({ busy: false }); }
     }
   };
-  private fail(error: unknown) { this.update({ error: error instanceof Error ? error.message : "Upload interrupted. Retry when ready." }); }
+  private fail(error: unknown) {
+    if (error instanceof SignInRequiredError) { this.signInLost(); return; }
+    this.update({ error: error instanceof Error ? error.message : "Upload interrupted. Retry when ready." });
+  }
+  // Pause the whole batch rather than failing every remaining file one by one.
+  private signInLost() {
+    this.stop = true; this.wakeSleepers();
+    this.update({ paused: true, signInRequired: true, error: SIGN_IN_MESSAGE });
+  }
+  private sleep(ms: number) {
+    return new Promise<void>((resolve) => {
+      const done = () => { window.clearTimeout(timer); this.sleepers.delete(done); resolve(); };
+      const timer = window.setTimeout(done, ms);
+      this.sleepers.add(done);
+    });
+  }
+  private wakeSleepers() { [...this.sleepers].forEach((wake) => wake()); }
   refresh = async () => {
     const batch = this.snapshot.batch;
     if (!batch?.batch_id) return;
@@ -98,7 +130,7 @@ export class UploadTransferManager {
       if (visited.has(cursor)) throw new Error("Upload progress pagination did not advance. Retry refreshing progress.");
       visited.add(cursor);
       const response: { items: UploadItem[]; next_cursor: string | null } = await jsonResponse(
-        await fetch(`/api/upload-batches/${batch.batch_id}/items?limit=100&cursor=${cursor}`));
+        await apiFetch(`/api/upload-batches/${batch.batch_id}/items?limit=100&cursor=${cursor}`));
       items.push(...response.items);
       cursor = response.next_cursor;
       if (items.length > 1000) throw new Error("Unexpected upload batch size.");
@@ -114,7 +146,7 @@ export class UploadTransferManager {
   };
   start = async (input: UploadInput) => {
     if (this.snapshot.busy) return;
-    this.update({ busy: true, error: null, paused: false });
+    this.update({ busy: true, error: null, paused: false, signInRequired: false });
     this.stop = false;
     try {
       let batch = this.snapshot.batch;
@@ -138,7 +170,7 @@ export class UploadTransferManager {
         if (!this.files.size) throw new Error("Reselect the original unfinished PDFs, including their original names and modification times.");
       }
       if (!batch.batch_id) {
-        const created = await jsonResponse<{ batch_id: string; items: UploadItem[] }>(await fetch("/api/upload-batches", {
+        const created = await jsonResponse<{ batch_id: string; items: UploadItem[] }>(await apiFetch("/api/upload-batches", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ client_request_id: batch.client_request_id, case_id: batch.case_id, files: batch.files }),
         }));
@@ -149,14 +181,29 @@ export class UploadTransferManager {
     finally { this.update({ busy: false }); }
   };
   retry = () => this.start({ files: [], caseId: this.snapshot.batch?.case_id ?? "" });
-  pause = () => { this.stop = true; this.update({ paused: true }); };
+  pause = () => { this.stop = true; this.wakeSleepers(); this.update({ paused: true }); };
   clear = () => {
     if (this.snapshot.busy) return;
     this.files.clear();
     this.update({ batch: null, error: null, paused: false });
   };
   private async drain() {
-    const queue = this.snapshot.batch!.items.filter((item) => !complete(item) && this.files.has(item.client_file_id));
+    const unfinished = (item: UploadItem) => !complete(item) && this.files.has(item.client_file_id);
+    const retryable = () => this.snapshot.batch!.items.filter((item) => item.state === "FAILED" && item.retryable && unfinished(item));
+    this.guardPage(true);
+    try {
+      await this.run(this.snapshot.batch!.items.filter(unfinished));
+      if (!this.stop && retryable().length) {
+        this.update({ retryingSoon: true });
+        await this.sleep(AUTO_RETRY_DELAY_MS);
+        this.update({ retryingSoon: false });
+        if (!this.stop) await this.run(retryable());
+      }
+    } finally { this.guardPage(false); }
+    await this.refresh();
+    this.onFinished();
+  }
+  private async run(queue: UploadItem[]) {
     let next = 0;
     const worker = async () => {
       while (!this.stop && next < queue.length) {
@@ -165,47 +212,86 @@ export class UploadTransferManager {
       }
     };
     await Promise.all(Array.from({ length: Math.min(this.snapshot.parallelTransfers, queue.length) }, worker));
-    await this.refresh();
-    this.onFinished();
+  }
+  // Warn before closing the tab and keep the screen awake while transfers run (where supported).
+  private readonly beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+  private readonly visibilityChanged = () => { if (document.visibilityState === "visible") void this.lockScreen(); };
+  private guardPage(active: boolean) {
+    this.guarding = active;
+    if (active) {
+      window.addEventListener("beforeunload", this.beforeUnload);
+      document.addEventListener("visibilitychange", this.visibilityChanged);
+      void this.lockScreen();
+    } else {
+      window.removeEventListener("beforeunload", this.beforeUnload);
+      document.removeEventListener("visibilitychange", this.visibilityChanged);
+      void this.wakeLock?.release().catch(() => undefined);
+      this.wakeLock = null;
+    }
+  }
+  private async lockScreen() {
+    if (!this.guarding || this.wakeLock || !("wakeLock" in navigator)) return;
+    try {
+      const lock = await navigator.wakeLock.request("screen");
+      // The browser releases the lock when the tab is hidden; visibilitychange takes it again.
+      if (!this.guarding) { void lock.release(); return; }
+      this.wakeLock = lock;
+      lock.addEventListener("release", () => { if (this.wakeLock === lock) this.wakeLock = null; });
+    } catch { /* Denied or unsupported: transfers work without it. */ }
   }
   private async transfer(item: UploadItem) {
     const batchId = this.snapshot.batch!.batch_id!;
-    for (let attempt = 0; attempt < 3 && !this.stop; attempt++) {
+    const id = item.client_file_id;
+    let failures = 0; let busyWaits = 0; let sent = false;
+    while (!this.stop) {
       try {
-        if (attempt > 0) {
+        if (sent) {
           // Resolve a lost response before retransmitting the PDF.
-          const known = await jsonResponse<UploadItem>(await fetch(`/api/upload-batches/${batchId}/items/${item.client_file_id}`));
-          if (complete(known)) { this.patch(item.client_file_id, known); this.files.delete(item.client_file_id); return; }
+          const known = await jsonResponse<UploadItem>(await apiFetch(`/api/upload-batches/${batchId}/items/${id}`));
+          if (complete(known)) { this.patch(id, known); this.files.delete(id); return; }
         }
-        const file = this.files.get(item.client_file_id)!;
+        const file = this.files.get(id)!;
         if (this.snapshot.maxFileBytes && file.size > this.snapshot.maxFileBytes) {
           throw new UploadHttpError("The PDF exceeds the configured per-file size limit.", 413, "HTTP_413");
         }
         const body = new FormData();
         body.append("files", file); body.append("upload_batch_id", batchId);
-        body.append("client_file_id", item.client_file_id);
-        this.patch(item.client_file_id, { state: "UPLOADING", error_code: null, error_message: null });
+        body.append("client_file_id", id);
+        this.patch(id, { state: "UPLOADING", error_code: null, error_message: null });
+        sent = true;
         const response = await jsonResponse<{ documents: { document_id: string }[] }>(
-          await fetch("/api/documents", { method: "POST", body }));
+          await apiFetch("/api/documents", { method: "POST", body }));
         if (!response.documents?.[0]) throw new Error("The upload service returned an unexpected response.");
-        this.patch(item.client_file_id, { state: "REGISTERED", document_id: response.documents[0].document_id });
-        this.files.delete(item.client_file_id);
+        this.patch(id, { state: "REGISTERED", document_id: response.documents[0].document_id });
+        this.files.delete(id);
         return;
       } catch (error) {
+        if (error instanceof SignInRequiredError) {
+          // Nothing reached the API, so nothing is recorded; the file resumes after sign-in.
+          this.patch(id, { state: "QUEUED", error_code: null, error_message: null });
+          this.signInLost();
+          return;
+        }
+        if (error instanceof UploadHttpError && error.code === "UPLOAD_BUSY" && busyWaits < BUSY_RETRY_DELAYS_MS.length) {
+          this.patch(id, { state: "QUEUED", error_code: null,
+            error_message: "An earlier transfer of this file is still finishing. Retrying shortly." });
+          await this.sleep(BUSY_RETRY_DELAYS_MS[busyWaits++]);
+          continue;
+        }
         const retryable = !(error instanceof UploadHttpError) || error.status >= 500 || error.status === 429;
-        this.patch(item.client_file_id, { state: "FAILED", retryable,
+        this.patch(id, { state: "FAILED", retryable,
           error_code: error instanceof UploadHttpError ? error.code : "UPLOAD_REQUEST_FAILED",
           error_message: error instanceof Error ? error.message : "Upload interrupted." });
         const code = error instanceof UploadHttpError ? `HTTP_${error.status}` : "UPLOAD_REQUEST_FAILED";
-        if (["HTTP_413", "HTTP_401", "HTTP_403", "HTTP_429", "HTTP_502", "HTTP_503", "HTTP_504", "UPLOAD_REQUEST_FAILED"].includes(code)) {
+        if (["HTTP_413", "HTTP_429", "HTTP_502", "HTTP_503", "HTTP_504", "UPLOAD_REQUEST_FAILED"].includes(code)) {
           try {
-            await fetch(`/api/upload-batches/${batchId}/items/${item.client_file_id}/transport-failure`, {
+            await apiFetch(`/api/upload-batches/${batchId}/items/${id}/transport-failure`, {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }),
             });
           } catch { /* Preserve the local explanation until connectivity/authentication returns. */ }
         }
-        if (!retryable || attempt === 2) return;
-        await new Promise((resolve) => window.setTimeout(resolve, 750 * 2 ** attempt));
+        if (!retryable || ++failures === 3) return;
+        await this.sleep(750 * 2 ** (failures - 1));
       }
     }
   }

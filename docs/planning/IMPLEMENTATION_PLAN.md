@@ -97,7 +97,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 |---|---|---|---|
 | 1 | Branch and Genie removal | 1 | Done (user to run the Genie unbind locally) |
 | 2 | Upload speed | 1 | Done (live DML result shape unconfirmed) |
-| 3 | Upload robustness | 1 | Not started |
+| 3 | Upload robustness | 1 | Done (live check L3 open) |
 | 4 | Folder import | 2 | Not started |
 | 5 | Chat foundation on Free Edition | 2 | Not started |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
@@ -106,6 +106,18 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
 five-hour usage window.
+
+## Live checks pending
+
+Work that needs live workspace, warehouse or browser access and cannot be done from a cloud
+session without Databricks credentials. Each needs the user's OK (quota) or the user's hands.
+Tick and record the result here when done.
+
+| # | From | Needs | Check | Status |
+|---|---|---|---|---|
+| L1 | Batch 1 step 5 | User's CLI, profile `idp-mvp`, local `genie.generated.yml` | `databricks bundle deployment unbind project_genie -t dev -p idp-mvp` with the old `genie_*` vars, then delete the overlay. **Blocks every deploy.** | Open |
+| L2 | Batch 2 step 2 | Dev warehouse `647704f77f24020a`, scratch schema | One `UPDATE` and one `MERGE` on a throwaway table through the Statement Execution API; confirm each returns a one-row result whose manifest columns include `num_affected_rows` (MERGE also `num_inserted_rows`). If not, uploads stay correct but fall back to read-backs (slower). | Open |
+| L3 | Batch 3 step 7 | Browser signed in to the dev app | Let the session expire (or clear the app cookie), then trigger an API call with `redirect: "manual"`; record whether the Apps gateway answers 401, 403 or a redirect (opaque redirect in the browser). The frontend treats all three as sign-in loss. | Open |
 
 ## Batch 1 — Branch and Genie removal
 
@@ -171,7 +183,19 @@ Goal: at most 5 SQL statements per new file, configurable parallel transfers.
 
 ## Batch 3 — Upload robustness
 
-Status: Not started
+Status: Done 30 September 2026, except the browser check in step 7 (live check **L3**).
+
+Notes for next batch: defaults are now `upload_claim_seconds` 300 and `max_upload_attempts` 10
+(the Facts section above predates this). Retries live in `services/sql_retry.py`
+(`run_with_retries`, 3 attempts, 0.25 s then 0.5 s): used by every `DatabricksBatchRepository` write
+and by the registry MERGE, never by plain SELECTs or non-idempotent writes. A retried
+`compare_and_set` that affects 0 rows after an uncertain failure reads back its `transition_id`.
+`UploadBatchService` catches `BaseException` after the UPLOADING claim and writes FAILED
+(retryable) inside a shielded cancel scope, so client disconnects are covered. Frontend: every
+upload-path API call uses `redirect: "manual"`; 401, 403 or an opaque redirect pauses the batch
+with `signInRequired` and the retry button becomes "Resume"; 409 `UPLOAD_BUSY` waits 5, 15, 30 s;
+after the queue drains, retryable failures get one pass 30 s later (`retryingSoon`); a
+`beforeunload` warning and a screen wake lock are held only while transfers run.
 
 1. Default `upload_claim_seconds` 300 (lease starts after the body has arrived).
 2. Frontend: 409 `UPLOAD_BUSY` is retryable with backoff (about 5 s, 15 s, 30 s).

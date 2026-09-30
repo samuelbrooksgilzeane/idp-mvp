@@ -15,6 +15,7 @@ from databricks.sdk.service import sql
 from idp_app.core.performance import record_sql_statement
 from idp_app.services.bulk_ids import id_chunks, id_parameters
 from idp_app.services.document_models import DocumentRecord
+from idp_app.services.sql_retry import run_with_retries
 
 DOCUMENT_COLUMNS = (
     "document_id",
@@ -400,7 +401,12 @@ class DatabricksDocumentRegistry:
             + f" WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values})"
         )
         values = dict(zip(DOCUMENT_COLUMNS, _document_values(document), strict=True))
-        counts = self.execute_dml(statement, {name: values[name] for name in parameter_names})
+        parameters = {name: values[name] for name in parameter_names}
+        # Safe to repeat: a second run after a commit matches the row and writes nothing, which
+        # the read-back below resolves.
+        counts = run_with_retries(
+            lambda: self.execute_dml(statement, parameters), label="document registration"
+        )
         # An inserted row is this document. A revived deleted row keeps its own (possibly legacy)
         # document_id and nothing written means another row holds the hash, so read those back.
         if counts.get("num_inserted_rows", 0) >= 1:

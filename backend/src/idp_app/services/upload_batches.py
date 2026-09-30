@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from anyio import CancelScope
 from fastapi import UploadFile
 from starlette.concurrency import run_in_threadpool
 
@@ -27,8 +28,8 @@ class UploadBatchService:
         repository: BatchRepository,
         documents: DocumentService,
         max_files: int = 1000,
-        max_attempts: int = 5,
-        lease_seconds: int = 1800,
+        max_attempts: int = 10,
+        lease_seconds: int = 300,
     ) -> None:
         self.repository = repository
         self.documents = documents
@@ -258,52 +259,53 @@ class UploadBatchService:
         )
 
         try:
-            document = await self.documents.store_and_register(
-                staged,
-                UploadMetadata(
-                    case_id=header["case_id"], template_id="invoice_v1", use_case="invoice"
-                ),
-                requester,
-                register_by=lease_expires,
-            )
-            state = "REGISTERED"
-        except DocumentServiceError as error:
-            if error.code == "DOCUMENT_DUPLICATE" and error.document_id:
+            try:
+                document = await self.documents.store_and_register(
+                    staged,
+                    UploadMetadata(
+                        case_id=header["case_id"], template_id="invoice_v1", use_case="invoice"
+                    ),
+                    requester,
+                    register_by=lease_expires,
+                )
+                state = "REGISTERED"
+            except DocumentServiceError as error:
+                if error.code != "DOCUMENT_DUPLICATE" or not error.document_id:
+                    raise
                 document = await self.documents.get_document(error.document_id)
                 state = "ALREADY_REGISTERED"
-            else:
+            await run_in_threadpool(
+                self.transition,
+                item,
+                state=state,
+                document_id=document.document_id,
+                lease_owner=None,
+                lease_expires_at=None,
+                retryable=False,
+            )
+            return document
+        except BaseException as error:
+            # Whatever ends this request (an error, a lost outcome write, a client disconnect
+            # cancelling the task), try once to leave a retryable record instead of UPLOADING.
+            # A retry of a file that did register resolves to ALREADY_REGISTERED by its hash.
+            failure = (
+                error
+                if isinstance(error, DocumentServiceError)
+                else DocumentServiceError(
+                    "UPLOAD_INTERRUPTED", "Upload interrupted. Retry this file.", 502
+                )
+            )
+            with CancelScope(shield=True), suppress(Exception):
                 await run_in_threadpool(
                     self.transition,
                     item,
                     state="FAILED",
                     lease_owner=None,
                     lease_expires_at=None,
-                    error_code=error.code,
-                    error_message=error.message,
-                    retryable=error.status_code >= 500 or error.status_code == 429,
+                    error_code=failure.code,
+                    error_message=failure.message,
+                    retryable=failure.status_code >= 500 or failure.status_code == 429,
                 )
+            if failure is error or not isinstance(error, Exception):
                 raise
-        except Exception as error:
-            await run_in_threadpool(
-                self.transition,
-                item,
-                state="FAILED",
-                lease_owner=None,
-                lease_expires_at=None,
-                error_code="UPLOAD_INTERRUPTED",
-                error_message="Upload interrupted. Retry this file.",
-                retryable=True,
-            )
-            raise DocumentServiceError(
-                "UPLOAD_INTERRUPTED", "Upload interrupted. Retry this file.", 502
-            ) from error
-        await run_in_threadpool(
-            self.transition,
-            item,
-            state=state,
-            document_id=document.document_id,
-            lease_owner=None,
-            lease_expires_at=None,
-            retryable=False,
-        )
-        return document
+            raise failure from error

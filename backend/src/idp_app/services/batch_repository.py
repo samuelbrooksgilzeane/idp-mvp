@@ -3,21 +3,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
-import time
 from pathlib import Path
 from typing import Any, Protocol
 
 from idp_app.services.document_registry import DatabricksDocumentRegistry
+from idp_app.services.sql_retry import RetryOutcome, run_with_retries
 
-logger = logging.getLogger(__name__)
-DELTA_CONFLICTS = (
-    "DELTA_CONCURRENT",
-    "ConcurrentAppendException",
-    "ConcurrentWriteException",
-    "ConcurrentDeleteReadException",
-)
 
 class BatchRepository(Protocol):
     def create(self, header: dict[str, Any], items: list[dict[str, Any]]) -> None: ...
@@ -146,22 +138,16 @@ class DatabricksBatchRepository:
         self.headers = f"{namespace}_upload_batches"
         self.members = f"{namespace}_upload_items"
 
-    def write(self, statement: str, values: dict[str, object]) -> dict[str, int]:
-        """Run one DML statement and return its row counts (empty when none were reported)."""
-        # Serializable Delta conflicts are retryable; authentication/schema errors are not.
-        for attempt in range(3):
-            try:
-                return self.sql.execute_dml(statement, values)
-            except Exception as error:
-                code = next((code for code in DELTA_CONFLICTS if code in str(error)), None)
-                if attempt == 2 or code is None:
-                    raise
-                logger.warning(
-                    "Delta conflict on upload metadata write; retrying",
-                    extra={"error_code": code, "attempt": attempt + 1},
-                )
-                time.sleep(0.1 * 2**attempt)
-        raise AssertionError("unreachable")
+    def write(
+        self, statement: str, values: dict[str, object], outcome: RetryOutcome | None = None
+    ) -> dict[str, int]:
+        """Run one DML statement and return its row counts (empty when none were reported).
+
+        Every write here is safe to repeat (idempotent MERGE or revision-checked UPDATE), so Delta
+        conflicts and transient warehouse failures are retried a bounded number of times."""
+        return run_with_retries(
+            lambda: self.sql.execute_dml(statement, values), outcome, label="upload metadata write"
+        )
 
     def create(self, header: dict[str, Any], items: list[dict[str, Any]]) -> None:
         self.write(
@@ -245,6 +231,7 @@ class DatabricksBatchRepository:
         return {row[0]: int(row[1]) for row in rows}
 
     def compare_and_set(self, old: dict[str, Any], new: dict[str, Any]) -> bool:
+        outcome = RetryOutcome()
         try:
             counts = self.write(
                 f"UPDATE {self.members} SET state = :state, "
@@ -259,6 +246,7 @@ class DatabricksBatchRepository:
                     "client_file_id": old["client_file_id"],
                     "revision": old["revision"],
                 },
+                outcome,
             )
         except Exception as error:
             # The statement may have committed before the error reached us; only a read-back
@@ -271,7 +259,9 @@ class DatabricksBatchRepository:
                 return True
             raise
         affected = counts.get("num_affected_rows")
-        if affected is None:  # No counts reported: fall back to confirming by transition ID.
+        # No counts, or a repeat that matched nothing after an attempt that may have committed:
+        # only this transition's own ID can tell whether the claim is ours.
+        if affected is None or (affected == 0 and outcome.uncertain):
             saved = self.item(old["batch_id"], old["client_file_id"])
             return saved is not None and saved["transition_id"] == new["transition_id"]
         if affected > 1:

@@ -23,9 +23,10 @@ export function UploadBatchProgress({ upload }: { upload: UploadBatchController 
     <p>Uploads continue while you navigate in this app. Closing or refreshing the tab stops unfinished transfers; reselect the original files to continue. Completed files are skipped.</p>
     {upload.automaticPreparation ? <p>Uploaded documents prepare in the background. Look for “Ready to extract” in the document list.</p> : null}
     {upload.error ? <p role="alert">{upload.error}</p> : null}
-    {upload.paused ? <p>Paused. Active transfers finish before the queue stops.</p> : null}
+    {upload.paused && !upload.signInRequired ? <p>Paused. Active transfers finish before the queue stops.</p> : null}
+    {upload.retryingSoon ? <p role="status">Retrying failed files automatically in 30 seconds.</p> : null}
     <button type="button" disabled={!upload.busy || upload.paused} onClick={upload.pause}>Pause uploads</button>
-    <button type="button" disabled={upload.busy || registered === items.length} onClick={() => void upload.retry()}>Retry unfinished files</button>
+    <button type="button" disabled={upload.busy || registered === items.length} onClick={() => void upload.retry()}>{upload.signInRequired ? "Resume" : "Retry unfinished files"}</button>
     <button type="button" disabled={upload.busy} onClick={() => {
       if (registered === items.length || window.confirm("Start a new upload batch? This batch's saved outcomes remain on the server.")) upload.clear();
     }}>New upload batch</button>

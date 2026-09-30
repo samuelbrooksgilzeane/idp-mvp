@@ -48,8 +48,9 @@ class Settings(BaseSettings):
     max_upload_bytes: PositiveInt = 25 * 1024 * 1024
     max_upload_files: PositiveInt = 10
     max_upload_batch_files: PositiveInt = 1000
-    max_upload_attempts: PositiveInt = 5
-    upload_claim_seconds: PositiveInt = 1800
+    max_upload_attempts: PositiveInt = 10
+    # The claim starts once the whole body has arrived, so it only covers storing and registering.
+    upload_claim_seconds: PositiveInt = 300
     upload_parallel_transfers: int = Field(default=3, ge=1, le=8)
 
     @field_validator(

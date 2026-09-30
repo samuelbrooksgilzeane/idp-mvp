@@ -199,11 +199,38 @@ def test_delta_conflict_retries_are_logged(caplog: pytest.LogCaptureFixture):
     sql = MagicMock()
     sql.execute_dml.side_effect = [RuntimeError("[DELTA_CONCURRENT_APPEND] conflict"), {}]
     repository = DatabricksBatchRepository(sql, "catalog.project.idp")
-    with caplog.at_level("WARNING"), patch("idp_app.services.batch_repository.time.sleep"):
+    with caplog.at_level("WARNING"), patch("idp_app.services.sql_retry.time.sleep"):
         repository.write("UPDATE t SET x = 1", {})
     [record] = caplog.records
     assert record.error_code == "DELTA_CONCURRENT"  # type: ignore[attr-defined]
     assert record.attempt == 1  # type: ignore[attr-defined]
+
+
+def test_transient_failure_retries_and_resolves_uncertain_claim_by_read_back():
+    from databricks.sdk.errors import TemporarilyUnavailable
+
+    sql = MagicMock()
+    repository = DatabricksBatchRepository(sql, "catalog.project.idp")
+    old = {"batch_id": "b", "client_file_id": "i", "revision": 0}
+    new = {"state": "UPLOADING", "revision": 1, "transition_id": "winner"}
+    # The first attempt committed but its answer was lost; the repeat matches nothing.
+    sql.execute_dml.side_effect = [TemporarilyUnavailable("warehouse"), {"num_affected_rows": 0}]
+    repository.item = MagicMock(return_value={"transition_id": "winner"})
+    with patch("idp_app.services.sql_retry.time.sleep"):
+        assert repository.compare_and_set(old, new)
+    assert sql.execute_dml.call_count == 2
+    sql.execute_dml.reset_mock()
+    sql.execute_dml.side_effect = RuntimeError("[UNRESOLVED_COLUMN] not transient")
+    repository.item = MagicMock(return_value=None)
+    with pytest.raises(RuntimeError, match="UNRESOLVED_COLUMN"):
+        repository.compare_and_set(old, new)
+    assert sql.execute_dml.call_count == 1
+
+
+def test_upload_defaults_favour_short_claims_and_more_attempts():
+    settings = Settings(_env_file=None)
+    assert settings.upload_claim_seconds == 300
+    assert settings.max_upload_attempts == 10
 
 
 def test_gateway_failure_is_durable_but_cannot_overwrite_success(client: TestClient):

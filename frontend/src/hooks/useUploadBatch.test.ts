@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
-import { UploadTransferManager, type UploadItem } from "./useUploadBatch";
+import { AUTO_RETRY_DELAY_MS, BUSY_RETRY_DELAYS_MS, SIGN_IN_MESSAGE, UploadTransferManager, type UploadItem } from "./useUploadBatch";
 
 function file(name: string) { return new File(["%PDF-small"], name, { type: "application/pdf", lastModified: 123 }); }
 function reply(payload: unknown, status = 200) { return { ok: status < 400, status, json: async () => payload } as Response; }
@@ -196,5 +196,83 @@ describe("durable upload transfers", () => {
     await running;
     expect(manager.getSnapshot().batch!.items.filter((item) => item.state === "REGISTERED")).toHaveLength(3);
     expect(manager.getSnapshot().batch!.items.filter((item) => item.state === "QUEUED")).toHaveLength(2);
+  });
+
+  it("waits and retries a file the server reports as busy instead of failing it", async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    const { fetchMock } = server(async (id, items) => ++calls === 1
+      ? reply({ error: { code: "UPLOAD_BUSY", message: "Already uploading." } }, 409)
+      : finish(id, items));
+    const manager = new UploadTransferManager();
+    const running = manager.start({ files: [file("one.pdf")], caseId: "" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(manager.getSnapshot().batch!.items[0]).toMatchObject({ state: "QUEUED", error_code: null });
+    await vi.advanceTimersByTimeAsync(BUSY_RETRY_DELAYS_MS[0]);
+    await running;
+    expect(manager.getSnapshot().batch!.items[0].state).toBe("REGISTERED");
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(2);
+  });
+
+  it.each([
+    ["an expired session (401)", () => reply({}, 401)],
+    ["a redirect to sign-in", () => ({ ok: false, status: 0, type: "opaqueredirect", json: async () => { throw new Error("opaque"); } }) as unknown as Response],
+  ])("pauses the whole batch on %s and resumes after sign-in", async (_label, signedOut) => {
+    let expired = true;
+    const { fetchMock } = server(async (id, items) => expired ? signedOut() : finish(id, items));
+    const manager = new UploadTransferManager();
+    const input = { files: Array.from({ length: 5 }, (_, i) => file(`${i}.pdf`)), caseId: "" };
+    await manager.start(input);
+    const snapshot = manager.getSnapshot();
+    expect(snapshot).toMatchObject({ paused: true, signInRequired: true, error: SIGN_IN_MESSAGE, busy: false });
+    expect(snapshot.batch!.items.every((item) => item.state === "QUEUED")).toBe(true);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(3);
+    expect(fetchMock.mock.calls.some(([url]) => url.toString().endsWith("/transport-failure"))).toBe(false);
+    for (const [, init] of fetchMock.mock.calls) if (init) expect(init.redirect).toBe("manual");
+    expired = false;
+    await manager.retry();
+    expect(manager.getSnapshot().signInRequired).toBe(false);
+    expect(manager.getSnapshot().batch!.items.every((item) => item.state === "REGISTERED")).toBe(true);
+  });
+
+  it("makes one automatic pass over retryable failures after the queue drains", async () => {
+    vi.useFakeTimers();
+    let down = true;
+    server(async (id, items) => down ? reply({ error: { code: "HTTP_503", message: "Unavailable" } }, 503) : finish(id, items));
+    const manager = new UploadTransferManager();
+    const running = manager.start({ files: [file("one.pdf")], caseId: "" });
+    await vi.advanceTimersByTimeAsync(750 + 1500);
+    expect(manager.getSnapshot().batch!.items[0]).toMatchObject({ state: "FAILED", retryable: true });
+    expect(manager.getSnapshot().retryingSoon).toBe(true);
+    down = false;
+    await vi.advanceTimersByTimeAsync(AUTO_RETRY_DELAY_MS);
+    await running;
+    expect(manager.getSnapshot().retryingSoon).toBe(false);
+    expect(manager.getSnapshot().batch!.items[0].state).toBe("REGISTERED");
+  });
+
+  it("warns before unload and holds a screen wake lock only while transferring", async () => {
+    const sentinel = { release: vi.fn(async () => undefined), addEventListener: vi.fn() };
+    const request = vi.fn(async () => sentinel);
+    Object.defineProperty(navigator, "wakeLock", { configurable: true, value: { request } });
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    try {
+      const pending: (() => void)[] = [];
+      server(async (id, items) => { await new Promise<void>((resolve) => pending.push(resolve)); return finish(id, items); });
+      const manager = new UploadTransferManager();
+      const running = manager.start({ files: [file("one.pdf")], caseId: "" });
+      await waitFor(() => expect(pending).toHaveLength(1));
+      expect(added).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+      expect(request).toHaveBeenCalledWith("screen");
+      expect(removed).not.toHaveBeenCalledWith("beforeunload", expect.any(Function));
+      pending[0]();
+      await running;
+      expect(removed).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+      expect(sentinel.release).toHaveBeenCalled();
+    } finally {
+      added.mockRestore(); removed.mockRestore();
+      delete (navigator as { wakeLock?: unknown }).wakeLock;
+    }
   });
 });
