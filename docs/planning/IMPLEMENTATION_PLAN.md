@@ -95,7 +95,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 
 | Batch | Title | Sessions (est.) | Status |
 |---|---|---|---|
-| 1 | Branch and Genie removal | 1 | Done (awaiting user: unbind or delete dev Genie space) |
+| 1 | Branch and Genie removal | 1 | Done (user to run the Genie unbind locally) |
 | 2 | Upload speed | 1 | Not started |
 | 3 | Upload robustness | 1 | Not started |
 | 4 | Folder import | 2 | Not started |
@@ -116,7 +116,9 @@ created. `make check` passes; `frontend/dist` was not rebuilt (still contains th
 Notes for next batch: `/api/app-config` now returns `{project_name, chat_app_url}`; the CSP is always
 `frame-src 'none'`; `workspace_smoke.py` makes two checks (warehouse, apps). The bundle default for
 `chat_app_url` is `" "` (Apps rejects empty env values; Settings strips it). The unbind/delete
-decision for the dev Genie space is still open — resolve it before any deploy.
+decision (30 September): **unbind**. The user runs `databricks bundle deployment unbind project_genie -t dev
+-p idp-mvp` with the old `genie_*` vars from a checkout that still has the overlay, then deletes
+`genie.generated.yml`. Confirm this has been done before any deploy.
 
 1. `git switch -c feat/chat-and-bulk-intake` from `feat/dark-blue-ui`; commit `docs/planning/`.
 2. Remove Genie from every file in **Genie footprint**. Leave `docs/archive/`, dated
