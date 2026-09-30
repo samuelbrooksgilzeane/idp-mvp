@@ -1,6 +1,6 @@
 import { documentStatusLabel } from "../lib/documentStatus";
 import { ReviewNavigation } from "../components/ReviewNavigation";
-import { invalidateDocumentReviews } from "../lib/extractionReviewPrefetch";
+import { invalidateDocumentReviews, loadDocumentExtractionRuns } from "../lib/extractionReviewPrefetch";
 import { ArrowLeft, Clock3, LoaderCircle, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -33,6 +33,10 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
   const [notice, setNotice] = useState<Notice>(null);
   const [tab, setTab] = useState<Tab>("Extraction");
   const [citationTarget, setCitationTarget] = useState<CitationTarget | null>(null);
+  // The parse the extraction panel's run read. The viewer shows that parse from the start, so a
+  // cited value lands on the elements it was taken from and citing only moves the highlight.
+  // Undefined until the panel has resolved its run; null when the document has none.
+  const [evidenceParseRunId, setEvidenceParseRunId] = useState<string | null>();
 
   // Fetched by id rather than read from a list, so a deep link or refresh resolves on its own.
   const loadDocument = useCallback(async () => {
@@ -70,7 +74,10 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
     activeDocument.current = documentId;
     setState("loading");
     setCitationTarget(null);
+    setEvidenceParseRunId(undefined);
     setTab("Extraction");
+    // Requested alongside the document: the viewer waits on it to know which parse to show.
+    loadDocumentExtractionRuns(documentId).catch(() => undefined);
     void loadDocument();
     void loadRuns();
     return () => { activeDocument.current = ""; };
@@ -149,6 +156,14 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
       setStarting(false);
     }
   }
+
+  const showParseRun = useCallback((parseRunId: string | null) => {
+    setEvidenceParseRunId(parseRunId);
+    // A highlight from another parse's run would be drawn over the wrong elements.
+    setCitationTarget((current) =>
+      current?.parseRunId && current.parseRunId !== parseRunId ? null : current,
+    );
+  }, []);
 
   function showEvidence(target: CitationTarget) {
     // The viewer sits alongside the panel, so citing a value only has to move the highlight.
@@ -247,7 +262,8 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
             documentId={document.document_id}
             documentStatus={document.status}
             citationTarget={citationTarget}
-            parseRunId={citationTarget?.parseRunId}
+            parseRunId={citationTarget?.parseRunId ?? evidenceParseRunId ?? undefined}
+            sourcePending={tab === "Extraction" && evidenceParseRunId === undefined}
           />
         </div>
 
@@ -256,6 +272,7 @@ export function DocumentDetailPage({ onDocumentsChanged }: DocumentDetailPagePro
           <ExtractionPanel
             document={document}
             onViewEvidence={showEvidence}
+            onParseRunChange={showParseRun}
             onDocumentsChanged={() => {
               void loadDocument();
               onDocumentsChanged();

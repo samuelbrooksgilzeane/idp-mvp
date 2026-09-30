@@ -143,6 +143,76 @@ describe("DocumentDetailPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the parse the extraction read before a value is cited, and citing keeps it", async () => {
+    const extractedParse = "parse-extracted";
+    const extractionRun = {
+      extraction_run_id: "13e7ac76-093f-481d-8360-42375bc8bda8",
+      document_id: documentId,
+      parse_run_id: extractedParse,
+      schema_id: "invoice",
+      schema_version: 1,
+      schema_hash: "b".repeat(64),
+      extractor_version: "2.1",
+      status: "EXTRACTED",
+      error_message: null,
+      requested_by: "analyst@example.com",
+      job_run_id: 1,
+      started_at: "2026-08-29T11:54:20Z",
+      completed_at: "2026-08-29T11:55:48Z",
+    };
+    const review = {
+      run: extractionRun,
+      document: { ...record, status: "EXTRACTED" },
+      schema_id: "invoice",
+      schema_version: 1,
+      root_mode: "SINGLE_RECORD",
+      result: { total: { value: 888.55 } },
+      fields: [{
+        record_id: "root", schema_path: "total", instance_path: "total", field_name: "total",
+        declared_type: "number", value: 888.55, value_string: "888.55", confidence_score: 1,
+        citation_ids: [3],
+        citations: [{ id: 3, bbox: [{ coord: [893, 1542, 1222, 1579], page_id: 0 }] }],
+        validation_status: null, validation_message: null,
+      }],
+      field_policies: {},
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.endsWith("/parse-runs")) return { ok: true, json: async () => [] };
+      if (url.includes("/extraction-runs")) return { ok: true, json: async () => [extractionRun] };
+      if (url.includes("/review")) return { ok: true, json: async () => review };
+      if (url.includes("/viewer")) {
+        return { ok: true, status: 200, json: async () => ({
+          parse_run_id: extractedParse,
+          pages: [{
+            page_id: 0, page_number: 1, element_count: 0, element_types: [],
+            image_url: `/api/documents/${documentId}/pages/0/image?parse_run_id=${extractedParse}`,
+          }],
+        }) };
+      }
+      if (url.includes("/elements")) return { ok: true, status: 200, json: async () => [] };
+      if (url.includes("/api/schemas")) return { ok: true, json: async () => [] };
+      return { ok: true, json: async () => ({ ...record, status: "EXTRACTED" }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const viewerRequests = () =>
+      fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes("/viewer"));
+
+    renderPage();
+    const value = await screen.findByRole("button", { name: "888.55" });
+    // The document's latest parse may be newer than the one the values were read from; only the
+    // extraction's own parse is ever requested.
+    await waitFor(() =>
+      expect(viewerRequests()).toEqual([
+        `/api/documents/${documentId}/viewer?parse_run_id=${extractedParse}`,
+      ]),
+    );
+
+    fireEvent.click(value);
+    expect(await screen.findByText(/Highlighting extraction evidence for/)).toBeInTheDocument();
+    expect(viewerRequests()).toHaveLength(1);
+  });
+
   it("reports a document that cannot be loaded", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
 

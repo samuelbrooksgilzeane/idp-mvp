@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import mimetypes
 import time
@@ -12,7 +13,7 @@ from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound
 from starlette.concurrency import run_in_threadpool
 
-from idp_app.services.document_models import ParseRunRecord
+from idp_app.services.document_models import DocumentRecord, ParseRunRecord
 from idp_app.services.document_registry import DocumentRegistry
 from idp_app.services.documents import DocumentServiceError
 from idp_app.services.parse_runs import ParseRunRepository
@@ -114,28 +115,91 @@ class ViewerService:
         self._images = images
         self._projections = projections
         self._fallback: OrderedDict[str, tuple[float, int, Any]] = OrderedDict()
+        # A successful parse and its projection manifest never change, so each is read from the
+        # warehouse once per process. The document itself is still checked on every request.
+        self._runs: OrderedDict[str, ParseRunRecord] = OrderedDict()
+        self._manifests: OrderedDict[str, dict[str, Any]] = OrderedDict()
 
-    async def _page_data(
-        self, run: ParseRunRecord, page_id: int | None = None
-    ) -> tuple[list[ParsedPage], list[ParsedElement]]:
+    async def _load(
+        self, document_id: str, parse_run_id: str | None, page_id: int | None = None
+    ) -> tuple[ParseRunRecord, list[ParsedPage], list[ParsedElement]]:
+        """Resolve the parse and its page data with independent warehouse reads in flight together.
+
+        Each Databricks statement costs roughly half a second, so issuing the document check, parse
+        metadata, projection manifest and page elements one after another made every viewer
+        request take seconds. They are checked afterwards in the same order as before.
+        """
+        document_checked = False
+        if parse_run_id is None:
+            document, references = await asyncio.gather(
+                run_in_threadpool(self._documents.get, document_id),
+                run_in_threadpool(self._parse_runs.latest_successful_references, [document_id]),
+            )
+            _require_document(document)
+            reference = references.get(document_id)
+            if reference is None:
+                raise DocumentServiceError(
+                    "DOCUMENT_NOT_PARSED", "No successful parse is available.", 409
+                )
+            parse_run_id = reference.parse_run_id
+            document_checked = True
+
+        run = self._runs.get(parse_run_id)
+        manifest = self._manifests.get(parse_run_id)
+        reads: dict[str, Any] = {}
+        if not document_checked:
+            reads["document"] = run_in_threadpool(self._documents.get, document_id)
+        if run is None:
+            reader = getattr(self._parse_runs, "metadata", self._parse_runs.get)
+            reads["run"] = run_in_threadpool(reader, parse_run_id)
         if self._projections is not None:
-            manifest = await run_in_threadpool(self._projections.manifest, run.parse_run_id)
+            if manifest is None:
+                reads["manifest"] = run_in_threadpool(self._projections.manifest, parse_run_id)
+            if page_id is not None:
+                reads["page"] = run_in_threadpool(self._projections.page, parse_run_id, page_id)
+        results = dict(
+            zip(reads, await asyncio.gather(*reads.values(), return_exceptions=True), strict=True)
+        )
+
+        if "document" in results:
+            _require_document(cast(DocumentRecord | None, _value(results["document"])))
+        if run is None:
+            run = cast(ParseRunRecord | None, _value(results["run"]))
+            if run is not None and run.status == "SUCCESS":
+                _remember(self._runs, parse_run_id, run)
+        if run is None or run.document_id != document_id:
+            raise DocumentServiceError("PARSE_RUN_NOT_FOUND", "Parse run not found.", 404)
+        if run.status != "SUCCESS":
+            raise DocumentServiceError(
+                "DOCUMENT_NOT_PARSED", "The requested parse is unavailable.", 409
+            )
+        if "manifest" in results:
+            manifest = cast(dict[str, Any] | None, _value(results["manifest"]))
             if manifest is not None:
                 if manifest["document_id"] != run.document_id:
                     raise DocumentServiceError(
                         "PROJECTION_INVALID", "Projection identity mismatch.", 409
                     )
-                pages = [ParsedPage(**page) for page in manifest["pages"]]
-                elements = []
-                if page_id is not None:
-                    if page_id not in {p.page_id for p in pages}:
-                        raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
-                    raw = await run_in_threadpool(self._projections.page, run.parse_run_id, page_id)
-                    elements = [
-                        ParsedElement(**{**e, "boxes": [BoundingBox(**box) for box in e["boxes"]]})
-                        for e in raw
-                    ]
-                return pages, elements
+                _remember(self._manifests, parse_run_id, manifest)
+        if manifest is None:
+            pages, elements = await self._retained_page_data(run, page_id)
+            return run, pages, elements
+        pages = [ParsedPage(**page) for page in manifest["pages"]]
+        if page_id is None:
+            return run, pages, []
+        if page_id not in {p.page_id for p in pages}:
+            raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
+        raw = cast(list[dict[str, Any]], _value(results["page"]))
+        elements = [
+            ParsedElement(**{**e, "boxes": [BoundingBox(**box) for box in e["boxes"]]})
+            for e in raw
+        ]
+        return run, pages, elements
+
+    async def _retained_page_data(
+        self, run: ParseRunRecord, page_id: int | None
+    ) -> tuple[list[ParsedPage], list[ParsedElement]]:
+        """Project a parse without a stored projection from its retained parser output."""
         from idp_app.services.viewer_projection import project
 
         now = time.monotonic()
@@ -165,8 +229,7 @@ class ViewerService:
     async def metadata(
         self, document_id: str, parse_run_id: str | None = None
     ) -> tuple[str, list[ParsedPage]]:
-        run = await self._successful_run(document_id, parse_run_id)
-        pages, _ = await self._page_data(run)
+        run, pages, _ = await self._load(document_id, parse_run_id)
         return run.parse_run_id, pages
 
     async def list_pages(
@@ -182,16 +245,14 @@ class ViewerService:
         element_type: str | None = None,
         parse_run_id: str | None = None,
     ) -> list[ParsedElement]:
-        run = await self._successful_run(document_id, parse_run_id)
-        _, elements = await self._page_data(run, page_id)
+        _, _, elements = await self._load(document_id, parse_run_id, page_id)
         requested = element_type.strip().lower() if element_type else None
         return [e for e in elements if not requested or e.element_type == requested]
 
     async def open_page_image(
         self, document_id: str, page_id: int, parse_run_id: str | None = None
     ) -> PageImage:
-        run = await self._successful_run(document_id, parse_run_id)
-        pages, _ = await self._page_data(run)
+        run, pages, _ = await self._load(document_id, parse_run_id)
         page = next((item for item in pages if item.page_id == page_id), None)
         if page is None:
             raise DocumentServiceError("PAGE_NOT_FOUND", "Parsed page not found.", 404)
@@ -239,29 +300,23 @@ class ViewerService:
             )
         return run
 
-    async def _successful_run(self, document_id: str, parse_run_id: str | None) -> ParseRunRecord:
-        document = await run_in_threadpool(self._documents.get, document_id)
-        if document is None or document.status == "DELETED":
-            raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
-        if parse_run_id is None:
-            references = await run_in_threadpool(
-                self._parse_runs.latest_successful_references, [document_id]
-            )
-            reference = references.get(document_id)
-            if reference is None:
-                raise DocumentServiceError(
-                    "DOCUMENT_NOT_PARSED", "No successful parse is available.", 409
-                )
-            parse_run_id = reference.parse_run_id
-        reader = getattr(self._parse_runs, "metadata", self._parse_runs.get)
-        run = await run_in_threadpool(reader, parse_run_id)
-        if run is None or run.document_id != document_id:
-            raise DocumentServiceError("PARSE_RUN_NOT_FOUND", "Parse run not found.", 404)
-        if run.status != "SUCCESS":
-            raise DocumentServiceError(
-                "DOCUMENT_NOT_PARSED", "The requested parse is unavailable.", 409
-            )
-        return cast(ParseRunRecord, run)
+
+def _require_document(document: DocumentRecord | None) -> None:
+    if document is None or document.status == "DELETED":
+        raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
+
+
+def _value(result: object) -> object:
+    """Unwrap one `asyncio.gather(..., return_exceptions=True)` result, raising its failure."""
+    if isinstance(result, BaseException):
+        raise result
+    return result
+
+
+def _remember(cache: OrderedDict[str, Any], key: str, value: Any) -> None:
+    cache[key] = value
+    while len(cache) > 64:
+        cache.popitem(last=False)
 
 
 def _parsed_pages(parsed: dict[str, Any] | None) -> list[tuple[int, str]]:

@@ -33,13 +33,17 @@ function speculate(task: () => Promise<unknown>) {
   speculative++;
   void task().catch(() => undefined).finally(() => { speculative--; });
 }
+/** A document's extraction history, shared so a page can request it alongside the document. */
+export function loadDocumentExtractionRuns(documentId: string): Promise<Run[]> {
+  return documentRuns.get(`${cacheScope()}:${documentId}`, async () => {
+    const payload = await json<unknown>(`/api/documents/${documentId}/extraction-runs`);
+    return Array.isArray(payload) ? payload as Run[] : [];
+  });
+}
 export function prefetchExtractionReview(id: string) { speculate(() => loadExtractionReview(id)); }
 export function prefetchDocumentExtractionReview(documentId: string) {
   speculate(async () => {
-    const history = await documentRuns.get(`${cacheScope()}:${documentId}`, async () => {
-      const payload = await json<unknown>(`/api/documents/${documentId}/extraction-runs`);
-      return Array.isArray(payload) ? payload as Run[] : [];
-    });
+    const history = await loadDocumentExtractionRuns(documentId);
     const latest = history.find(run => run.status === "EXTRACTED");
     if (latest) await loadExtractionReview(latest.extraction_run_id);
   });

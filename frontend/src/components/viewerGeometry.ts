@@ -1,4 +1,4 @@
-import type { ElementBox } from "./DocumentViewer";
+import type { ElementBox, ParsedElement } from "./DocumentViewer";
 
 type Size = { width: number; height: number };
 
@@ -49,4 +49,37 @@ export function scaleBoundingBox(
     width: box.width * scaleX,
     height: box.height * scaleY,
   };
+}
+
+/**
+ * The parsed element a citation was taken from. `ai_extract` cites the regions of the parse it
+ * read, so the cited box coincides with that element's box; overlap (intersection over union,
+ * on the same page) rather than equality tolerates rounding. Returns null when no element
+ * overlaps a cited region by at least half.
+ */
+export function citedElementId(
+  regions: ElementBox[],
+  elements: ParsedElement[],
+): number | null {
+  let best: { id: number; overlap: number } | null = null;
+  for (const region of regions) {
+    for (const element of elements) {
+      for (const box of element.boxes) {
+        if (box.page_id !== region.page_id) continue;
+        const overlap = intersectionOverUnion(region, box);
+        if (overlap >= 0.5 && (best === null || overlap > best.overlap)) {
+          best = { id: element.element_id, overlap };
+        }
+      }
+    }
+  }
+  return best?.id ?? null;
+}
+
+function intersectionOverUnion(a: ElementBox, b: ElementBox): number {
+  const width = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+  const height = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+  if (width <= 0 || height <= 0) return 0;
+  const shared = width * height;
+  return shared / (a.width * a.height + b.width * b.height - shared);
 }

@@ -59,6 +59,7 @@ const report = {
 };
 
 const extraction = {
+  run: { parse_run_id: "9b1f3c4e-parse-validated" },
   fields: [
     {
       field_path: "total",
@@ -134,6 +135,8 @@ describe("ValidationPanel", () => {
     expect(target.fieldLabel).toBe("total");
     expect(target.pageId).toBe(0);
     expect(target.boxes[0].coord).toEqual([893, 1542, 1222, 1579]);
+    // Drawn over the parse the validated extraction read, whichever parse is newest.
+    expect(target.parseRunId).toBe("9b1f3c4e-parse-validated");
   });
 
   it("requires a successful extraction before validating", async () => {

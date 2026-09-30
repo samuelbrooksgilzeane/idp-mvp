@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentViewer, type ParsedElement } from "./DocumentViewer";
-import { scaleBoundingBox } from "./viewerGeometry";
+import { citedElementId, scaleBoundingBox } from "./viewerGeometry";
 
 const documentId = "d0ed9896-da45-560a-8ddb-5b88d20dea1e";
 const pages = [
@@ -73,6 +73,15 @@ describe("DocumentViewer", () => {
         { width: 2000, height: 2750 },
       ),
     ).toEqual({ page_id: 0, x: 200, y: 275, width: 800, height: 550 });
+  });
+
+  it("identifies the parsed element a cited region was read from", () => {
+    const region = { page_id: 0, x: 82, y: 518, width: 1256, height: 612 };
+
+    expect(citedElementId([region], pageOneElements)).toBe(8);
+    // Another page, or too little overlap, names no element.
+    expect(citedElementId([{ ...region, page_id: 1 }], pageOneElements)).toBeNull();
+    expect(citedElementId([{ ...region, width: 300 }], pageOneElements)).toBeNull();
   });
 
   it("renders labelled overlays, filters types, zooms, and inspects content", async () => {
@@ -163,6 +172,92 @@ describe("DocumentViewer", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "Highlighting extraction evidence for total",
     );
+  });
+
+  it("selects the element a cited value was read from", async () => {
+    vi.stubGlobal("fetch", viewerFetch());
+    const { rerender } = render(<DocumentViewer documentId={documentId} documentStatus="PARSED" />);
+    const image = await screen.findByAltText("Rendered page 1");
+    setImageDimensions(image, 1600, 2200, 800, 1100);
+    fireEvent.load(image);
+    await screen.findByRole("button", { name: /table 8:/ });
+
+    rerender(
+      <DocumentViewer
+        documentId={documentId}
+        documentStatus="PARSED"
+        citationTarget={{
+          pageId: 0,
+          fieldLabel: "total",
+          nonce: 1,
+          boxes: [{ page_id: 0, coord: [80, 520, 1340, 1130] }],
+        }}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /table 8:/ })).toHaveClass("selected"),
+    );
+    // The inspector names the element and shows its parsed content beside the element list.
+    expect(screen.getAllByText("Line items and totals")).toHaveLength(2);
+  });
+
+  it("keeps the parse already on screen when a citation asks for it again", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/viewer")) {
+        return { ok: true, status: 200, json: async () => ({ parse_run_id: "parse-latest", pages }) };
+      }
+      return { ok: true, status: 200, json: async () => pageOneElements };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(<DocumentViewer documentId={documentId} documentStatus="EXTRACTED" />);
+    const image = await screen.findByAltText("Rendered page 1");
+
+    // The cited value names the parse on screen; neither that nor a workflow status change
+    // may reload the page.
+    rerender(
+      <DocumentViewer
+        documentId={documentId}
+        documentStatus="VALIDATED_PASS"
+        parseRunId="parse-latest"
+        citationTarget={{
+          parseRunId: "parse-latest",
+          pageId: 0,
+          fieldLabel: "total",
+          nonce: 1,
+          boxes: [{ page_id: 0, coord: [80, 520, 1340, 1130] }],
+        }}
+      />,
+    );
+
+    expect(screen.getByAltText("Rendered page 1")).toBe(image);
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/viewer"))).toHaveLength(1);
+  });
+
+  it("waits for a pending source instead of loading a parse it may replace", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes("/viewer")) {
+        return { ok: true, status: 200, json: async () => ({ parse_run_id: "parse-evidence", pages }) };
+      }
+      return { ok: true, status: 200, json: async () => pageOneElements };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { rerender } = render(
+      <DocumentViewer documentId={documentId} documentStatus="EXTRACTED" sourcePending />,
+    );
+
+    expect(screen.getByLabelText("Loading parsed pages")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    rerender(
+      <DocumentViewer documentId={documentId} documentStatus="EXTRACTED" parseRunId="parse-evidence" />,
+    );
+    expect(await screen.findByAltText("Rendered page 1")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/viewer"))).toEqual([
+      [`/api/documents/${documentId}/viewer?parse_run_id=parse-evidence`, expect.anything()],
+    ]);
   });
 
   it("scopes page metadata, elements, and images to a requested parse run", async () => {

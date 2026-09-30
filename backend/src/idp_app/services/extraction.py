@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -245,10 +246,13 @@ class ExtractionService:
         return runs
 
     async def list_runs(self, document_id: str) -> list[ExtractionRunRecord]:
-        document = await run_in_threadpool(self._documents.get, document_id)
+        # Independent reads: the history is only returned once the document is confirmed.
+        document, runs = await asyncio.gather(
+            run_in_threadpool(self._documents.get, document_id),
+            run_in_threadpool(self._runs.list_for_document, document_id),
+        )
         if document is None:
             raise DocumentServiceError("DOCUMENT_NOT_FOUND", "Document not found.", 404)
-        runs = await run_in_threadpool(self._runs.list_for_document, document_id)
         refreshed = False
         for run in runs:
             if run.status == "RUNNING" and run.job_run_id is not None:

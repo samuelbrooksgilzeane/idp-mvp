@@ -339,3 +339,38 @@ def test_deleted_document_cannot_reuse_cached_or_projected_viewer(tmp_path: Path
             response = client.get(f"{path}/{endpoint}", params={**params, "page_id": 0})
             assert response.status_code == 404
             assert response.json()["error"]["code"] == "DOCUMENT_NOT_FOUND"
+
+
+@pytest.mark.parametrize("projected", [False, True])
+def test_repeat_viewer_requests_reuse_parse_reads_but_recheck_the_document(
+    tmp_path: Path, projected
+):
+    client, settings = _client(tmp_path)
+    settings.viewer_projection_enabled = projected
+    document, run = _upload_and_parse(client, _pdf_bytes(), "cached.pdf")
+    other, _ = _upload_and_parse(client, _pdf_bytes("Other"), "other.pdf")
+    path = f"/api/documents/{document['document_id']}"
+    params = {"parse_run_id": run["parse_run_id"]}
+    assert client.get(f"{path}/viewer", params=params).status_code == 200
+
+    viewer = client.app.state.viewer_service
+    reads: list[str] = []
+    checks: list[str] = []
+
+    def spy(owner, name, log):
+        original = getattr(owner, name)
+        setattr(owner, name, lambda *args: (log.append(name), original(*args))[1])
+
+    spy(viewer._parse_runs, "metadata", reads)
+    spy(viewer._parse_runs, "get", reads)
+    if projected:
+        spy(viewer._projections, "manifest", reads)
+    spy(viewer._documents, "get", checks)
+    assert client.get(f"{path}/elements", params={**params, "page_id": 0}).status_code == 200
+    assert client.get(f"{path}/pages/0/image", params=params).status_code == 200
+    assert reads == []
+    assert checks == ["get", "get"]
+
+    crossed = client.get(f"/api/documents/{other['document_id']}/viewer", params=params)
+    assert crossed.status_code == 404
+    assert crossed.json()["error"]["code"] == "PARSE_RUN_NOT_FOUND"

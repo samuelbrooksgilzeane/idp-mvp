@@ -21,6 +21,7 @@ import {
 import type { DocumentStatus } from "../types";
 import {
   citationToBox,
+  citedElementId,
   scaleBoundingBox,
   type CitationCoordinate,
 } from "./viewerGeometry";
@@ -70,6 +71,8 @@ type DocumentViewerProps = {
   documentId: string;
   documentStatus: DocumentStatus;
   parseRunId?: string;
+  /** The page has yet to resolve which parse to show; hold the loading state until it has. */
+  sourcePending?: boolean;
   citationTarget?: CitationTarget | null;
 };
 
@@ -79,6 +82,7 @@ export function DocumentViewer({
   documentId,
   documentStatus,
   parseRunId,
+  sourcePending = false,
   citationTarget,
 }: DocumentViewerProps) {
   const [viewer, setViewer] = useState<ViewerState>({ kind: "idle" });
@@ -91,9 +95,14 @@ export function DocumentViewer({
   const [naturalSize, setNaturalSize] = useState<Size>({ width: 0, height: 0 });
   const [renderedSize, setRenderedSize] = useState<Size>({ width: 0, height: 0 });
   const imageRef = useRef<HTMLImageElement>(null);
+  // The parse on screen, so asking for that same parse again (a cited value, a tab switch or a
+  // workflow status change) keeps the page rather than reloading it.
+  const shownParse = useRef<string | null>(null);
 
   useEffect(() => {
+    if (parseRunId && shownParse.current === `${documentId}:${parseRunId}`) return;
     const controller = new AbortController();
+    shownParse.current = null;
     setPageIndex(0);
     setZoom(100);
     setSelectedElementId(null);
@@ -103,6 +112,9 @@ export function DocumentViewer({
     // Workflow status can lag retained parse history (including historical extraction
     // evidence). Let the authenticated viewer endpoint determine availability.
     setViewer({ kind: "loading" });
+    // Loading the latest parse while the evidence source is unresolved would draw elements the
+    // cited values were not read from, then reload once it resolves.
+    if (sourcePending) return () => controller.abort();
     const query = parseRunId ? `?parse_run_id=${encodeURIComponent(parseRunId)}` : "";
     fetch(`/api/documents/${documentId}/viewer${query}`, { signal: controller.signal })
       .then(async (response) => {
@@ -119,9 +131,11 @@ export function DocumentViewer({
         const payload = (await response.json()) as unknown;
         if (controller.signal.aborted) return;
         const envelope = payload as { parse_run_id?: string; pages?: unknown[] };
-        setResolvedParseId(envelope.parse_run_id || parseRunId);
+        const resolved = envelope.parse_run_id || parseRunId;
+        setResolvedParseId(resolved);
         const raw = Array.isArray(payload) ? payload : envelope.pages;
         const pages = Array.isArray(raw) ? raw.filter(isPageMetadata) : [];
+        if (pages.length) shownParse.current = `${documentId}:${resolved}`;
         setViewer(
           pages.length
             ? { kind: "ready", pages }
@@ -134,7 +148,7 @@ export function DocumentViewer({
         }
       });
     return () => controller.abort();
-  }, [documentId, documentStatus, parseRunId]);
+  }, [documentId, documentStatus, parseRunId, sourcePending]);
 
   const currentPage = viewer.kind === "ready" ? viewer.pages[pageIndex] : null;
 
@@ -183,6 +197,16 @@ export function DocumentViewer({
         : [],
     [citationTarget, currentPage],
   );
+  // Select the element each cited value was read from, so it is outlined and the inspector names
+  // it and shows its parsed content alongside the highlight.
+  useEffect(() => {
+    if (!citationTarget) return;
+    const regions = citationBoxes
+      .map(citationToBox)
+      .filter((box): box is ElementBox => box !== null);
+    const cited = citedElementId(regions, elements);
+    if (cited !== null) setSelectedElementId(cited);
+  }, [citationTarget, citationBoxes, elements]);
   const selectedElement =
     elements.find((element) => element.element_id === selectedElementId) ?? null;
   const allTypesSelected =

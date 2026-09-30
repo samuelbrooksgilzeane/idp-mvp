@@ -2,7 +2,11 @@ import { LoaderCircle, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DocumentRecord, ExtractionReview } from "../types";
-import { loadExtractionReview } from "../lib/extractionReviewPrefetch";
+import {
+  invalidateDocumentReviews,
+  loadDocumentExtractionRuns,
+  loadExtractionReview,
+} from "../lib/extractionReviewPrefetch";
 import type { CitationTarget } from "./DocumentViewer";
 import { type FieldPolicy, GenericResultView } from "./GenericResultView";
 
@@ -33,6 +37,8 @@ type ExtractableSchema = {
 type ExtractionPanelProps = {
   document: DocumentRecord;
   onViewEvidence: (target: CitationTarget) => void;
+  /** Reports the parse the shown run read (null without one), so the viewer can show it first. */
+  onParseRunChange?: (parseRunId: string | null) => void;
   onDocumentsChanged: () => void;
 };
 
@@ -44,6 +50,7 @@ const formatter = new Intl.DateTimeFormat(undefined, {
 export function ExtractionPanel({
   document,
   onViewEvidence,
+  onParseRunChange,
   onDocumentsChanged,
 }: ExtractionPanelProps) {
   const documentId = document.document_id;
@@ -78,7 +85,7 @@ export function ExtractionPanel({
   );
 
   useEffect(() => {
-    const controller = new AbortController();
+    let active = true;
     setRuns([]);
     setSelectedRunId(null);
     setReview(null);
@@ -86,20 +93,20 @@ export function ExtractionPanel({
     setError(null);
     setActiveRunId(null);
     setRunsState("loading");
-    loadRuns(controller.signal)
-      .then((history) => {
-        if (controller.signal.aborted) return;
+    // Shared with the page, which requests the history alongside the document itself.
+    loadDocumentExtractionRuns(documentId)
+      .then((payload) => {
+        if (!active) return;
+        const history = payload.filter(isExtractionRun);
         setRuns(history);
         setSelectedRunId(latestSuccessfulId(history));
         setRunsState("ready");
       })
-      .catch((cause: unknown) => {
-        if (!(cause instanceof DOMException && cause.name === "AbortError")) {
-          setRunsState("error");
-        }
+      .catch(() => {
+        if (active) setRunsState("error");
       });
-    return () => controller.abort();
-  }, [documentId, loadRuns]);
+    return () => { active = false; };
+  }, [documentId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -135,6 +142,11 @@ export function ExtractionPanel({
     () => runs.find((run) => run.extraction_run_id === selectedRunId) ?? null,
     [runs, selectedRunId],
   );
+
+  const selectedParseRunId = selectedRun?.parse_run_id ?? null;
+  useEffect(() => {
+    if (runsState !== "loading") onParseRunChange?.(selectedParseRunId);
+  }, [runsState, selectedParseRunId, onParseRunChange]);
 
   useEffect(() => {
     if (!selectedRun || selectedRun.status !== "EXTRACTED") {
@@ -214,6 +226,7 @@ export function ExtractionPanel({
       if (!response.ok || !isExtractionRun(payload)) {
         throw new Error(errorMessage(payload) ?? "Extraction could not start.");
       }
+      invalidateDocumentReviews(documentId);
       setRuns((current) => [payload, ...current.filter((run) => run.extraction_run_id !== payload.extraction_run_id)]);
       setSelectedRunId(payload.extraction_run_id);
       setActiveRunId(payload.extraction_run_id);

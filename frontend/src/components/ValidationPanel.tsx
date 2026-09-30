@@ -78,6 +78,8 @@ export function ValidationPanel({
   const [report, setReport] = useState<ValidationReport | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [citations, setCitations] = useState<Record<string, CitationCoordinate[]>>({});
+  // The parse the evaluated extraction read, so its evidence is drawn over that parse's page.
+  const [citationParseRunId, setCitationParseRunId] = useState<string>();
   const [filter, setFilter] = useState<OutcomeFilter>("Issues");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +105,7 @@ export function ValidationPanel({
     setSelectedRunId(null);
     setReport(null);
     setCitations({});
+    setCitationParseRunId(undefined);
     setError(null);
     setState("loading");
     loadRuns(controller.signal)
@@ -154,7 +157,7 @@ export function ValidationPanel({
       .then((response) => (response.ok ? response.json() : null))
       .then((payload: unknown) => {
         if (controller.signal.aborted || !payload || typeof payload !== "object") return;
-        const fields = (payload as { fields?: unknown }).fields;
+        const { fields, run } = payload as { fields?: unknown; run?: { parse_run_id?: unknown } };
         if (!Array.isArray(fields)) return;
         const map: Record<string, CitationCoordinate[]> = {};
         for (const field of fields as {
@@ -173,6 +176,9 @@ export function ValidationPanel({
           if (boxes.length) map[field.field_path] = boxes;
         }
         setCitations(map);
+        setCitationParseRunId(
+          typeof run?.parse_run_id === "string" ? run.parse_run_id : undefined,
+        );
       })
       .catch(() => undefined);
     return () => controller.abort();
@@ -209,6 +215,7 @@ export function ValidationPanel({
     if (!boxes?.length) return;
     evidenceNonce.current += 1;
     onViewEvidence({
+      parseRunId: citationParseRunId,
       pageId: boxes[0].page_id,
       fieldLabel: result.field_path ?? "evidence",
       boxes,
