@@ -50,3 +50,36 @@ def test_export_is_preserved_exactly_and_update_is_etag_guarded() -> None:
     remote.etag = None
     with pytest.raises(ValueError, match="ETag"):
         module().overlay(remote, 123)
+
+
+def test_project_views_are_added_once_and_curation_is_kept() -> None:
+    exported = json.dumps({
+        "version": 2,
+        "instructions": {"human_edit": True},
+        "data_sources": {"tables": [
+            {"identifier": "other.curated.table", "description": ["kept"]},
+            {"identifier": "WORKSPACE.idp_mvp.idp_dev_genie_fields", "description": ["human text"]},
+        ]},
+    })
+    remote = SimpleNamespace(serialized_space=exported, etag="e", title=None, description=None,
+                             warehouse_id=None)
+    views = ("workspace", "idp_mvp", "idp_dev")
+    space = json.loads(module().overlay(remote, 1, views)["resources"]["genie_spaces"]
+                       ["project_genie"]["serialized_space"])
+    identifiers = [table["identifier"] for table in space["data_sources"]["tables"]]
+    assert identifiers == sorted(identifiers, key=str.lower)
+    assert "other.curated.table" in identifiers
+    assert [i.lower() for i in identifiers].count("workspace.idp_mvp.idp_dev_genie_fields") == 1
+    for view in ("documents", "extractions", "records"):
+        assert f"workspace.idp_mvp.idp_dev_genie_{view}" in identifiers
+    assert space["instructions"] == {"human_edit": True}
+    again = module().with_project_views(json.dumps(space), *views)
+    assert json.loads(again) == space
+
+
+def test_new_space_gets_project_views_and_identifiers_are_validated() -> None:
+    space = json.loads(module().overlay(None, 1, ("cat", "sch", "idp"))["resources"]
+                       ["genie_spaces"]["project_genie"]["serialized_space"])
+    assert len(space["data_sources"]["tables"]) == 4
+    with pytest.raises(ValueError, match="identifier"):
+        module().with_project_views("{}", "cat", "sch; DROP", "idp")

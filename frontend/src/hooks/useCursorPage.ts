@@ -30,6 +30,9 @@ export function useCursorPage<T>(url: string, enabled = true, revision = 0) {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); if (!complete) pages.delete(key); };
   }, [url, enabled, revision, scope]);
-  return { ...(loadedUrl === url ? data : { items: [] as T[], next_cursor: null }),
-    loading: enabled && (loading || loadedUrl !== url), error };
+  // A revision bump refetches the same URL in the background: keep its rows on screen and report
+  // `refreshing`, so polling does not blank the list. `loading` means this URL has no data yet.
+  const hasData = loadedUrl === url;
+  return { ...(hasData ? data : { items: [] as T[], next_cursor: null }),
+    loading: enabled && !hasData, refreshing: enabled && hasData && loading, error };
 }
