@@ -30,12 +30,20 @@ class SinglePageStaticFiles(StaticFiles):
 
     async def get_response(self, path: str, scope: MutableMapping[str, Any]) -> Response:
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except StarletteHTTPException as error:
             # A request for an extension-less path is a client route, not a missing file.
             if error.status_code == 404 and "." not in Path(path).name:
-                return await super().get_response("index.html", scope)
-            raise
+                response = await super().get_response("index.html", scope)
+            else:
+                raise
+        # Content-hashed build assets never change; the HTML entry point names the current ones
+        # and must be revalidated, otherwise browsers keep loading the previous release's code.
+        if path.startswith("assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:

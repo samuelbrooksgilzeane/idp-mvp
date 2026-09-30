@@ -49,3 +49,16 @@ def test_client_routes_fall_back_to_the_application_entry_point(tmp_path: Path) 
     assert client.get("/assets/does-not-exist.js").status_code == 404
     # API routes keep their own error contract.
     assert client.get("/api/documents/not-a-document").status_code in {404, 422}
+
+
+def test_entry_point_is_revalidated_and_hashed_assets_are_cached(tmp_path: Path) -> None:
+    """After a deploy, browsers must fetch the new entry point, which names the new assets."""
+    dist = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    if not (dist / "index.html").is_file():
+        pytest.skip("frontend production build is not present")
+    client = TestClient(create_app(Settings(_env_file=None, local_data_dir=tmp_path / "idp")))
+
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/documents/some-id").headers["cache-control"] == "no-cache"
+    asset = next((dist / "assets").glob("index-*.js")).name
+    assert "immutable" in client.get(f"/assets/{asset}").headers["cache-control"]
