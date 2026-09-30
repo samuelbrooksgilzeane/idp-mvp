@@ -6,7 +6,6 @@ import argparse
 import json
 import re
 from typing import Any
-from urllib.parse import urlsplit
 
 
 def check(client: Any, host: str, warehouse: str) -> list[dict[str, Any]]:
@@ -45,26 +44,14 @@ def main() -> None:
     parser.add_argument("--host", required=True)
     parser.add_argument("--warehouse", required=True)
     args = parser.parse_args()
-    origin = urlsplit(args.host)
-    if (
-        origin.scheme != "https"
-        or not origin.hostname
-        or origin.username
-        or origin.password
-        or origin.path not in ("", "/")
-        or origin.query
-        or origin.fragment
-    ):
-        parser.error("--host must be the plain HTTPS workspace origin")
-    try:
-        from databricks.sdk import WorkspaceClient
-        from databricks.sdk.core import Config
+    from workspace_auth import plain_origin, workspace_client  # sibling script module
 
-        client = WorkspaceClient(
-            config=Config(
-                profile=args.profile, http_timeout_seconds=15, retry_timeout_seconds=1
-            )
-        )
+    try:
+        plain_origin(args.host)
+    except ValueError as error:
+        parser.error(str(error))
+    try:
+        client = workspace_client(args.profile, args.host)
         result = check(client, args.host, args.warehouse)
     except Exception as error:
         result = [

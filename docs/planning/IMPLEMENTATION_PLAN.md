@@ -113,6 +113,21 @@ Work that needs live workspace, warehouse or browser access and cannot be done f
 session without Databricks credentials. Each needs the user's OK (quota) or the user's hands.
 Tick and record the result here when done.
 
+**Access from a cloud session** (set once by the user in the environment settings, then a new
+session): network access must allow `dbc-97e4a372-40b1.cloud.databricks.com`; environment variables
+`DATABRICKS_HOST=https://dbc-97e4a372-40b1.cloud.databricks.com` and `DATABRICKS_TOKEN=<personal
+access token>` (never pasted into chat). `scripts/workspace_auth.py` uses them when both are set,
+otherwise the CLI profile. The Python SDK is enough for L2 and smoke checks; the Databricks CLI
+(bundle deploy/unbind) also needs `github.com` and `objects.githubusercontent.com` allowed plus
+`curl -fsSL https://raw.githubusercontent.com/databricks/setup-cli/main/install.sh | sh` in the
+setup script. Budget: at most one warehouse start per check session; no jobs or AI functions
+unless a batch lists them.
+
+Commands: smoke (no SQL) `uv run --project backend python scripts/workspace_smoke.py --host
+https://dbc-97e4a372-40b1.cloud.databricks.com --warehouse 647704f77f24020a`; L2 `uv run --project
+backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.databricks.com
+--warehouse 647704f77f24020a --catalog workspace --schema idp_mvp --yes` (4 statements).
+
 | # | From | Needs | Check | Status |
 |---|---|---|---|---|
 | L1 | Batch 1 step 5 | User's CLI, profile `idp-mvp`, local `genie.generated.yml` | `databricks bundle deployment unbind project_genie -t dev -p idp-mvp` with the old `genie_*` vars, then delete the overlay. **Blocks every deploy.** | Open |
