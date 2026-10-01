@@ -89,7 +89,7 @@ export function UploadPanel({ uploading, notice, onUpload, resuming = false, max
 
 function FolderImportForm({ folderImport, caseId, maxFiles }: { folderImport: FolderImportController; caseId: string; maxFiles: number }) {
   const [folder, setFolder] = useState("");
-  const { folders, root, busy, batch } = folderImport;
+  const { folders, busy, batch } = folderImport;
   const chosen = folders?.includes(folder) ? folder : "";
   return (
     <details className="folder-import" onToggle={(event) => {
@@ -97,16 +97,16 @@ function FolderImportForm({ folderImport, caseId, maxFiles }: { folderImport: Fo
     }}>
       <summary><FolderInput size={16} aria-hidden="true" /> Import from folder</summary>
       <p className="upload-hint">
-        For large batches: copy a folder of PDFs (up to {maxFiles.toLocaleString()}) into{" "}
-        <code>{root ?? "the import volume"}</code>, for example with{" "}
-        <code>databricks fs cp -r ./invoices dbfs:{root ?? "/Volumes/…/idp_import"}/invoices</code>{" "}
-        or Catalog Explorer, then choose it here. The server imports it; no browser needed after start.
+        Have a large batch of PDFs (up to {maxFiles.toLocaleString()} at a time)? Reach out to a member of
+        the support team if you'd like to upload a folder. Once it has been added, choose it below and
+        select <strong>Import folder</strong>. Importing carries on in the background, so you can close
+        this page while it runs.
       </p>
       <div className="folder-import-row">
         <label className="field-label" htmlFor="import-folder">Folder</label>
         <select id="import-folder" value={chosen} disabled={busy || !folders?.length}
           onChange={(event) => setFolder(event.target.value)}>
-          <option value="">{folders === null ? "Loading folders…" : folders.length ? "Choose a folder" : "No folders found"}</option>
+          <option value="">{folders === null ? "Loading folders…" : folders.length ? "Choose a folder" : "No folders available yet"}</option>
           {folders?.map((name) => <option key={name} value={name}>{name}</option>)}
         </select>
         <button type="button" disabled={busy} onClick={() => void folderImport.loadFolders()}>Refresh folders</button>

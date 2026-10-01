@@ -27,7 +27,8 @@ describe("upload panel folder import", () => {
 
     const loaded = controller({ folders: ["invoices", "receipts"], root: "/Volumes/c/s/idp_import" });
     rerender(<UploadPanel uploading={false} notice={null} onUpload={vi.fn()} folderImport={loaded} />);
-    expect(screen.getByText(/databricks fs cp -r .\/invoices dbfs:\/Volumes\/c\/s\/idp_import\/invoices/)).toBeInTheDocument();
+    expect(screen.getByText(/Reach out to a member of\s+the support team if you'd like to upload a folder/)).toBeInTheDocument();
+    expect(screen.queryByText(/databricks fs cp/)).not.toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Import folder" });
     expect(button).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Case ID/), { target: { value: "CASE-9" } });
