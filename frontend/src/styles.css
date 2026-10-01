@@ -473,7 +473,7 @@ td:first-child { min-width: 190px; }
 .batch-clear { color: var(--muted) !important; font-weight: 650 !important; }
 .batch-actions .notice { margin: 0; }
 
-/* Cross-document reporting and shared case filtering */
+/* Shared case filtering */
 .case-filter { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; align-items: center; gap: 5px 16px; }
 .case-filter label { color: var(--text-2); font-size: 12.5px; font-weight: 720; }
 .case-filter select { grid-row: 2; width: 100%; height: 38px; padding: 0 34px 0 11px; border: 1px solid var(--border-2); border-radius: 3px; background: var(--panel); color: var(--text); font-size: 12.5px; font-weight: 650; outline: none; }

@@ -1,7 +1,6 @@
 """Schema-driven exports: section 7 of the generalized IDP plan.
 
-Replaces the invoice-only `/api/exports/invoices.xlsx` with a generic `POST /api/exports` that
-works for any schema shape:
+`POST /api/exports` works for any schema shape:
 
   * A flat schema exports as one worksheet (or one CSV).
   * A singleton nested object flattens into its containing table using dotted column names.

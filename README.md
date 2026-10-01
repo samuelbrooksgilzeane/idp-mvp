@@ -107,19 +107,6 @@ GET  /api/documents/{document_id}
 
 Stable errors include `UNSUPPORTED_FILE_TYPE`, `FILE_TOO_LARGE`, `DOCUMENT_DUPLICATE`, `FILE_STORAGE_FAILED`, and `REGISTRY_WRITE_FAILED`. A mixed multi-file result uses HTTP 207 and reports each rejected file explicitly. No route accepts a volume or table path.
 
-## Results and export API
-
-```text
-GET /api/results/invoices?case_id={optional_case_id}
-GET /api/exports/invoices.xlsx?case_id={optional_case_id}
-```
-
-The results route reads the latest successful extraction for each invoice and returns its line
-count, line sum, stated total, reconciliation delta, and latest completed validation outcome. The
-XLSX export applies the same optional case scope and contains `Summary` and `Line items` sheets so
-the aggregate can be checked against its billed-line detail. Neither response exposes source paths
-or extraction-run identifiers.
-
 ## Parsing API
 
 ```text
