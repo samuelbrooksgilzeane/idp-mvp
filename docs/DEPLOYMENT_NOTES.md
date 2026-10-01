@@ -29,14 +29,16 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
 
 The bundle's required variables have no defaults and are not stored in the repository. The values
 below match the live `dev` deployment (non-secret). Omitting `viewer_projection_enabled=true` would
-turn viewer projections off, so always pass the full set and review the plan.
+turn viewer projections off, and omitting `chat_endpoint` would hide the "Ask documents" page, so
+always pass the full set and review the plan. The values last deployed are recorded in
+`databricks_etl/.databricks/bundle/dev/resources.json` (the app's `IDP_*` env entries).
 
 ```bash
 make check
 cd databricks_etl
 VARS=(--var catalog=workspace --var project_schema=idp_mvp --var source_volume_name=idp_source
       --var artifacts_volume_name=idp_artifacts --var warehouse_id=647704f77f24020a
-      --var viewer_projection_enabled=true)
+      --var viewer_projection_enabled=true --var chat_endpoint=mas-0297dd39-endpoint)
 databricks bundle plan   -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle deploy -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle run    -t dev -p idp-mvp "${VARS[@]}" idp_app   # activates the new app code
