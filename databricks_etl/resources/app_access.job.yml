@@ -1,0 +1,33 @@
+resources:
+  jobs:
+    app_access_grants:
+      name: ${var.app_name}-${bundle.target}-app-access-grants
+      description: >-
+        Grants the App's service principal the tables, volume, Job and chat agents it uses beyond
+        its 20 bound resources. Additive and safe to re-run; the bootstrap runs it last.
+      tasks:
+      - task_key: grant_app_access
+        spark_python_task:
+          python_file: ../src/grant_app_access.py
+          parameters:
+          - --app-name
+          - ${var.app_name}-${bundle.target}
+          - --catalog
+          - ${var.catalog}
+          - --project-schema
+          - ${var.project_schema}
+          - --table-prefix
+          - ${var.table_prefix}
+          - --import-volume-name
+          - ${var.import_volume_name}
+          - --import-job-id
+          - ${resources.jobs.folder_importer.id}
+          - --chat-endpoint
+          - ${var.chat_endpoint}
+        environment_key: default
+      environments:
+      - environment_key: default
+        spec:
+          environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0

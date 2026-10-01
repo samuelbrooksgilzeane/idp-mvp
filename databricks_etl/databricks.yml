@@ -79,8 +79,18 @@ targets:
   dev:
     default: true
     mode: development
+    # The live dev deployment's values (non-secret), so `databricks bundle deploy -t dev` needs no
+    # --var flags. The CLI profile still chooses the workspace. Another workspace overrides these
+    # with --var; prod keeps every workspace value required.
     variables:
       table_prefix: idp_dev
+      catalog: workspace
+      project_schema: idp_mvp
+      source_volume_name: idp_source
+      artifacts_volume_name: idp_artifacts
+      warehouse_id: 647704f77f24020a
+      viewer_projection_enabled: "true"
+      chat_endpoint: mas-0297dd39-endpoint
   prod:
     mode: production
     variables:

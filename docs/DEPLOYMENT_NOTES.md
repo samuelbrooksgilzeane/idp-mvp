@@ -27,87 +27,60 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
 
 ## Deploying the existing dev target
 
-The bundle's required variables have no defaults and are not stored in the repository. The values
-below match the live `dev` deployment (non-secret). Omitting `viewer_projection_enabled=true` would
-turn viewer projections off, and omitting `chat_endpoint` would hide the "Ask documents" page, so
-always pass the full set and review the plan. The values last deployed are recorded in
-`databricks_etl/.databricks/bundle/dev/resources.json` (the app's `IDP_*` env entries).
+The `dev` target in `databricks_etl/databricks.yml` holds the live dev values (catalog, warehouse,
+viewer projections, chat endpoint), so no `--var` flags are needed. The CLI profile chooses the
+workspace (default `idp-mvp`; override with `PROFILE=...`).
 
 ```bash
-make check
-cd databricks_etl
-VARS=(--var catalog=workspace --var project_schema=idp_mvp --var source_volume_name=idp_source
-      --var artifacts_volume_name=idp_artifacts --var warehouse_id=647704f77f24020a
-      --var viewer_projection_enabled=true --var chat_endpoint=mas-0297dd39-endpoint)
-databricks bundle plan   -t dev -p idp-mvp "${VARS[@]}"
-databricks bundle deploy -t dev -p idp-mvp "${VARS[@]}"
-databricks bundle run    -t dev -p idp-mvp "${VARS[@]}" idp_app   # activates the new app code
+make deploy        # make check (tests, then rebuilds frontend/dist, which the app serves), deploy, restart the App
+make bootstrap     # only when migrations change: runs the bootstrap (which re-applies the App's direct grants), then deploys
+make grants        # re-applies the App's direct grants on their own; additive and safe to repeat
 ```
 
-`make check` rebuilds `frontend/dist`, which is what the app serves. Parse/extract parallelism is set by
-the bundle variables `parse_concurrency`, `extraction_concurrency` (default 3 each) and
-`combined_inference_concurrency` (default 6; must be at least their sum). It applies within one
-multi-document Job run.
+Parse/extract parallelism is set by the bundle variables `parse_concurrency`, `extraction_concurrency`
+(default 3 each) and `combined_inference_concurrency` (default 6; must be at least their sum). It
+applies within one multi-document Job run.
+
+**Why there is a grants Job.** A Databricks App binds at most 20 resources and this App needs more, so
+the bundle cannot grant everything through the App. The `app_access_grants` Job
+(`databricks_etl/src/grant_app_access.py`) grants the rest as the deploying identity: the viewer
+projection tables, the import volume, the import Job (CAN_MANAGE_RUN), the chat views, functions and
+history table, and, when `chat_endpoint` is set, the Supervisor, its Knowledge Assistant, both
+serving endpoints and the Supervisor's experiment (found from the endpoint name). The bootstrap runs
+it as its last task, because replacing views drops their grants.
 
 ## Deploying to another workspace
 
-The bundle has no fixed workspace host; the CLI profile chooses the workspace. A new workspace needs its
-own tables, grants and deployment state, so the first deployment runs in the order below. Deploy from a
-checkout of the release branch after `make setup`; the build in `frontend/dist` is what the app serves.
-
-Prerequisites: an existing Unity Catalog catalog you may create a schema in, a SQL warehouse, serverless
-Jobs, and AI Functions (`ai_parse_document`, `ai_extract`) available in the workspace's region.
+The bundle has no fixed workspace host; the CLI profile chooses the workspace. Prerequisites: an
+existing Unity Catalog catalog you may create a schema in, a SQL warehouse, serverless Jobs, and AI
+Functions (`ai_parse_document`, `ai_extract`) available in the workspace's region. Deploy from a
+checkout of the release branch after `make setup`.
 
 ```bash
-# Sign in once, then set this workspace's values
 databricks auth login --host https://YOUR-WORKSPACE --profile NEW_PROFILE
-PROFILE=NEW_PROFILE
-TARGET=dev        # app idp-mvp-dev, tables idp_dev_*; the prod target uses PREFIX=idp and production mode
-PREFIX=idp_dev
-CATALOG=YOUR_CATALOG
-SCHEMA=idp_mvp
-WAREHOUSE=YOUR_WAREHOUSE_ID
-
-make check                                          # tests, then rebuilds frontend/dist
 ls databricks_etl/resources/*.generated.yml 2>/dev/null && echo "remove per-workspace overlays first"
-cd databricks_etl
-VARS=(--var catalog=$CATALOG --var project_schema=$SCHEMA --var source_volume_name=idp_source
-      --var artifacts_volume_name=idp_artifacts --var warehouse_id=$WAREHOUSE
-      --var viewer_projection_enabled=true)
-sql() {  # run one statement on the warehouse and print its state
-  python3 -c 'import json,sys; print(json.dumps({"warehouse_id": sys.argv[1], "statement": sys.argv[2], "wait_timeout": "50s"}))' "$WAREHOUSE" "$1" |
-    databricks api post /api/2.0/sql/statements -p "$PROFILE" --json @/dev/stdin |
-    python3 -c 'import json,sys; s=json.load(sys.stdin)["status"]; print(s["state"], s.get("error", {}).get("message", ""))'
-}
+make deploy-first PROFILE=NEW_PROFILE BUNDLE_VARS="--var catalog=YOUR_CATALOG --var project_schema=idp_mvp \
+  --var source_volume_name=idp_source --var artifacts_volume_name=idp_artifacts \
+  --var warehouse_id=YOUR_WAREHOUSE_ID --var viewer_projection_enabled=true"
+```
 
-# 1. Creates the Jobs. On a first deployment the App step fails: its grants name tables that the
-#    bootstrap only creates in step 2.
-databricks bundle plan   -t $TARGET -p $PROFILE "${VARS[@]}"
-databricks bundle deploy -t $TARGET -p $PROFILE "${VARS[@]}"
-# 2. Schema, volumes, tables, views and the published extraction schemas
-databricks bundle run    -t $TARGET -p $PROFILE "${VARS[@]}" governed_data_bootstrap
-# 3. Viewer projection tables (databricks_etl/sql/migrate_viewer_projection.sql; not in the bootstrap)
-sql "CREATE TABLE IF NOT EXISTS $CATALOG.$SCHEMA.${PREFIX}_parsed_page_manifest (parse_run_id STRING NOT NULL, payload STRING NOT NULL) USING DELTA"
-sql "CREATE TABLE IF NOT EXISTS $CATALOG.$SCHEMA.${PREFIX}_parsed_page_elements (parse_run_id STRING NOT NULL, page_id INT NOT NULL, payload STRING NOT NULL) USING DELTA"
-# 4. Deploy again, which applies the App's table and volume grants, then start the App
-databricks bundle plan   -t $TARGET -p $PROFILE "${VARS[@]}"
-databricks bundle deploy -t $TARGET -p $PROFILE "${VARS[@]}"
-databricks bundle run    -t $TARGET -p $PROFILE "${VARS[@]}" idp_app
-# 5. The App reads projections outside its 20 bound resources, so grant them directly
-APP_SP=$(databricks apps get idp-mvp-$TARGET -p $PROFILE -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["service_principal_client_id"])')
-sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_manifest TO \`$APP_SP\`"
-sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_elements TO \`$APP_SP\`"
-# 6. Folder import, also outside the 20 bindings: the App lists the import volume and starts the
-#    import Job. The Job itself runs as the deploying identity, which owns the volumes and tables.
-sql "GRANT READ VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$APP_SP\`"
-# Dev-mode deploys prefix job names with "[dev <user>] ", so match the name suffix.
-IMPORT_JOB=$(databricks jobs list -p $PROFILE -o json | python3 -c 'import json,sys; print(next(j["job_id"] for j in json.load(sys.stdin) if j["settings"]["name"].endswith("idp-mvp-'$TARGET'-folder-importer")))')
-databricks jobs update-permissions $IMPORT_JOB -p $PROFILE --json "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE_RUN\"}]}"
-# 7. Who may drop folders in: users need to write into the import volume (and to see it).
+`deploy-first` deploys (the App step fails the first time: its bound grants name tables the
+bootstrap creates), runs the bootstrap, deploys again, runs the grants Job and starts the App. Later
+deployments are `make deploy` with the same `PROFILE` and `BUNDLE_VARS`; to stop passing them, add the
+workspace's values as a target in `databricks.yml` like `dev`. For prod use `TARGET=prod` (tables
+`idp_*`, production mode).
+
+One grant stays manual because it is an access decision: who may drop folders in for import. They
+need to write into the import volume (and to see it):
+
+```bash
+PROFILE=NEW_PROFILE; CATALOG=YOUR_CATALOG; SCHEMA=idp_mvp; WAREHOUSE=YOUR_WAREHOUSE_ID
 USERS_GROUP='account users'   # or the workspace's all-users group
-sql "GRANT USE CATALOG ON CATALOG $CATALOG TO \`$USERS_GROUP\`"
-sql "GRANT USE SCHEMA ON SCHEMA $CATALOG.$SCHEMA TO \`$USERS_GROUP\`"
-sql "GRANT READ VOLUME, WRITE VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$USERS_GROUP\`"
+for statement in "GRANT USE CATALOG ON CATALOG $CATALOG TO \`$USERS_GROUP\`" \
+  "GRANT USE SCHEMA ON SCHEMA $CATALOG.$SCHEMA TO \`$USERS_GROUP\`" \
+  "GRANT READ VOLUME, WRITE VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$USERS_GROUP\`"; do
+  databricks api post /api/2.0/sql/statements -p $PROFILE --json "$(python3 -c 'import json,sys; print(json.dumps({"warehouse_id": sys.argv[1], "statement": sys.argv[2], "wait_timeout": "50s"}))' "$WAREHOUSE" "$statement")"
+done
 ```
 
 Folder import in use: copy a folder of PDFs with `databricks fs cp -r ./invoices
@@ -118,9 +91,6 @@ once it is registered; failed files stay in the folder with their reason in the 
 unfinished files** starts another run; re-running is safe. Only the App and Jobs write `idp_source`.
 Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pending files there.
 
-Every later deployment to that workspace is step 4's plan, deploy and run. If the bootstrap is run again, deploy afterwards: replacing
-views drops the grants the App binding applied.
-
 ## Document chat: Knowledge Assistant and Supervisor
 
 The bootstrap creates five read-only UC functions (`<prefix>_chat_document_fields`,
@@ -128,11 +98,12 @@ The bootstrap creates five read-only UC functions (`<prefix>_chat_document_field
 chat views. `scripts/provision_chat.py` then creates or updates, by name, the Knowledge Assistant
 `<app>-<target>-documents-ka` (files source: the source volume's `incoming/` folder) and the
 Supervisor `<app>-<target>-chat-supervisor` (the KA plus the five functions as tools). It is
-idempotent, never deletes, and prints the KA id and both serving endpoint names, which Databricks
-generates. Agent Bricks APIs are Beta.
+idempotent, never deletes, and prints both serving endpoint names, which Databricks generates.
+Agent Bricks APIs are Beta.
 
 ```bash
-# After the bootstrap and deploy above. Read-only preview first.
+# After the first deployment above. Read-only preview first.
+PROFILE=idp-mvp; TARGET=dev; CATALOG=workspace; SCHEMA=idp_mvp
 cd scripts
 uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
   --target $TARGET --catalog $CATALOG --project-schema $SCHEMA --dry-run
@@ -147,39 +118,17 @@ Then turn the chat page on in the IDP App (**Ask documents** in the sidebar). Th
 Supervisor itself, keeps per-user history in `<prefix>_chat_messages` (created by the bootstrap's
 `migrate_chat_history` task) and shows citations and extracted values as plain text, with
 `<document_id>.pdf` rewritten to the original file name. No separate chat app or Lakebase is needed.
-The App is at the 20-binding cap, so these grants are direct (`*_ID` from the script output):
+Set the Supervisor's endpoint (and, for automatic KA Sync, the KA id) and deploy; the grants Job
+then gives the App everything chat needs:
 
 ```bash
-# The App queries the Supervisor, which runs the chat functions (and the KA, where present).
-# Agent permissions do not reach the serving endpoints: without CAN_QUERY on each endpoint (the
-# Supervisor's and the KA's) every question fails with PERMISSION_DENIED.
-databricks supervisor-agents update-permissions $SUPERVISOR_ID -p $PROFILE --json \
-  "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
-for ENDPOINT in $SUPERVISOR_ENDPOINT $KA_ENDPOINT; do   # omit $KA_ENDPOINT without a KA
-  EID=$(databricks serving-endpoints get $ENDPOINT -p $PROFILE -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-  databricks serving-endpoints update-permissions $EID -p $PROFILE --json \
-    "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
-done
-for f in document_fields find_documents invoices invoice_totals case_documents; do
-  sql "GRANT EXECUTE ON FUNCTION $CATALOG.$SCHEMA.${PREFIX}_chat_$f TO \`$APP_SP\`"
-done
-for v in documents extractions fields records; do
-  sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_chat_$v TO \`$APP_SP\`"
-done
-sql "GRANT SELECT, MODIFY ON TABLE $CATALOG.$SCHEMA.${PREFIX}_chat_messages TO \`$APP_SP\`"
-# Trace tagging: the App labels each answer's MLflow trace with the user and conversation.
-# $SUPERVISOR_EXPERIMENT_ID is "experiments.supervisor" in the provisioning output.
-databricks experiments update-permissions $SUPERVISOR_EXPERIMENT_ID -p $PROFILE --json \
-  "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_EDIT\"}]}"
-# Where a KA exists: CAN_QUERY for the App (the Supervisor calls it), CAN_MANAGE for automatic Sync.
-databricks knowledge-assistants update-permissions $KA_ID -p $PROFILE --json \
-  "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE\"}]}"
-# Deploy with the endpoint (and, where a KA exists, automatic Sync), then restart the App:
-#   --var chat_endpoint=<supervisor endpoint> [--var ka_sync_enabled=true --var ka_id=$KA_ID]
+# dev: edit chat_endpoint (and optionally ka_sync_enabled: "true", ka_id) under targets.dev in
+# databricks_etl/databricks.yml; another workspace: add them to BUNDLE_VARS
+make deploy
+make grants
 ```
 
-Re-running the bootstrap replaces the chat functions and views, which drops their grants: deploy and
-re-apply the grants above afterwards. Answers can take up to a minute when several tools run.
+Answers can take up to a minute when several tools run.
 
 **Finding the trace behind a user's conversation.** Every answer stores its MLflow trace id in the
 history row (never shown to users), and the trace is tagged `idp.user` and `idp.conversation_id`.

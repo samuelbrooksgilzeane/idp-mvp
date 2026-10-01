@@ -261,6 +261,26 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
+        - task_key: migrate_viewer_projection
+          depends_on:
+            - task_key: create_governed_objects
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_viewer_projection.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
+        # Replacing views drops their grants; restore the App's direct grants last.
+        - task_key: grant_app_access
+          depends_on:
+            - task_key: create_chat_functions
+            - task_key: migrate_chat_history
+            - task_key: migrate_work_batches
+            - task_key: migrate_viewer_projection
+          run_job_task:
+            job_id: ${resources.jobs.app_access_grants.id}
       environments:
         - environment_key: default
           spec:

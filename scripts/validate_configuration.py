@@ -166,6 +166,8 @@ def validate_data_bootstrap() -> None:
         "create_chat_functions",
         "migrate_chat_history",
         "migrate_work_batches",
+        "migrate_viewer_projection",
+        "grant_app_access",
     ]
     if (
         not isinstance(tasks, list)
@@ -175,7 +177,23 @@ def validate_data_bootstrap() -> None:
             "Governed data bootstrap must contain the reviewed creation, migration, "
             "and schema-registration tasks in order"
         )
-    upload_migration = tasks[-1]
+    by_key = {task["task_key"]: task for task in tasks}
+    projection = by_key["migrate_viewer_projection"]
+    if (
+        projection.get("sql_task", {}).get("file", {}).get("path")
+        != "../sql/migrate_viewer_projection.sql"
+        or projection.get("sql_task", {}).get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS
+    ):
+        raise ValueError("Viewer projection tables require the reviewed additive migration")
+    grants = by_key["grant_app_access"]
+    if grants.get("run_job_task", {}).get("job_id") != "${resources.jobs.app_access_grants.id}":
+        raise ValueError("The bootstrap must restore the App's direct grants last")
+    others = [task for task in tasks if task is not grants]
+    awaited = {d["task_key"] for task in others for d in task.get("depends_on", [])}
+    final = {task["task_key"] for task in others} - awaited
+    if {d["task_key"] for d in grants.get("depends_on", [])} != final:
+        raise ValueError("App grants must wait for every other bootstrap task")
+    upload_migration = by_key["migrate_work_batches"]
     if (
         upload_migration.get("sql_task", {}).get("file", {}).get("path")
         != "../sql/migrate_work_batches.sql"
