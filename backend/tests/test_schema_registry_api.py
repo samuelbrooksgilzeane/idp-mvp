@@ -388,3 +388,61 @@ def test_databricks_draft_save_uses_guarded_write_and_verified_read(manifest, st
     statement = sql.execute_sql.call_args.args[0]
     assert "WHEN MATCHED AND target.status = 'DRAFT' THEN UPDATE" in statement
     repository.get.assert_called_once_with(manifest.schema_id, manifest.schema_version)
+
+
+def test_deleting_a_schema_hides_every_version_and_blocks_extraction(
+    client: TestClient, tmp_path: Path
+) -> None:
+    from idp_app.services.documents import DocumentServiceError
+    from idp_app.services.extraction_inputs import published_schema
+
+    created = client.post(
+        "/api/schemas", json={"display_name": "Old Form", "root_mode": "SINGLE_RECORD"}
+    ).json()
+    schema_id = created["schema_id"]
+    assert client.post(f"/api/schemas/{schema_id}/publish?schema_version=1").status_code == 200
+    assert (
+        client.post(
+            f"/api/schemas/{schema_id}/clone?schema_version=1",
+            json={"new_display_name": "Old Form"},
+        ).status_code
+        == 201
+    )
+
+    assert client.delete(f"/api/schemas/{schema_id}").status_code == 204
+
+    listed = client.get("/api/schemas?status=ALL").json()
+    assert schema_id not in {item["schema_id"] for item in listed}
+    # Results still load the version they ran with; it reports DELETED.
+    kept = client.get(f"/api/schemas/{schema_id}/versions/1")
+    assert kept.status_code == 200 and kept.json()["status"] == "DELETED"
+    repository = SQLiteSchemaRepository(tmp_path / "local" / "registry.sqlite3")
+    with pytest.raises(DocumentServiceError) as rejected:
+        published_schema(repository, schema_id, 1)
+    assert rejected.value.code == "SCHEMA_NOT_PRODUCTION"
+    # Deleting again, or an unknown or unsafe id, is a 404/422, and the id is never reused.
+    assert client.delete(f"/api/schemas/{schema_id}").status_code == 404
+    assert client.delete("/api/schemas/no_such_schema").status_code == 404
+    assert client.delete("/api/schemas/Bad-Id").status_code == 422
+    recreated = client.post(
+        "/api/schemas", json={"display_name": "Old Form", "root_mode": "SINGLE_RECORD"}
+    ).json()
+    assert recreated["schema_id"] != schema_id
+
+
+def test_databricks_delete_marks_versions_and_list_hides_them() -> None:
+    from unittest.mock import Mock
+
+    from idp_app.services.schema_registry import DatabricksSchemaRepository
+
+    sql = Mock()
+    sql.execute_sql.return_value = []
+    repository = DatabricksSchemaRepository(sql, "catalog", "project", "idp")
+
+    repository.delete("old_form")
+    statement, values = sql.execute_sql.call_args.args
+    assert statement.startswith("UPDATE catalog.project.idp_schema_registry SET status = 'DELETED'")
+    assert values == {"schema_id": "old_form"}
+
+    repository.list_all()
+    assert "WHERE status <> 'DELETED'" in sql.execute_sql.call_args.args[0]

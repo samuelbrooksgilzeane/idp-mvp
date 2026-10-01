@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query, Response
 
 from idp_app.api.dependencies import get_authenticated_user, get_schema_service
 from idp_app.api.models import (
@@ -140,6 +140,21 @@ async def publish_schema(
 ) -> SchemaDetailResponse:
     schema = await service.publish_schema(schema_id, schema_version)
     return _detail(schema)
+
+
+@schemas_router.delete(
+    "/{schema_id}",
+    status_code=204,
+    responses={404: {"model": ErrorResponse}},
+)
+async def delete_schema(
+    schema_id: Annotated[str, Path(pattern=r"^[a-z][a-z0-9_]{0,99}$")],
+    service: Annotated[SchemaService, Depends(get_schema_service)],
+) -> Response:
+    """Delete every version of a schema. New extractions can no longer use it; existing results
+    keep showing the version they ran with."""
+    await service.delete_schema(schema_id)
+    return Response(status_code=204)
 
 
 @schemas_router.post(

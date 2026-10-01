@@ -193,6 +193,19 @@ class SchemaService:
         except SchemaNotDraftError as error:
             raise DocumentServiceError("SCHEMA_NOT_DRAFT", str(error), 409) from error
 
+    async def delete_schema(self, schema_id: str) -> None:
+        """Delete every version of a schema (soft: see SchemaRepository.delete)."""
+        versions = [
+            schema
+            for schema in await run_in_threadpool(self._repository.list_all, None)
+            if schema.schema_id == schema_id
+        ]
+        if not versions:
+            raise DocumentServiceError(
+                "SCHEMA_NOT_FOUND", "The requested extraction schema was not found.", 404
+            )
+        await run_in_threadpool(self._repository.delete, schema_id)
+
     async def clone_schema(
         self,
         source_schema_id: str,

@@ -945,3 +945,5 @@ tbody tr:hover td { background: var(--hover); }
 .markdown-table td { min-height: 0; padding: 7px 14px 7px 0; white-space: normal; }
 .markdown-table td:first-child { min-width: 0; }
 @media (max-width: 860px) { .chat-layout { grid-template-columns: 1fr; } .chat-history { position: static; } .chat-history ul { max-height: 160px; } }
+.schema-form-actions .danger-action { margin-left: auto; border-color: var(--red-line); color: var(--red); }
+.schema-form-actions .danger-action:hover:not(:disabled) { background: var(--red-soft); }

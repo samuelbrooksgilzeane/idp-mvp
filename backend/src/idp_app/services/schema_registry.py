@@ -74,6 +74,13 @@ class SchemaRepository(Protocol):
         """The highest schema_version registered for this schema_id, or 0 if none exists."""
         ...
 
+    def delete(self, schema_id: str) -> None:
+        """Mark every version DELETED: hidden from lists and pickers and no longer extractable.
+
+        Rows are kept so extraction results can still load the version they ran with, and so a
+        deleted schema_id is never reused (latest_version still counts its versions)."""
+        ...
+
 
 class SQLiteSchemaRepository:
     def __init__(self, database_path: Path) -> None:
@@ -168,10 +175,10 @@ class SQLiteSchemaRepository:
         return _sqlite_row_to_record(row) if row else None
 
     def list_all(self, use_case: str | None = None) -> builtins.list[SchemaRecord]:
-        statement = "SELECT * FROM schema_registry"
+        statement = "SELECT * FROM schema_registry WHERE status <> 'DELETED'"
         parameters: tuple[object, ...] = ()
         if use_case is not None:
-            statement += " WHERE use_case = ?"
+            statement += " AND use_case = ?"
             parameters = (use_case,)
         statement += " ORDER BY schema_id, schema_version DESC"
         with self._connect() as connection:
@@ -185,6 +192,14 @@ class SQLiteSchemaRepository:
                 (schema_id,),
             ).fetchone()
         return int(row[0]) if row and row[0] is not None else 0
+
+    def delete(self, schema_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE schema_registry SET status = 'DELETED' "
+                "WHERE schema_id = ? AND status <> 'DELETED'",
+                (schema_id,),
+            )
 
     def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
         existing = self.get(manifest.schema_id, manifest.schema_version)
@@ -296,10 +311,12 @@ class DatabricksSchemaRepository:
         return _databricks_row_to_record(rows[0]) if rows else None
 
     def list_all(self, use_case: str | None = None) -> builtins.list[SchemaRecord]:
-        statement = f"SELECT {', '.join(SCHEMA_COLUMNS)} FROM {self._table}"
+        statement = (
+            f"SELECT {', '.join(SCHEMA_COLUMNS)} FROM {self._table} WHERE status <> 'DELETED'"
+        )
         values: dict[str, object] = {}
         if use_case is not None:
-            statement += " WHERE use_case = :use_case"
+            statement += " AND use_case = :use_case"
             values["use_case"] = use_case
         statement += " ORDER BY schema_id, schema_version DESC"
         return [
@@ -314,6 +331,13 @@ class DatabricksSchemaRepository:
         )
         value = rows[0][0] if rows else None
         return int(value) if value is not None else 0
+
+    def delete(self, schema_id: str) -> None:
+        self._sql_client.execute_sql(
+            f"UPDATE {self._table} SET status = 'DELETED' "
+            "WHERE schema_id = :schema_id AND status <> 'DELETED'",
+            {"schema_id": schema_id},
+        )
 
     def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
         # The MERGE guards draft-only writes atomically; a preliminary SELECT adds

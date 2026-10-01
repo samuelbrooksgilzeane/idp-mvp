@@ -195,7 +195,7 @@ class SchemaManifest(BaseModel):
     # PRODUCTION is the historical status for a manifest registered by the governed bootstrap.
     # DRAFT / PUBLISHED / RETIRED are the user-editable lifecycle states from the schema editor;
     # PUBLISHED is otherwise equivalent to PRODUCTION (immutable, extractable).
-    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED"]
+    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED", "DELETED"]
     # Optional human-readable summary shown in the schema list. Excluded from the hash when
     # absent so every already-registered governed manifest keeps an identical schema_hash.
     description: str | None = Field(default=None, max_length=2000)

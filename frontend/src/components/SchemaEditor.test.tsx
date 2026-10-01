@@ -181,4 +181,52 @@ describe("SchemaEditor", () => {
     await waitFor(() => expect(cloned).toBe(true));
     expect(await screen.findByText(/Draft version 5 created for editing/)).toBeInTheDocument();
   });
+
+  it("deletes every version of a schema after confirmation", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      calls.push(`${init?.method ?? "GET"} ${url}`);
+      if (url.includes("/api/schemas?status=ALL")) {
+        return { ok: true, json: async () => [publishedSummary, { ...publishedSummary, schema_version: 3 }, draftSummary] };
+      }
+      if (url.includes("/versions/")) return { ok: true, json: async () => publishedDetail };
+      return { ok: true, status: 204, json: async () => null };
+    }));
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal("confirm", confirm);
+    render(<SchemaEditor />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /v4/ }));
+    const remove = await screen.findByRole("button", { name: /Delete schema/ });
+    fireEvent.click(remove);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Delete "Invoice v4" and all of its versions?'));
+    expect(calls.some((call) => call.startsWith("DELETE"))).toBe(false);
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(remove);
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("Invoice v4 deleted"));
+    expect(calls).toContain("DELETE /api/schemas/invoice");
+    expect(screen.queryByRole("button", { name: /v3/ })).toBeNull();
+    expect(screen.getByText("Custom Form")).toBeTruthy();
+  });
+
+  it("keeps the schema and reports the error when deleting fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      if (url.includes("/api/schemas?status=ALL")) return { ok: true, json: async () => [draftSummary] };
+      if (url.includes("/versions/")) return { ok: true, json: async () => draftDetail };
+      if (init?.method === "DELETE") {
+        return { ok: false, json: async () => ({ error: { message: "The requested extraction schema was not found." } }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    }));
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    render(<SchemaEditor />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /v1/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Delete schema/ }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("was not found"));
+    expect(screen.getByRole("button", { name: /v1/ })).toBeTruthy();
+  });
 });

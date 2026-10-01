@@ -27,7 +27,7 @@ export type SchemaSummary = {
   description: string | null;
   use_case: string;
   schema_hash: string;
-  status: "PRODUCTION" | "DRAFT" | "PUBLISHED" | "RETIRED";
+  status: "PRODUCTION" | "DRAFT" | "PUBLISHED" | "RETIRED" | "DELETED";
   root_mode: "SINGLE_RECORD" | "REPEATED_RECORDS";
   is_editable: boolean;
   created_by: string;
@@ -281,6 +281,11 @@ export function SchemaEditor() {
                 if (saved) retainSavedSchema(saved);
               }}
               onSelect={(schemaId, version) => setSelectedKey(`${schemaId}:${version}`)}
+              onDeleted={(schemaId, name) => {
+                setSchemas((current) => current.filter((item) => item.schema_id !== schemaId));
+                setSelectedKey(null);
+                setNotice({ kind: "success", message: `${name} deleted. Existing extraction results are kept.` });
+              }}
             />
           ) : null}
           {!creating && !selected ? (
@@ -383,10 +388,12 @@ function SchemaDetailPanel({
   summary,
   onChanged,
   onSelect,
+  onDeleted,
 }: {
   summary: SchemaSummary;
   onChanged: (notice: { kind: "success" | "error"; message: string }, saved?: SchemaDetail) => void;
   onSelect: (schemaId: string, version: number) => void;
+  onDeleted: (schemaId: string, displayName: string) => void;
 }) {
   const [detail, setDetail] = useState<SchemaDetail | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
@@ -527,6 +534,30 @@ function SchemaDetailPanel({
     }
   }
 
+  async function deleteSchema() {
+    const prompt = `Delete "${summary.display_name}" and all of its versions? It can no longer be used `
+      + "for new extractions. Existing extraction results are kept.";
+    if (!window.confirm(prompt)) return;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/schemas/${encodeURIComponent(summary.schema_id)}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(payload?.error?.message ?? "Could not delete the schema.");
+      }
+      onDeleted(summary.schema_id, summary.display_name);
+    } catch (error: unknown) {
+      onChanged({ kind: "error", message: error instanceof Error ? error.message : "Could not delete the schema." });
+      setBusy(false);
+    }
+  }
+
+  const deleteButton = (
+    <button type="button" className="danger-action" disabled={busy} onClick={() => void deleteSchema()}>
+      <Trash2 size={15} aria-hidden="true" /> Delete schema
+    </button>
+  );
+
   if (state === "loading") return <p>Loading schema…</p>;
   if (state === "error" || !detail) return <p role="alert">Schema could not be loaded.</p>;
 
@@ -586,6 +617,7 @@ function SchemaDetailPanel({
             <button type="button" disabled={busy} onClick={() => void validateOnServer()}>Test schema</button>
             <button type="button" disabled={busy} onClick={() => void saveDraft()}>Save draft</button>
             <button type="button" className="primary-action" disabled={busy} onClick={() => void publish()}>Publish</button>
+            {deleteButton}
           </div>
         </>
       ) : (
@@ -596,6 +628,7 @@ function SchemaDetailPanel({
             <button type="button" disabled={busy} onClick={() => void clone()}>
               <Copy size={15} aria-hidden="true" /> Clone to a new draft
             </button>
+            {deleteButton}
           </div>
         </>
       )}
@@ -738,5 +771,5 @@ function ReadOnlyNode({ name, node }: { name: string; node: ApiSchemaField }) {
 }
 
 function schemaStatusLabel(status: string): string {
-  return status === "PRODUCTION" || status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : status === "RETIRED" ? "Retired" : status;
+  return status === "PRODUCTION" || status === "PUBLISHED" ? "Published" : status === "DRAFT" ? "Draft" : status === "RETIRED" ? "Retired" : status === "DELETED" ? "Deleted" : status;
 }

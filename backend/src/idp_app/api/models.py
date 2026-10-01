@@ -128,7 +128,7 @@ class SchemaSummaryResponse(BaseModel):
     description: str | None = None
     use_case: str
     schema_hash: str
-    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED"]
+    status: Literal["PRODUCTION", "DRAFT", "PUBLISHED", "RETIRED", "DELETED"]
     root_mode: Literal["SINGLE_RECORD", "REPEATED_RECORDS"]
     is_editable: bool
     created_by: str
