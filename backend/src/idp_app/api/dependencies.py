@@ -113,6 +113,7 @@ def build_document_service(settings: Settings) -> DocumentService:
         catalog,
         project_schema,
         table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return DocumentService(
         databricks_storage,
@@ -177,6 +178,7 @@ def build_parsing_service(settings: Settings) -> ParsingService:
         catalog,
         project_schema,
         table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     databricks_parse_runs = DatabricksParseRunRepository(
         databricks_documents,
@@ -239,6 +241,7 @@ def build_viewer_service(settings: Settings) -> ViewerService:
         catalog,
         project_schema,
         table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return ViewerService(
         documents,
@@ -296,6 +299,7 @@ def build_schema_service(settings: Settings) -> SchemaService:
         catalog,
         project_schema,
         table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return SchemaService(
         DatabricksSchemaRepository(
@@ -346,7 +350,8 @@ def build_extraction_service(settings: Settings) -> ExtractionService:
             503,
         ) from error
     databricks_documents = DatabricksDocumentRegistry(
-        client, warehouse_id, catalog, project_schema, table_prefix
+        client, warehouse_id, catalog, project_schema, table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     databricks_parse_runs = DatabricksParseRunRepository(
         databricks_documents, catalog, project_schema, table_prefix
@@ -402,7 +407,8 @@ def build_extraction_results_service(settings: Settings) -> ExtractionResultsSer
             503,
         ) from error
     documents = DatabricksDocumentRegistry(
-        client, warehouse_id, catalog, project_schema, table_prefix
+        client, warehouse_id, catalog, project_schema, table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return ExtractionResultsService(
         DatabricksExtractionRunRepository(documents, catalog, project_schema, table_prefix),
@@ -446,7 +452,8 @@ def build_export_service(settings: Settings) -> ExportService:
             503,
         ) from error
     sql_client = DatabricksDocumentRegistry(
-        client, warehouse_id, catalog, project_schema, table_prefix
+        client, warehouse_id, catalog, project_schema, table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return ExportService(
         DatabricksExportSourceRepository(sql_client, catalog, project_schema, table_prefix)
@@ -512,7 +519,8 @@ def build_validation_service(settings: Settings) -> ValidationService:
             503,
         ) from error
     documents = DatabricksDocumentRegistry(
-        client, warehouse_id, catalog, project_schema, table_prefix
+        client, warehouse_id, catalog, project_schema, table_prefix,
+        statement_deadline_seconds=settings.sql_statement_deadline_seconds,
     )
     return ValidationService(
         documents,
@@ -554,6 +562,7 @@ def build_upload_batch_service(
             catalog,
             schema,
             prefix,
+            statement_deadline_seconds=settings.sql_statement_deadline_seconds,
         )
         repository = DatabricksBatchRepository(sql, f"{catalog}.{schema}.{prefix}")
     return UploadBatchService(

@@ -37,10 +37,12 @@ def result(columns: list[str], rows: list[list[Any]]) -> SimpleNamespace:
         statement_id="s",
         status=SimpleNamespace(state=sql.StatementState.SUCCEEDED, error=None),
         manifest=SimpleNamespace(
-            schema=SimpleNamespace(columns=[SimpleNamespace(name=name) for name in columns])
+            schema=SimpleNamespace(columns=[SimpleNamespace(name=name) for name in columns]),
+            truncated=False,
         ),
         result=SimpleNamespace(
-            data_array=[[None if v is None else str(v) for v in row] for row in rows] or None
+            data_array=[[None if v is None else str(v) for v in row] for row in rows] or None,
+            next_chunk_index=None,
         ),
     )
 

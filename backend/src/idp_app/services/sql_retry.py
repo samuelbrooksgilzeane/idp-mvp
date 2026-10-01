@@ -56,8 +56,16 @@ TRANSIENT_MESSAGES = (
 ATTEMPTS = 3
 
 
+class SqlOutcomeUnknownError(RuntimeError):
+    """A statement passed its deadline and was cancelled. A write may still have committed, so
+    callers must read back instead of assuming it failed. Never retried: each attempt would wait
+    out the whole deadline again."""
+
+
 def retry_reason(error: BaseException) -> str | None:
     """A short code when ``error`` is worth one more try, else None."""
+    if isinstance(error, SqlOutcomeUnknownError):
+        return None
     text = str(error)
     conflict = next((code for code in DELTA_CONFLICTS if code in text), None)
     if conflict:

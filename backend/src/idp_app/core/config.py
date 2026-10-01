@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     # The claim starts once the whole body has arrived, so it only covers storing and registering.
     upload_claim_seconds: PositiveInt = 300
     upload_parallel_transfers: int = Field(default=3, ge=1, le=8)
+    # App requests stop waiting for a warehouse statement after this; Jobs wait indefinitely.
+    sql_statement_deadline_seconds: int = Field(default=120, ge=30, le=1800)
     # Folder import: users copy PDFs into this volume; a Job registers them. Off in databricks
     # mode until both the volume and the import Job are configured. Mock mode uses a local folder.
     import_volume_name: str | None = None

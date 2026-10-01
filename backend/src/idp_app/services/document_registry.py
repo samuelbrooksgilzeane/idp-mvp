@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import logging
 import sqlite3
 import time
 from datetime import UTC, datetime
@@ -15,7 +16,11 @@ from databricks.sdk.service import sql
 from idp_app.core.performance import record_sql_statement
 from idp_app.services.bulk_ids import id_chunks, id_parameters
 from idp_app.services.document_models import DocumentRecord
-from idp_app.services.sql_retry import run_with_retries
+from idp_app.services.sql_retry import SqlOutcomeUnknownError, run_with_retries
+
+logger = logging.getLogger(__name__)
+# Status polls start fast for short statements and back off to this interval.
+MAX_POLL_SECONDS = 2.0
 
 DOCUMENT_COLUMNS = (
     "document_id",
@@ -349,9 +354,13 @@ class DatabricksDocumentRegistry:
         catalog: str,
         project_schema: str,
         table_prefix: str,
+        statement_deadline_seconds: float | None = None,
     ) -> None:
         self._client = client
         self._warehouse_id = warehouse_id
+        # None waits for the warehouse indefinitely (Jobs); the app passes a bound so a stalled
+        # statement cannot hold a request worker.
+        self._deadline_seconds = statement_deadline_seconds
         self._catalog = catalog
         self._project_schema = project_schema
         self._table = f"{catalog}.{project_schema}.{table_prefix}_documents"
@@ -581,9 +590,23 @@ class DatabricksDocumentRegistry:
         self, statement: str, values: dict[str, object] | None = None
     ) -> list[list[str]]:
         response = self._execute(statement, values)
-        if not response.result or not response.result.data_array:
+        if response.manifest and response.manifest.truncated:
+            # Partial rows would look like missing documents or runs; fail instead.
+            raise RuntimeError("Databricks SQL result was truncated by the warehouse")
+        result = response.result
+        if not result:
             return []
-        return cast(list[list[str]], response.result.data_array)
+        rows = list(result.data_array or [])
+        next_chunk = result.next_chunk_index
+        while next_chunk is not None:
+            if not response.statement_id:
+                raise RuntimeError("Databricks SQL response did not include a statement identifier")
+            chunk = self._client.statement_execution.get_statement_result_chunk_n(
+                response.statement_id, next_chunk
+            )
+            rows.extend(chunk.data_array or [])
+            next_chunk = chunk.next_chunk_index
+        return cast(list[list[str]], rows)
 
     def execute_dml(
         self, statement: str, values: dict[str, object] | None = None
@@ -625,6 +648,10 @@ class DatabricksDocumentRegistry:
                 on_wait_timeout=sql.ExecuteStatementRequestOnWaitTimeout.CONTINUE,
             )
 
+            deadline = (
+                None if self._deadline_seconds is None else started_at + self._deadline_seconds
+            )
+            delay = 0.25
             while response.status and response.status.state in {
                 sql.StatementState.PENDING,
                 sql.StatementState.RUNNING,
@@ -633,7 +660,18 @@ class DatabricksDocumentRegistry:
                     raise RuntimeError(
                         "Databricks SQL response did not include a statement identifier"
                     )
-                time.sleep(0.25)
+                if deadline is not None:
+                    remaining = deadline - time.perf_counter()
+                    if remaining <= 0:
+                        self._cancel(response.statement_id)
+                        raise SqlOutcomeUnknownError(
+                            f"Databricks SQL statement {response.statement_id} passed its "
+                            f"{self._deadline_seconds:g}s deadline and was cancelled; "
+                            "if it was a write, it may still have committed"
+                        )
+                    delay = min(delay, remaining)
+                time.sleep(delay)
+                delay = min(delay * 2, MAX_POLL_SECONDS)
                 response = self._client.statement_execution.get_statement(response.statement_id)
 
             if not response.status or response.status.state is not sql.StatementState.SUCCEEDED:
@@ -646,6 +684,15 @@ class DatabricksDocumentRegistry:
             return response
         finally:
             record_sql_statement((time.perf_counter() - started_at) * 1000)
+
+    def _cancel(self, statement_id: str) -> None:
+        # Best effort: the caller reports an unknown outcome whether or not this lands.
+        try:
+            self._client.statement_execution.cancel_execution(statement_id)
+        except Exception as error:
+            logger.warning(
+                "Cancelling a Databricks SQL statement failed: %s", type(error).__name__
+            )
 
 
 def _document_values(document: DocumentRecord) -> tuple[object, ...]:
