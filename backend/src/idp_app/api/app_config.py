@@ -17,6 +17,5 @@ def app_config(
     settings = request.app.state.settings
     return {
         "project_name": settings.app_name,
-        "chat_app_url": settings.chat_app_url,
         "chat_enabled": settings.chat_enabled,
     }

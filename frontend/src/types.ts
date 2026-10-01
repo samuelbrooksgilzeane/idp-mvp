@@ -152,7 +152,6 @@ export type ExtractionReview = {
 
 export type AppConfig = {
   project_name: string;
-  chat_app_url: string | null;
   chat_enabled?: boolean;
 };
 

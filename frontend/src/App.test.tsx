@@ -62,38 +62,13 @@ describe("App", () => {
     );
   });
 
-  it("links to the chat app only when one is configured", async () => {
-    const chatUrl = "https://idp-chat.example.databricksapps.com";
-    const respond = (url: string | null) => vi.fn(async (input: RequestInfo | URL) => ({
-      ok: true,
-      json: async () => {
-        const path = input.toString();
-        if (path.endsWith("/health")) return health;
-        if (path.endsWith("/app-config")) return { project_name: "IDP MVP", chat_app_url: url };
-        return path.includes("/documents/page?") ? { items: [], next_cursor: null } : [];
-      },
-    }));
-    vi.stubGlobal("fetch", respond(null));
-    renderApp();
-    await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
-    expect(screen.queryByRole("link", { name: /Ask documents/ })).not.toBeInTheDocument();
-    cleanup();
-
-    vi.stubGlobal("fetch", respond(chatUrl));
-    renderApp();
-    const link = await screen.findByRole("link", { name: /Ask documents/ });
-    expect(link).toHaveAttribute("href", chatUrl);
-    expect(link).toHaveAttribute("target", "_blank");
-    expect(link).toHaveAttribute("rel", "noopener noreferrer");
-  });
-
   it("links to the built-in chat page when chat is enabled", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => ({
       ok: true,
       json: async () => {
         const path = input.toString();
         if (path.endsWith("/health")) return health;
-        if (path.endsWith("/app-config")) return { project_name: "IDP MVP", chat_app_url: null, chat_enabled: true };
+        if (path.endsWith("/app-config")) return { project_name: "IDP MVP", chat_enabled: true };
         return path.includes("/documents/page?") ? { items: [], next_cursor: null } : [];
       },
     })));

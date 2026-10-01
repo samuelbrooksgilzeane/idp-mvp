@@ -22,9 +22,8 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
   warehouses and schedules; it is not a shutdown mechanism for all project compute.
 - The source volume contains uploaded PDFs. App deletion removes the PDF then marks its registry row
   deleted; it does not purge retained results or generated artifacts. Direct SQL deletion is different.
-- Document chat is a separate app (see [the implementation plan](planning/IMPLEMENTATION_PLAN.md)).
-  Set the bundle variable `chat_app_url` to its HTTPS URL to show "Ask documents" in the sidebar;
-  blank hides the link. The bootstrap creates read-only `<prefix>_chat_*` views for its SQL functions.
+- Document chat is the app's "Ask documents" page, shown when the bundle variable `chat_endpoint`
+  is set. The bootstrap creates read-only `<prefix>_chat_*` views for its SQL functions.
 
 ## Deploying the existing dev target
 

@@ -2,7 +2,6 @@ import re
 from enum import Enum
 from pathlib import Path
 from typing import Any, Self
-from urllib.parse import urlsplit
 
 from pydantic import Field, PositiveInt, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,7 +21,6 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    chat_app_url: str | None = None
     mode: IdpMode = IdpMode.MOCK
     catalog: str | None = None
     project_schema: str | None = None
@@ -105,25 +103,6 @@ class Settings(BaseSettings):
     def blank_is_unset(cls, value: Any) -> Any:
         # The bundle passes " " until provisioned (Apps rejects empty environment values).
         return value.strip() or None if isinstance(value, str) else value
-
-    @field_validator("chat_app_url", mode="before")
-    @classmethod
-    def validate_chat_app_url(cls, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value
-        value = value.strip()
-        if not value:
-            return None
-        url = urlsplit(value)
-        if (
-            url.scheme != "https"
-            or not url.hostname
-            or url.username
-            or url.password
-            or any(c.isspace() for c in value)
-        ):
-            raise ValueError("Chat app URL must be a plain HTTPS URL")
-        return value
 
     @model_validator(mode="after")
     def require_databricks_configuration(self) -> Self:

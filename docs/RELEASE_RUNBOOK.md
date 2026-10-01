@@ -17,7 +17,7 @@ Before testing, record the workspace, app URL/deployment ID, release snapshot, t
 catalog/schema/prefix, resource IDs and authenticated identity. Confirm health, required
 migrations/grants and actual deployed settings. Authenticated `/api/upload-batches/limits`
 reports upload limits and automatic preparation/bulk extraction/export flags;
-`/api/app-config` reports the document chat link (`chat_app_url`). Viewer projections and recovery schedule
+`/api/app-config` reports whether document chat is enabled (`chat_enabled`). Viewer projections and recovery schedule
 state also require deployment/resource inspection; do not infer them from a visible page.
 
 - `IDP_AUTO_PREPARE_ENABLED` permits upload-triggered background preparation; uploads may consume
@@ -119,7 +119,7 @@ upload/inference optional and user-operated so repeated demos do not multiply co
 
 ## Document chat handoff
 
-Document chat is a separate app linked from the sidebar ("Ask documents", set by `chat_app_url`).
+Document chat is the app's "Ask documents" page, enabled by the `chat_endpoint` bundle variable.
 Its sources and rollout are tracked in [the implementation plan](planning/IMPLEMENTATION_PLAN.md).
 App selections do not filter chat questions. Verify scope and intended colleague grants before
 connecting a document source, and test the link with the ordinary colleague account.

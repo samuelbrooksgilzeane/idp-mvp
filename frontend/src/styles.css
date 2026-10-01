@@ -66,7 +66,6 @@ a { color: var(--accent); }
 .workflow-steps { margin: 0; padding: 0; display: grid; gap: 2px; list-style: none; }
 .workflow-steps a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted); font-weight: 500; text-decoration: none; }
 .workflow-steps a svg { flex: none; }
-.workflow-steps a .external-mark { margin-left: auto; opacity: 0.7; }
 .workflow-steps a:hover { background: var(--hover); color: var(--text-2); }
 .workflow-steps a.active { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--border); color: var(--text); }
 .workflow-steps a.active svg { color: var(--accent); }

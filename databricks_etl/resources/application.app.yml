@@ -138,8 +138,6 @@ resources:
         env:
           - name: IDP_UPLOAD_PARALLEL_TRANSFERS
             value: ${var.upload_parallel_transfers}
-          - name: IDP_CHAT_APP_URL
-            value: ${var.chat_app_url}
           - name: IDP_VIEWER_PROJECTION_ENABLED
             value: ${var.viewer_projection_enabled}
           - name: IDP_BULK_EXPORT_ENABLED

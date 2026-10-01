@@ -7,7 +7,6 @@ from idp_app.core.config import IdpMode, Settings
 
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
-    "chat_app_url",
     "ka_sync_enabled",
     "ka_id",
     "chat_endpoint",
@@ -595,13 +594,8 @@ def validate_application_resource() -> None:
 
 
 def validate_chat_configuration() -> None:
-    bundle = load_yaml(ROOT / "databricks_etl/databricks.yml")
-    if bundle["variables"]["chat_app_url"]["default"].strip():
-        raise ValueError("The chat app link must default to blank until the chat app exists")
     resource = load_yaml(ROOT / "databricks_etl/resources/application.app.yml")
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
-    if env.get("IDP_CHAT_APP_URL") != "${var.chat_app_url}":
-        raise ValueError("IDP_CHAT_APP_URL must use the chat_app_url bundle variable")
     if env.get("IDP_CHAT_ENDPOINT") != "${var.chat_endpoint}":
         raise ValueError("IDP_CHAT_ENDPOINT must use the chat_endpoint bundle variable")
     bootstrap = load_yaml(ROOT / "databricks_etl/resources/bootstrap.job.yml")

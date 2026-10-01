@@ -1,4 +1,4 @@
-import { Braces, ExternalLink, FileText, MessageSquare, Table2 } from "lucide-react";
+import { Braces, FileText, MessageSquare, Table2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const NAVIGATION = [
@@ -8,12 +8,12 @@ const NAVIGATION = [
 ];
 
 type WorkflowHeaderProps = {
-  appName: string; runtimeMode?: string; apiStatus?: string; chatAppUrl?: string | null;
+  appName: string; runtimeMode?: string; apiStatus?: string;
   chatEnabled?: boolean;
 };
 
 /** Sidebar navigation; the runtime footer only reports live connection state. */
-export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl, chatEnabled }: WorkflowHeaderProps) {
+export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatEnabled }: WorkflowHeaderProps) {
   return (
     <aside className="app-sidebar">
       <div className="brand-lockup">
@@ -34,14 +34,6 @@ export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl, ch
               <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : undefined)}>
                 <MessageSquare size={16} aria-hidden="true" />Ask documents
               </NavLink>
-            </li>
-          ) : chatAppUrl ? (
-            <li>
-              <a href={chatAppUrl} target="_blank" rel="noopener noreferrer"
-                aria-label="Ask documents (opens in a new tab)">
-                <MessageSquare size={16} aria-hidden="true" />Ask documents
-                <ExternalLink size={12} aria-hidden="true" className="external-mark" />
-              </a>
             </li>
           ) : null}
         </ul>

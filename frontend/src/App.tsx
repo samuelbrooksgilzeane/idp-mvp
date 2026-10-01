@@ -67,7 +67,6 @@ export function App() {
   const [scopeSettled, setScopeSettled] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
-  const [chatAppUrl, setChatAppUrl] = useState<string | null>(null);
   const [chatEnabled, setChatEnabled] = useState(false);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
@@ -151,10 +150,7 @@ export function App() {
         if (!response.ok) throw new Error("Configuration request failed");
         return response.json() as Promise<AppConfig>;
       })
-      .then((config) => {
-        setChatAppUrl(config.chat_app_url ?? null);
-        setChatEnabled(Boolean(config.chat_enabled));
-      })
+      .then((config) => setChatEnabled(Boolean(config.chat_enabled)))
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
@@ -178,7 +174,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatAppUrl={chatAppUrl} chatEnabled={chatEnabled} />
+      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatEnabled={chatEnabled} />
       <div className="app-main">
       <header className="top-bar" aria-label="Location">
         {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1

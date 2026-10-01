@@ -14,11 +14,6 @@ variables:
   upload_parallel_transfers:
     description: Browser upload transfers in flight per batch (1-8)
     default: 3
-  chat_app_url:
-    description: HTTPS URL of the document chat app; the "Ask documents" link is hidden when blank.
-    # Databricks Apps rejects an environment entry whose substituted value is empty.
-    # Settings strips this placeholder to None until the chat app is deployed.
-    default: " "
   chat_endpoint:
     description: Chat Supervisor serving endpoint from scripts/provision_chat.py; blank hides the chat page
     default: " "
