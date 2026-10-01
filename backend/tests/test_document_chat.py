@@ -206,3 +206,53 @@ def test_endpoint_client_requests_the_trace_and_tags_it() -> None:
     client.tag_trace(TRACE, {"idp.user": "ann@example.com"})
     assert api.do.call_args.args == ("PATCH", f"/api/2.0/mlflow/traces/{TRACE}/tags")
     assert api.do.call_args.kwargs == {"body": {"key": "idp.user", "value": "ann@example.com"}}
+
+
+def test_concurrent_turns_on_one_conversation_are_both_kept(tmp_path: Path) -> None:
+    chat, client, _ = service(tmp_path)
+    conversation_id = chat.ask("ann@example.com", None, "First")["conversation_id"]
+    ask = client.ask
+
+    def second_tab_answers_first(messages: list[dict[str, str]]) -> dict[str, Any]:
+        client.ask = ask  # the second tab's own call answers normally
+        chat.ask("ann@example.com", conversation_id, "Second tab")
+        return ask(messages)
+
+    client.ask = second_tab_answers_first  # type: ignore[method-assign]
+    slow = chat.ask("ann@example.com", conversation_id, "First tab")
+
+    assert [m["seq"] for m in slow["messages"]] == [4, 5]
+    assert all("turn_id" not in m for m in slow["messages"])
+    stored = chat.conversation("ann@example.com", conversation_id)
+    assert [m["text"] for m in stored if m["role"] == "user"] == [
+        "First",
+        "Second tab",
+        "First tab",
+    ]
+    assert [m["seq"] for m in stored] == [0, 1, 2, 3, 4, 5]
+
+
+class LostAnswerRepository(SQLiteChatRepository):
+    """The write commits but its row count is lost, as after a retried warehouse MERGE."""
+
+    def append(self, user: str, conversation_id: str, messages: list[dict[str, Any]]) -> int:
+        super().append(user, conversation_id, messages)
+        return 0
+
+
+class AlwaysTakenRepository(SQLiteChatRepository):
+    def append(self, user: str, conversation_id: str, messages: list[dict[str, Any]]) -> int:
+        return 0
+
+
+def test_committed_turn_with_a_lost_answer_is_not_stored_twice(tmp_path: Path) -> None:
+    chat = DocumentChatService(FakeClient(), LostAnswerRepository(tmp_path / "c.db"), dict)
+    conversation_id = chat.ask("ann@example.com", None, "Q")["conversation_id"]
+    assert len(chat.conversation("ann@example.com", conversation_id)) == 2
+
+
+def test_turn_that_keeps_losing_its_place_reports_a_conflict(tmp_path: Path) -> None:
+    chat = DocumentChatService(FakeClient(), AlwaysTakenRepository(tmp_path / "c.db"), dict)
+    with pytest.raises(ChatError) as error:
+        chat.ask("ann@example.com", None, "Q")
+    assert error.value.status_code == 409

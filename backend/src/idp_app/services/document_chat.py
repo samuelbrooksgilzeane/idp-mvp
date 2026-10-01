@@ -172,7 +172,12 @@ class MockChatClient:
 class ChatRepository(Protocol):
     def conversations(self, user: str) -> list[dict[str, Any]]: ...
     def messages(self, user: str, conversation_id: str) -> list[dict[str, Any]]: ...
-    def append(self, user: str, conversation_id: str, messages: list[dict[str, Any]]) -> None: ...
+    def append(
+        self, user: str, conversation_id: str, messages: list[dict[str, Any]]
+    ) -> int | None:
+        """Insert messages whose (conversation_id, seq) is free, all or none, and return how
+        many were inserted (None when unknown). A taken seq is skipped, not overwritten."""
+        ...
 
 
 def _summaries(rows: list[tuple[str, str, str]]) -> list[dict[str, Any]]:
@@ -218,9 +223,11 @@ class SQLiteChatRepository:
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
-    def append(self, user: str, conversation_id: str, messages: list[dict[str, Any]]) -> None:
+    def append(
+        self, user: str, conversation_id: str, messages: list[dict[str, Any]]
+    ) -> int | None:
         with self.connect() as db:
-            db.executemany(
+            return db.executemany(
                 "INSERT OR IGNORE INTO chat_messages VALUES (?, ?, ?, ?, ?, ?)",
                 [
                     (
@@ -233,7 +240,7 @@ class SQLiteChatRepository:
                     )
                     for message in messages
                 ],
-            )
+            ).rowcount
 
 
 class DatabricksChatRepository:
@@ -260,7 +267,9 @@ class DatabricksChatRepository:
         )
         return [json.loads(row[0]) for row in rows]
 
-    def append(self, user: str, conversation_id: str, messages: list[dict[str, Any]]) -> None:
+    def append(
+        self, user: str, conversation_id: str, messages: list[dict[str, Any]]
+    ) -> int | None:
         # The caller passes each message's seq; MERGE on (conversation_id, seq) makes retries safe.
         rows = [
             {
@@ -273,7 +282,7 @@ class DatabricksChatRepository:
             }
             for message in messages
         ]
-        run_with_retries(
+        counts = run_with_retries(
             lambda: self.sql.execute_dml(
                 f"MERGE INTO {self.table} t USING (SELECT m.conversation_id, m.user_id, m.seq, "
                 "m.role, m.payload, CAST(m.created_at AS TIMESTAMP) AS created_at FROM "
@@ -286,6 +295,8 @@ class DatabricksChatRepository:
             None,
             label="chat history write",
         )
+        # After a retried attempt that had committed, this reads 0; the caller then reads back.
+        return counts.get("num_inserted_rows")
 
 
 class DocumentChatService:
@@ -327,7 +338,14 @@ class DocumentChatService:
         answer = parse_response(self.client.ask([*context, {"role": "user", "content": question}]))
         names = self._lookup(document_ids(answer.text, *answer.citations))
         now = self.clock().isoformat()
-        asked = {"seq": len(history), "role": "user", "text": question, "created_at": now}
+        turn_id = str(uuid.uuid4())
+        asked = {
+            "seq": len(history),
+            "role": "user",
+            "text": question,
+            "created_at": now,
+            "turn_id": turn_id,
+        }
         reply = {
             "seq": len(history) + 1,
             "role": "assistant",
@@ -338,13 +356,33 @@ class DocumentChatService:
             ),
             "elapsed_seconds": round(time.monotonic() - started, 1),
             "created_at": now,
+            "turn_id": turn_id,
         }
         if answer.trace_id:
             # Stored for operators (history row -> MLflow trace); never sent to the browser.
             reply["trace_id"] = answer.trace_id
             self._tag(answer.trace_id, user, conversation_id)
-        self.repository.append(user, conversation_id, [asked, reply])
-        return {"conversation_id": conversation_id, "messages": [asked, _public(reply)]}
+        self._store(user, conversation_id, [asked, reply])
+        return {"conversation_id": conversation_id, "messages": [_public(asked), _public(reply)]}
+
+    def _store(self, user: str, conversation_id: str, turn: list[dict[str, Any]]) -> None:
+        """Append the turn after whatever is stored now. Another request on the same
+        conversation (a second tab) may have taken these seqs since history was read; then the
+        turn moves after it instead of being dropped."""
+        for _ in range(2):
+            if self.repository.append(user, conversation_id, turn) == len(turn):
+                return
+            stored = self.repository.messages(user, conversation_id)
+            if any(message.get("turn_id") == turn[0]["turn_id"] for message in stored):
+                return  # An earlier attempt committed before its answer was lost.
+            after = stored[-1]["seq"] + 1 if stored else 0
+            for offset, message in enumerate(turn):
+                message["seq"] = after + offset
+        raise ChatError(
+            "CHAT_SAVE_CONFLICT",
+            "This conversation changed in another tab. Reload it and ask again.",
+            409,
+        )
 
     def _tag(self, trace: str, user: str, conversation_id: str) -> None:
         try:
@@ -376,6 +414,10 @@ def _conversation_id(value: str) -> str:
         raise ChatError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404) from error
 
 
+# Stored for operators and conflict checks; never sent to the browser.
+PRIVATE_FIELDS = {"trace_id", "turn_id"}
+
+
 def _public(message: dict[str, Any]) -> dict[str, Any]:
     """A history message as the browser sees it: operator-only fields removed."""
-    return {key: value for key, value in message.items() if key != "trace_id"}
+    return {key: value for key, value in message.items() if key not in PRIVATE_FIELDS}
