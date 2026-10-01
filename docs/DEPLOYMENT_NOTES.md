@@ -101,7 +101,8 @@ sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_parsed_page_elements TO \`
 # 6. Folder import, also outside the 20 bindings: the App lists the import volume and starts the
 #    import Job. The Job itself runs as the deploying identity, which owns the volumes and tables.
 sql "GRANT READ VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$APP_SP\`"
-IMPORT_JOB=$(databricks jobs list -p $PROFILE -o json --name "idp-mvp-$TARGET-folder-importer" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["job_id"])')
+# Dev-mode deploys prefix job names with "[dev <user>] ", so match the name suffix.
+IMPORT_JOB=$(databricks jobs list -p $PROFILE -o json | python3 -c 'import json,sys; print(next(j["job_id"] for j in json.load(sys.stdin) if j["settings"]["name"].endswith("idp-mvp-'$TARGET'-folder-importer")))')
 databricks jobs update-permissions $IMPORT_JOB -p $PROFILE --json "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE_RUN\"}]}"
 # 7. Who may drop folders in: users need to write into the import volume (and to see it).
 USERS_GROUP='account users'   # or the workspace's all-users group
