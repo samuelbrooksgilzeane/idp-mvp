@@ -102,7 +102,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
 | 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
-| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7 and 7a done (1 Oct); 7b next |
+| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7 and 7a done (1 Oct); 7b designed, needs user OK to vendor the template |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Blocked: Batch 7 |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -402,6 +402,37 @@ Supervisor answered from a function tool.
    EXECUTE on the functions; IDP app principal permission to sync the KA (level from G7).
 
 ### 7b — Chat app (code session, no workspace)
+
+Status (1 October): design settled, not started. Copying the template into the repo needs the
+user's go-ahead (the session's permission check blocks integrating third-party code).
+Findings and decisions:
+- Template `databricks/app-templates/e2e-chatbot-app-next` at commit
+  `74c0cd0f66ed4c6bde454bcd5f7ad277f078f2fd` (8 Sep 2026): Express server + React (Vite) client,
+  639 files, npm workspaces, Biome lint, Playwright only (no unit test runner). Copy it without its
+  `CLAUDE.md`, `.claude/` and `app.yaml`; record the commit and local changes in `chat_app/TEMPLATE.md`.
+- **Own bundle in `chat_app/databricks.yml`** (not `resources/chat.app.yml`): the app resource needs
+  the Supervisor endpoint, which exists only after `provision_chat.py`; inside the IDP bundle every
+  IDP deploy would fail until then. Exclude `chat_app/` from the IDP bundle sync.
+- **History on Lakebase Autoscaling** (Free Edition allows one project; neither kind exists yet).
+  Apps bind it with resource `postgres: {branch, database, permission: CAN_CONNECT_AND_CREATE}`. The
+  default branch id is not documented, so create the project once by CLI
+  (`databricks postgres create-project idp-chat`) and pass `chat_postgres_branch` /
+  `chat_postgres_database` (resource paths from `databricks postgres list-branches` /
+  `list-databases`; initial database `databricks_postgres`). The template reads `PG*` variables.
+- Endpoint resource: Supervisor endpoint (`chat_endpoint` variable), CAN_QUERY. A Supervisor also
+  needs CAN_QUERY on its KA endpoint (add it as a second resource where a KA exists).
+- **Citations as plain text:** `client/src/components/databricks-message-citation.tsx` renders
+  `source-url` parts as links with a URL tooltip; render a plain span instead.
+- **UUID rewrite on the client:** a pure `rewriteDocumentNames(text, names)` applied in
+  `message.tsx` to `joinMessagePartSegments(parts)` before `sanitizeText` (one place covers text,
+  citation titles and history, and avoids UUIDs split across stream chunks). A server route
+  `GET /api/document-names?ids=` (UUIDs only, at most 50, cached) reads
+  `<prefix>_chat_documents` through the Statement Execution API with the app's token; resources: a
+  SQL warehouse (CAN_USE) and env `IDP_DOCUMENTS_VIEW`; grant the chat SP SELECT on that view.
+- Unit tests with `tsx --test` (already a dev dependency); `make check` gains a chat target
+  (Biome, `tsc --noEmit`, unit tests).
+- `chat_app_url` for dev is the deterministic app URL; set it in L5 once the app exists, so the link
+  never points at a missing app.
 
 1. Add `e2e-chatbot-app-next` under `chat_app/` (pin the template commit), bundle resource
    `resources/chat.app.yml` (serving endpoint resource CAN_QUERY, Lakebase database resource),
