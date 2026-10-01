@@ -10,15 +10,22 @@ from idp_app.services.documents import DocumentServiceError
 from idp_app.services.schema_models import (
     MAX_SCHEMA_DEPTH,
     MAX_SCHEMA_LEAVES,
+    DocumentRule,
     ExtractField,
     FieldPolicy,
     SchemaManifest,
     SchemaRecord,
     schema_leaves,
 )
-from idp_app.services.schema_registry import SchemaNotDraftError, SchemaRepository
+from idp_app.services.schema_registry import (
+    SchemaNotDraftError,
+    SchemaRepository,
+    SchemaVersionConflictError,
+)
 
 SCHEMA_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,99}$")
+# New ids and versions are taken insert-only; a request that loses a race picks the next one.
+CREATE_ATTEMPTS = 5
 
 
 class SchemaService:
@@ -84,7 +91,6 @@ class SchemaService:
         this type?": REPEATED_RECORDS wraps the starter field in a top-level array, SINGLE_
         RECORD leaves it as a top-level scalar, matching a flat form.
         """
-        schema_id = await self._unique_schema_id(display_name)
         starter_field = ExtractField(type="string", description="Describe what this field holds.")
         if root_mode == "REPEATED_RECORDS":
             ai_extract_schema = {
@@ -101,17 +107,21 @@ class SchemaService:
         else:
             ai_extract_schema = {"field_1": starter_field}
 
-        manifest = self._build_manifest(
-            schema_id=schema_id,
-            schema_version=1,
-            display_name=display_name,
-            description=description,
-            use_case=use_case,
-            instructions="Extract only values explicitly stated in the source document.",
-            ai_extract_schema=ai_extract_schema,
-            field_policies=None,
-        )
-        return await self._save_draft(manifest, created_by)
+        for _ in range(CREATE_ATTEMPTS):
+            manifest = self._build_manifest(
+                schema_id=await self._unique_schema_id(display_name),
+                schema_version=1,
+                display_name=display_name,
+                description=description,
+                use_case=use_case,
+                instructions="Extract only values explicitly stated in the source document.",
+                ai_extract_schema=ai_extract_schema,
+                field_policies=None,
+            )
+            created = await self._try_create(manifest, created_by)
+            if created is not None:
+                return created
+        raise _busy()
 
     async def update_draft(
         self,
@@ -142,6 +152,7 @@ class SchemaService:
             instructions=instructions or current.instructions,
             ai_extract_schema=ai_extract_schema,
             field_policies=field_policies,
+            base=current,
         )
         return await self._save_draft(manifest, updated_by)
 
@@ -192,6 +203,8 @@ class SchemaService:
             )
         except SchemaNotDraftError as error:
             raise DocumentServiceError("SCHEMA_NOT_DRAFT", str(error), 409) from error
+        except SchemaVersionConflictError as error:
+            raise DocumentServiceError("SCHEMA_CHANGED", str(error), 409) from error
 
     async def delete_schema(self, schema_id: str) -> None:
         """Delete every version of a schema (soft: see SchemaRepository.delete)."""
@@ -223,27 +236,36 @@ class SchemaService:
         for a new custom schema.
         """
         source = await self.get_schema(source_schema_id, source_schema_version)
-        if new_schema_id is None:
-            schema_id = source_schema_id
-            next_version = await run_in_threadpool(
-                self._repository.latest_version, schema_id
-            )
-            schema_version = next_version + 1
-        else:
-            schema_id = new_schema_id
-            schema_version = 1
 
-        manifest = self._build_manifest(
-            schema_id=schema_id,
-            schema_version=schema_version,
-            display_name=new_display_name,
-            description=source.description,
-            use_case=source.use_case,
-            instructions=source.instructions,
-            ai_extract_schema=source.ai_extract_schema,
-            field_policies=None,
-        )
-        return await self._save_draft(manifest, created_by)
+        def clone_as(schema_id: str, schema_version: int) -> SchemaManifest:
+            # The clone keeps the source's validation: required fields and business rules.
+            return self._build_manifest(
+                schema_id=schema_id,
+                schema_version=schema_version,
+                display_name=new_display_name,
+                description=source.description,
+                use_case=source.use_case,
+                instructions=source.instructions,
+                ai_extract_schema=source.ai_extract_schema,
+                field_policies=None,
+                base=source,
+            )
+
+        if new_schema_id is not None:
+            created = await self._try_create(clone_as(new_schema_id, 1), created_by)
+            if created is None:
+                raise DocumentServiceError(
+                    "SCHEMA_EXISTS",
+                    f"A schema named {new_schema_id} already exists. Choose another name.",
+                    409,
+                )
+            return created
+        for _ in range(CREATE_ATTEMPTS):
+            latest = await run_in_threadpool(self._repository.latest_version, source_schema_id)
+            created = await self._try_create(clone_as(source_schema_id, latest + 1), created_by)
+            if created is not None:
+                return created
+        raise _busy()
 
     # -- Internals ----------------------------------------------------------------------
 
@@ -270,11 +292,23 @@ class SchemaService:
         instructions: str,
         ai_extract_schema: dict[str, ExtractField],
         field_policies: dict[str, FieldPolicy] | None,
+        base: SchemaRecord | None = None,
     ) -> SchemaManifest:
-        resolved_policies = field_policies or {
-            path: FieldPolicy() for path, _ in schema_leaves(ai_extract_schema)
-        }
+        """`base` is the version this one starts from (the draft being edited, or a clone's
+        source). The editor cannot set field policies or rules, so they carry over from it: a
+        field keeps its policy, a new field gets the default, and a rule is kept unless it
+        names a field that no longer exists (it could not be valid, and nothing can edit it)."""
         try:
+            fields = [path for path, _ in schema_leaves(ai_extract_schema)]
+            inherited = base.field_policies if base else {}
+            resolved_policies = field_policies or {
+                path: inherited.get(path, FieldPolicy()) for path in fields
+            }
+            rules = [
+                rule
+                for rule in (base.document_rules if base else [])
+                if _rule_applies(rule, set(fields))
+            ]
             return SchemaManifest(
                 schema_id=schema_id,
                 schema_version=schema_version,
@@ -285,10 +319,19 @@ class SchemaService:
                 instructions=instructions,
                 ai_extract_schema=ai_extract_schema,
                 field_policies=resolved_policies,
-                document_rules=[],
+                document_rules=rules,
             )
         except (ValueError, ValidationError) as error:
             raise DocumentServiceError("SCHEMA_INVALID", str(error), 422) from error
+
+    async def _try_create(
+        self, manifest: SchemaManifest, created_by: str
+    ) -> SchemaRecord | None:
+        """The new draft, or None when its (schema_id, version) is already taken."""
+        try:
+            return await run_in_threadpool(self._repository.create_draft, manifest, created_by)
+        except SchemaVersionConflictError:
+            return None
 
     async def _save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
         try:
@@ -297,6 +340,20 @@ class SchemaService:
             )
         except SchemaNotDraftError as error:
             raise DocumentServiceError("SCHEMA_NOT_DRAFT", str(error), 409) from error
+
+
+def _busy() -> DocumentServiceError:
+    return DocumentServiceError(
+        "SCHEMA_BUSY", "Another schema was created at the same moment. Try again.", 409
+    )
+
+
+def _rule_applies(rule: DocumentRule, fields: set[str]) -> bool:
+    try:
+        SchemaManifest._validate_rule(rule, fields)
+    except ValueError:
+        return False
+    return True
 
 
 class SchemaValidationReport:

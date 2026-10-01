@@ -367,7 +367,7 @@ def test_integral_numbers_hash_identically_however_they_are_written() -> None:
 
 
 @pytest.mark.parametrize("status", ["DRAFT", "PUBLISHED", "PRODUCTION", "RETIRED"])
-def test_databricks_draft_save_uses_guarded_write_and_verified_read(manifest, status):
+def test_databricks_draft_edit_only_updates_an_existing_draft(manifest, status):
     from unittest.mock import Mock
 
     from idp_app.services.schema_registry import (
@@ -384,10 +384,137 @@ def test_databricks_draft_save_uses_guarded_write_and_verified_read(manifest, st
     else:
         with pytest.raises(SchemaNotDraftError):
             repository.save_draft(manifest, "user")
-    sql.execute_sql.assert_called_once()
-    statement = sql.execute_sql.call_args.args[0]
-    assert "WHEN MATCHED AND target.status = 'DRAFT' THEN UPDATE" in statement
+    sql.execute_dml.assert_called_once()
+    statement = sql.execute_dml.call_args.args[0]
+    assert statement.startswith("UPDATE ") and "AND status = 'DRAFT'" in statement
+    assert "INSERT" not in statement and "created_by" not in statement
     repository.get.assert_called_once_with(manifest.schema_id, manifest.schema_version)
+
+
+@pytest.mark.parametrize(("inserted", "taken"), [(1, False), (0, True)])
+def test_databricks_draft_creation_never_overwrites(manifest, inserted, taken):
+    from unittest.mock import Mock
+
+    from idp_app.services.schema_registry import DatabricksSchemaRepository
+
+    sql = Mock()
+    sql.execute_dml.return_value = {"num_affected_rows": inserted, "num_inserted_rows": inserted}
+    repository = DatabricksSchemaRepository(sql, "catalog", "project", "idp")
+    repository.get = Mock(return_value=Mock(status="DRAFT"))
+    if taken:
+        with pytest.raises(SchemaVersionConflictError):
+            repository.create_draft(manifest, "user")
+    else:
+        repository.create_draft(manifest, "user")
+    statement = sql.execute_dml.call_args.args[0]
+    assert "WHEN NOT MATCHED THEN INSERT" in statement and "WHEN MATCHED" not in statement
+
+
+def _draft(manifest: SchemaManifest, **changes: object) -> SchemaManifest:
+    payload = manifest.model_dump(mode="json", exclude_none=True)
+    return SchemaManifest.model_validate(
+        {**payload, "schema_id": "race", "status": "DRAFT", **changes}
+    )
+
+
+def test_publish_fails_instead_of_freezing_a_draft_edited_after_it_was_read(
+    manifest: SchemaManifest, tmp_path: Path
+) -> None:
+    from idp_app.services.schema_registry import _published_hash
+
+    repository = SQLiteSchemaRepository(tmp_path / "registry.sqlite3")
+    repository.create_draft(_draft(manifest), "ann")
+    edited = _draft(manifest, instructions="Edited in another tab.")
+    read = repository.get
+
+    def read_then_edit(schema_id: str, schema_version: int):
+        record = read(schema_id, schema_version)
+        repository.get = read  # one concurrent edit, right after publish reads the draft
+        repository.save_draft(edited, "ann")
+        return record
+
+    repository.get = read_then_edit  # type: ignore[method-assign]
+    with pytest.raises(SchemaVersionConflictError, match="changed while"):
+        repository.publish("race", 1)
+    still_draft = repository.get("race", 1)
+    assert still_draft is not None and still_draft.status == "DRAFT"
+    assert still_draft.instructions == "Edited in another tab."
+
+    published = repository.publish("race", 1)
+    assert published.instructions == "Edited in another tab."
+    assert published.schema_hash == _published_hash(published)  # extraction verifies this
+
+
+def test_clone_and_edit_keep_required_fields_and_business_rules(client: TestClient) -> None:
+    cloned = client.post(
+        "/api/schemas/invoice/clone?schema_version=1",
+        json={"new_display_name": "My invoice", "new_schema_id": "my_invoice"},
+    )
+    assert cloned.status_code == 201
+    detail = cloned.json()
+    required = {field["field_path"]: field["required"] for field in detail["fields"]}
+    assert required["total"] is True and required["subtotal"] is False
+    rules = {rule["rule_id"] for rule in detail["document_rules"]}
+    assert rules == {"invoice_total_reconciliation", "required_invoice_identity"}
+
+    # An edit that drops `discount` keeps every policy and the rule that does not use it.
+    tree = detail["schema_tree"]
+    tree.pop("discount")
+    edited = client.put(
+        "/api/schemas/my_invoice/draft?schema_version=1", json={"ai_extract_schema": tree}
+    )
+    assert edited.status_code == 200
+    required = {field["field_path"]: field["required"] for field in edited.json()["fields"]}
+    assert required["total"] is True and "discount" not in required
+    assert {rule["rule_id"] for rule in edited.json()["document_rules"]} == {
+        "required_invoice_identity"
+    }
+
+
+def test_clone_never_replaces_an_existing_draft(client: TestClient) -> None:
+    mine = client.post(
+        "/api/schemas", json={"display_name": "Mine", "root_mode": "SINGLE_RECORD"}
+    ).json()
+    clash = client.post(
+        "/api/schemas/invoice/clone?schema_version=1",
+        json={"new_display_name": "Clash", "new_schema_id": mine["schema_id"]},
+        headers={"x-forwarded-email": "someone-else@example.com"},
+    )
+    assert clash.status_code == 409
+    assert clash.json()["error"]["code"] == "SCHEMA_EXISTS"
+    kept = client.get(f"/api/schemas/{mine['schema_id']}/versions/1").json()
+    assert kept["display_name"] == "Mine" and kept["schema_tree"] == mine["schema_tree"]
+
+
+def test_concurrent_next_version_clones_get_distinct_versions(tmp_path: Path) -> None:
+    import asyncio
+
+    from idp_app.services.schemas import SchemaService
+
+    class StaleLatest(SQLiteSchemaRepository):
+        """The first answer is one version behind, as when another clone just inserted."""
+
+        stale = True
+
+        def latest_version(self, schema_id: str) -> int:
+            latest = super().latest_version(schema_id)
+            if self.stale:
+                self.stale = False
+                return latest - 1
+            return latest
+
+    repository = StaleLatest(tmp_path / "registry.sqlite3")
+    for source in load_source_manifests():
+        repository.register(source, "bootstrap")
+    service = SchemaService(repository)
+    repository.stale = False
+    first = asyncio.run(service.clone_schema("invoice", 1, "First", "ann"))
+    # Bob's first attempt targets Ann's new version, as if both read the same latest version.
+    repository.stale = True
+    second = asyncio.run(service.clone_schema("invoice", 1, "Second", "bob"))
+    assert second.schema_version == first.schema_version + 1
+    kept = repository.get("invoice", first.schema_version)
+    assert kept is not None and (kept.created_by, kept.display_name) == ("ann", "First")
 
 
 def test_deleting_a_schema_hides_every_version_and_blocks_extraction(

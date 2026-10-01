@@ -123,3 +123,31 @@ def test_api_confirms_cross_page_duplicates_and_replays_without_reresolving(tmp_
     assert client.get(f"/api/export-requests/{identity}/download").status_code == 409
     body["format"] = "csv"
     assert client.post("/api/export-requests", json=body).status_code == 409
+
+
+def test_artifact_missing_from_databricks_storage_is_a_410_not_a_500(tmp_path: Path):
+    from types import SimpleNamespace
+
+    from databricks.sdk.errors import NotFound
+    from fastapi.testclient import TestClient
+
+    from idp_app.core.config import Settings
+    from idp_app.main import create_app
+
+    def download(path: str):
+        raise NotFound(f"{path} does not exist")
+
+    client = SimpleNamespace(files=SimpleNamespace(download=download))
+    volume = ExportArtifacts("/Volumes/c/s/artifacts", client)
+    with pytest.raises(FileNotFoundError):
+        volume.open(str(uuid4()))
+
+    app = create_app(Settings(local_data_dir=tmp_path, bulk_export_enabled=True))
+    requests = ExportRequests(tmp_path / "exports.sqlite")
+    row = requests.create("local-development-user", str(uuid4()), "csv", [str(uuid4())])
+    row.update(state="SUCCEEDED", filename="results.csv", bytes=10, media_type="text/csv")
+    requests.save(row)
+    app.state.durable_exports = (requests, None, volume)
+    missing = TestClient(app).get(f"/api/export-requests/{row['export_id']}/download")
+    assert missing.status_code == 410
+    assert missing.json()["error"]["code"] == "EXPORT_ARTIFACT_MISSING"

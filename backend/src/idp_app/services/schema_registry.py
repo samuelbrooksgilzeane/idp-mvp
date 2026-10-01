@@ -16,6 +16,17 @@ from idp_app.services.schema_models import (
     SchemaRecord,
 )
 
+# A draft edit replaces these; identity, lifecycle and authorship columns stay as created.
+DRAFT_CONTENT_COLUMNS = (
+    "display_name",
+    "use_case",
+    "ai_extract_schema_json",
+    "instructions",
+    "field_policy_json",
+    "document_rule_json",
+    "schema_hash",
+    "description",
+)
 SCHEMA_COLUMNS = (
     "schema_id",
     "schema_version",
@@ -35,7 +46,7 @@ SCHEMA_COLUMNS = (
 
 
 class SchemaVersionConflictError(Exception):
-    pass
+    """The version already exists with other content, or changed while it was being written."""
 
 
 class SchemaNotDraftError(Exception):
@@ -58,16 +69,24 @@ class SchemaRepository(Protocol):
         """
         ...
 
-    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
-        """Insert a new DRAFT version, or overwrite an existing DRAFT version in place.
+    def create_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
+        """Insert a new DRAFT version. Never overwrites: raises `SchemaVersionConflictError`
+        if (schema_id, schema_version) already exists in any status."""
+        ...
 
-        Raises `SchemaNotDraftError` if a version already exists and is not DRAFT -- a
-        published or retired version is immutable, matching the governed `register` path.
+    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
+        """Replace the content of an existing DRAFT version; its creator is kept.
+
+        Raises `SchemaNotDraftError` if the version is missing or not DRAFT -- a published or
+        retired version is immutable, matching the governed `register` path.
         """
         ...
 
     def publish(self, schema_id: str, schema_version: int) -> SchemaRecord:
-        """Freeze a DRAFT version: from this point it is immutable and extractable."""
+        """Freeze a DRAFT version: from this point it is immutable and extractable.
+
+        Raises `SchemaVersionConflictError` if the draft was edited after it was read here, so
+        the published hash always matches the published content."""
         ...
 
     def latest_version(self, schema_id: str) -> int:
@@ -201,26 +220,42 @@ class SQLiteSchemaRepository:
                 (schema_id,),
             )
 
-    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
-        existing = self.get(manifest.schema_id, manifest.schema_version)
-        if existing is not None and existing.status != "DRAFT":
-            raise SchemaNotDraftError(
-                f"Schema {manifest.schema_id} version {manifest.schema_version} "
-                f"is {existing.status}, not DRAFT"
-            )
+    def create_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
         values = _manifest_values(manifest, created_by, datetime.now(UTC))
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    f"INSERT INTO schema_registry ({', '.join(SCHEMA_COLUMNS)}) "
+                    f"VALUES ({', '.join('?' for _ in SCHEMA_COLUMNS)})",
+                    values,
+                )
+        except sqlite3.IntegrityError as error:
+            raise _version_taken(manifest) from error
+        created = self.get(manifest.schema_id, manifest.schema_version)
+        if created is None:
+            raise RuntimeError("Draft schema creation did not produce a readable row")
+        return created
+
+    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
+        content = dict(
+            zip(
+                SCHEMA_COLUMNS,
+                _manifest_values(manifest, created_by, datetime.now(UTC)),
+                strict=True,
+            )
+        )
         with self._connect() as connection:
             connection.execute(
-                f"INSERT INTO schema_registry ({', '.join(SCHEMA_COLUMNS)}) "
-                f"VALUES ({', '.join('?' for _ in SCHEMA_COLUMNS)}) "
-                "ON CONFLICT (schema_id, schema_version) DO UPDATE SET "
-                + ", ".join(f"{column} = excluded.{column}" for column in SCHEMA_COLUMNS[2:]),
-                values,
+                "UPDATE schema_registry SET "
+                + ", ".join(f"{column} = ?" for column in DRAFT_CONTENT_COLUMNS)
+                + " WHERE schema_id = ? AND schema_version = ? AND status = 'DRAFT'",
+                (
+                    *(content[column] for column in DRAFT_CONTENT_COLUMNS),
+                    manifest.schema_id,
+                    manifest.schema_version,
+                ),
             )
-        saved = self.get(manifest.schema_id, manifest.schema_version)
-        if saved is None:
-            raise RuntimeError("Draft schema save did not produce a readable row")
-        return saved
+        return _saved_draft(self.get(manifest.schema_id, manifest.schema_version), manifest)
 
     def publish(self, schema_id: str, schema_version: int) -> SchemaRecord:
         existing = self.get(schema_id, schema_version)
@@ -233,18 +268,19 @@ class SQLiteSchemaRepository:
         published_at = datetime.now(UTC)
         new_hash = _published_hash(existing)
         with self._connect() as connection:
-            cursor = connection.execute(
+            connection.execute(
                 "UPDATE schema_registry SET status = 'PUBLISHED', published_at = ?, "
-                "schema_hash = ? WHERE schema_id = ? AND schema_version = ? AND status = 'DRAFT'",
-                (published_at.isoformat(), new_hash, schema_id, schema_version),
+                "schema_hash = ? WHERE schema_id = ? AND schema_version = ? AND status = 'DRAFT' "
+                "AND schema_hash = ?",
+                (
+                    published_at.isoformat(),
+                    new_hash,
+                    schema_id,
+                    schema_version,
+                    existing.schema_hash,
+                ),
             )
-            if cursor.rowcount != 1:
-                raise SchemaNotDraftError(
-                    f"Schema {schema_id} version {schema_version} could not be published"
-                )
-        published = self.get(schema_id, schema_version)
-        assert published is not None
-        return published
+        return _published(self.get(schema_id, schema_version), schema_id, schema_version, new_hash)
 
 
 class DatabricksSchemaRepository:
@@ -339,9 +375,7 @@ class DatabricksSchemaRepository:
             {"schema_id": schema_id},
         )
 
-    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
-        # The MERGE guards draft-only writes atomically; a preliminary SELECT adds
-        # latency without protecting against a concurrent publish.
+    def create_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
         values = dict(
             zip(
                 SCHEMA_COLUMNS,
@@ -351,27 +385,49 @@ class DatabricksSchemaRepository:
         )
         source = ", ".join(f":{column} AS {column}" for column in SCHEMA_COLUMNS)
         insert_values = ", ".join(f"source.{column}" for column in SCHEMA_COLUMNS)
-        update_values = ", ".join(
-            f"target.{column} = source.{column}" for column in SCHEMA_COLUMNS[2:]
-        )
-        self._sql_client.execute_sql(
+        counts = self._sql_client.execute_dml(
             f"MERGE INTO {self._table} AS target USING (SELECT {source}) AS source "
             "ON target.schema_id = source.schema_id "
             "AND target.schema_version = source.schema_version "
-            f"WHEN MATCHED AND target.status = 'DRAFT' THEN UPDATE SET {update_values} "
             f"WHEN NOT MATCHED THEN INSERT ({', '.join(SCHEMA_COLUMNS)}) "
             f"VALUES ({insert_values})",
             values,
         )
-        saved = self.get(manifest.schema_id, manifest.schema_version)
-        if saved is None:
-            raise RuntimeError("Draft schema save did not produce a readable row")
-        if saved.status != "DRAFT":
-            raise SchemaNotDraftError(
-                f"Schema {manifest.schema_id} version {manifest.schema_version} "
-                f"is {saved.status}, not DRAFT"
+        created = self.get(manifest.schema_id, manifest.schema_version)
+        if created is None:
+            raise RuntimeError("Draft schema creation did not produce a readable row")
+        inserted = counts.get("num_inserted_rows")
+        # Without a count, the row is ours only if it holds exactly what was just written.
+        ours = (
+            inserted == 1
+            if inserted is not None
+            else created.status == "DRAFT"
+            and created.created_by == created_by
+            and created.schema_hash == manifest.schema_hash
+        )
+        if not ours:
+            raise _version_taken(manifest)
+        return created
+
+    def save_draft(self, manifest: SchemaManifest, created_by: str) -> SchemaRecord:
+        values = dict(
+            zip(
+                SCHEMA_COLUMNS,
+                _manifest_values(manifest, created_by, datetime.now(UTC)),
+                strict=True,
             )
-        return saved
+        )
+        self._sql_client.execute_dml(
+            f"UPDATE {self._table} SET "
+            + ", ".join(f"{column} = :{column}" for column in DRAFT_CONTENT_COLUMNS)
+            + " WHERE schema_id = :schema_id AND schema_version = :schema_version "
+            "AND status = 'DRAFT'",
+            {
+                column: values[column]
+                for column in ("schema_id", "schema_version", *DRAFT_CONTENT_COLUMNS)
+            },
+        )
+        return _saved_draft(self.get(manifest.schema_id, manifest.schema_version), manifest)
 
     def publish(self, schema_id: str, schema_version: int) -> SchemaRecord:
         existing = self.get(schema_id, schema_version)
@@ -379,24 +435,23 @@ class DatabricksSchemaRepository:
             raise SchemaNotDraftError(
                 f"Schema {schema_id} version {schema_version} is not an editable draft"
             )
+        new_hash = _published_hash(existing)
+        # Matching the hash read above makes the publish fail, not freeze stale content, when
+        # the draft is edited in between.
         self._sql_client.execute_sql(
             f"UPDATE {self._table} SET status = 'PUBLISHED', "
             "published_at = CAST(:published_at AS TIMESTAMP), schema_hash = :schema_hash "
             "WHERE schema_id = :schema_id AND schema_version = :schema_version "
-            "AND status = 'DRAFT'",
+            "AND status = 'DRAFT' AND schema_hash = :draft_hash",
             {
                 "schema_id": schema_id,
                 "schema_version": schema_version,
                 "published_at": datetime.now(UTC).isoformat(),
-                "schema_hash": _published_hash(existing),
+                "schema_hash": new_hash,
+                "draft_hash": existing.schema_hash,
             },
         )
-        published = self.get(schema_id, schema_version)
-        if published is None or published.status != "PUBLISHED":
-            raise SchemaNotDraftError(
-                f"Schema {schema_id} version {schema_version} could not be published"
-            )
-        return published
+        return _published(self.get(schema_id, schema_version), schema_id, schema_version, new_hash)
 
 
 def _manifest_values(
@@ -460,6 +515,44 @@ def _published_hash(existing: SchemaRecord) -> str:
         document_rules=existing.document_rules,
     )
     return manifest.schema_hash
+
+
+def _version_taken(manifest: SchemaManifest) -> SchemaVersionConflictError:
+    return SchemaVersionConflictError(
+        f"Schema {manifest.schema_id} version {manifest.schema_version} already exists"
+    )
+
+
+def _saved_draft(saved: SchemaRecord | None, manifest: SchemaManifest) -> SchemaRecord:
+    if saved is None:
+        raise SchemaNotDraftError(
+            f"Schema {manifest.schema_id} version {manifest.schema_version} not found"
+        )
+    if saved.status != "DRAFT":
+        raise SchemaNotDraftError(
+            f"Schema {manifest.schema_id} version {manifest.schema_version} "
+            f"is {saved.status}, not DRAFT"
+        )
+    return saved
+
+
+def _published(
+    published: SchemaRecord | None, schema_id: str, schema_version: int, expected_hash: str
+) -> SchemaRecord:
+    """The row after a guarded publish. A matching published hash is this publish, or an
+    identical concurrent one; a row still in DRAFT was edited after it was read."""
+    if published is not None and published.status == "PUBLISHED":
+        if published.schema_hash == expected_hash:
+            return published
+        raise SchemaVersionConflictError(
+            f"Schema {schema_id} version {schema_version} was published with other content"
+        )
+    if published is not None and published.status == "DRAFT":
+        raise SchemaVersionConflictError(
+            f"Schema {schema_id} version {schema_version} changed while it was being "
+            "published. Review it and publish again."
+        )
+    raise SchemaNotDraftError(f"Schema {schema_id} version {schema_version} could not be published")
 
 
 def _verify_immutable(existing: SchemaRecord, manifest: SchemaManifest) -> None:

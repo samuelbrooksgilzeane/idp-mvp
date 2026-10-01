@@ -38,9 +38,14 @@ class ExportArtifacts:
         return file.stat().st_size, digest.hexdigest()
 
     def open(self, identity: str) -> BinaryIO:
+        """Raises FileNotFoundError when the artifact is gone, from either store, so callers
+        handle one exception (the download route turns it into a 410)."""
         if self.client is None:
             return Path(self.path(identity)).open("rb")
-        response = self.client.files.download(self.path(identity))
+        try:
+            response = self.client.files.download(self.path(identity))
+        except NotFound as error:
+            raise FileNotFoundError("Export artifact is unavailable") from error
         if response.contents is None:
             raise FileNotFoundError("Export artifact is unavailable")
         return cast(BinaryIO, response.contents)
