@@ -163,6 +163,7 @@ def validate_data_bootstrap() -> None:
         "migrate_generic_extraction_records",
         "migrate_generic_extraction_fields",
         "create_chat_views",
+        "create_chat_functions",
         "migrate_work_batches",
     ]
     if (
@@ -597,6 +598,13 @@ def validate_chat_configuration() -> None:
     task = next(item for item in tasks if item["task_key"] == "create_chat_views")
     if task["depends_on"] != [{"task_key": "migrate_generic_extraction_fields"}]:
         raise ValueError("Chat views must follow generic migrations")
+    task = next(item for item in tasks if item["task_key"] == "create_chat_functions")
+    if task["depends_on"] != [{"task_key": "create_chat_views"}]:
+        raise ValueError("Chat functions must follow the chat views")
+    if task["spark_python_task"]["parameters"][-1] != (
+        "${workspace.file_path}/databricks_etl/sql/create_chat_functions.sql"
+    ):
+        raise ValueError("Chat functions must come from the source-controlled template")
 
 
 def main() -> None:

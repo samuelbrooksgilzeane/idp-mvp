@@ -24,7 +24,9 @@ CREATE OR REPLACE VIEW IDENTIFIER(:catalog || '.' || :project_schema || '.' || :
 COMMENT 'Extracted field instances, not documents; missing legacy projections are not zero values'
 AS SELECT f.extraction_run_id, f.document_id, f.record_id, f.schema_path, f.instance_path,
  f.declared_type, f.value_string, f.confidence_score, f.validation_status, f.validation_message,
- f.citation_ids, f.extraction_error
+ f.citation_ids, f.extraction_error,
+ -- Concrete path and type, set on every row; schema_path/instance_path are NULL for legacy rows.
+ f.field_path, f.field_type
 FROM IDENTIFIER(:catalog || '.' || :project_schema || '.' || :table_prefix || '_extracted_fields') f
 JOIN IDENTIFIER(:catalog || '.' || :project_schema || '.' || :table_prefix || '_chat_extractions') e
 ON f.extraction_run_id = e.extraction_run_id AND f.document_id = e.document_id;
