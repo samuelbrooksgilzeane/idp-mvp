@@ -122,6 +122,50 @@ Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pe
 Every later deployment to that workspace is step 4's plan, deploy and run. If the bootstrap is run again, deploy afterwards: replacing
 views drops the grants the App binding applied.
 
+## Document chat: Knowledge Assistant and Supervisor
+
+The bootstrap creates five read-only UC functions (`<prefix>_chat_document_fields`,
+`_chat_find_documents`, `_chat_invoices`, `_chat_invoice_totals`, `_chat_case_documents`) after the
+chat views. `scripts/provision_chat.py` then creates or updates, by name, the Knowledge Assistant
+`<app>-<target>-documents-ka` (files source: the source volume's `incoming/` folder) and the
+Supervisor `<app>-<target>-chat-supervisor` (the KA plus the five functions as tools). It is
+idempotent, never deletes, and prints the KA id and both serving endpoint names, which Databricks
+generates. Agent Bricks APIs are Beta.
+
+```bash
+# After the bootstrap and deploy above. Read-only preview first.
+cd scripts
+uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
+  --target $TARGET --catalog $CATALOG --project-schema $SCHEMA --dry-run
+uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
+  --target $TARGET --catalog $CATALOG --project-schema $SCHEMA
+# Free Edition: the KA indexes but cannot answer (G7), so provision the Supervisor alone:
+#   ... --no-knowledge-assistant
+```
+
+Grants (the KA and Supervisor ids are in the script output; `*_ID` below):
+
+```bash
+# Automatic KA Sync from the IDP App and the import Job. Sync needs CAN_MANAGE (the only levels
+# are CAN_MANAGE and CAN_QUERY). The import Job runs as the deploying identity, which created the KA.
+databricks knowledge-assistants update-permissions $KA_ID -p $PROFILE --json \
+  "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE\"}]}"
+# Then deploy with: --var ka_sync_enabled=true --var ka_id=$KA_ID
+# Chat app (Batch 7b): CAN_QUERY on the Supervisor and the KA, EXECUTE on the functions.
+databricks supervisor-agents update-permissions $SUPERVISOR_ID -p $PROFILE --json \
+  "{\"access_control_list\": [{\"service_principal_name\": \"$CHAT_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
+databricks knowledge-assistants update-permissions $KA_ID -p $PROFILE --json \
+  "{\"access_control_list\": [{\"service_principal_name\": \"$CHAT_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
+for f in document_fields find_documents invoices invoice_totals case_documents; do
+  sql "GRANT EXECUTE ON FUNCTION $CATALOG.$SCHEMA.${PREFIX}_chat_$f TO \`$CHAT_SP\`"
+done
+```
+
+Unverified until L5: whether the Supervisor runs the functions as the end user or as the chat
+app's principal, and so whether users or `$CHAT_SP` also need `USE CATALOG`, `USE SCHEMA` and
+`SELECT` on the four `_chat_*` views. Record the answer here. Re-running the bootstrap replaces the
+functions and views, so deploy and re-apply these grants afterwards.
+
 Historical detailed instructions and evidence, including the retired chat space: see
 [docs/archive](archive/) and [implementation handoff](archive/performance/intake-implementation-progress.md).
 These archived notes contain superseded checkpoints; reconcile them with current code and live state.

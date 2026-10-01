@@ -27,6 +27,8 @@ def main():
         "--auto-prepare-enabled", default="false", choices=["true", "false"]
     )
     parser.add_argument("--dispatch-job-id", type=int)
+    parser.add_argument("--ka-sync-enabled", default="false", choices=["true", "false"])
+    parser.add_argument("--ka-id", default=" ")
     args = parser.parse_args()
     if not args.batch_id.strip():
         raise ValueError("Start folder imports from the app; the run needs a batch_id")
@@ -59,10 +61,19 @@ def main():
         auto_prepare_enabled=auto_prepare,
         dispatch_job_id=args.dispatch_job_id if auto_prepare else None,
         import_concurrency=args.concurrency,
+        ka_sync_enabled=args.ka_sync_enabled == "true",
+        ka_id=args.ka_id,
     )
     uploads = build_upload_batch_service(settings, build_document_service(settings))
     service = build_folder_import_service(settings, uploads, start_runs=False)
-    counts = service.run(args.batch_id)
+    try:
+        counts = service.run(args.batch_id)
+    finally:
+        if settings.ka_sync_enabled and settings.ka_id:
+            from idp_app.services.chat_sync import shared_knowledge_sync
+
+            # The process exits next, so sync now instead of after the quiet period.
+            shared_knowledge_sync(settings.ka_id).flush()
     print(f"Folder import {args.batch_id}: {counts}")
 
 

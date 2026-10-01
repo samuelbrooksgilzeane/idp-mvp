@@ -19,6 +19,12 @@ variables:
     # Databricks Apps rejects an environment entry whose substituted value is empty.
     # Settings strips this placeholder to None until the chat app is deployed.
     default: " "
+  ka_sync_enabled:
+    description: Request a Knowledge Assistant Sync after documents are added or deleted
+    default: "false"
+  ka_id:
+    description: Knowledge Assistant id printed by scripts/provision_chat.py; blank until provisioned
+    default: " "
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.
     default: "false"

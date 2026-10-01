@@ -158,6 +158,11 @@ resources:
             value: ${var.import_volume_name}
           - name: IDP_IMPORT_JOB_ID
             value: ${resources.jobs.folder_importer.id}
+          # Document chat: KA Sync after uploads, imports and deletions (needs CAN_MANAGE on the KA).
+          - name: IDP_KA_SYNC_ENABLED
+            value: ${var.ka_sync_enabled}
+          - name: IDP_KA_ID
+            value: ${var.ka_id}
           - name: IDP_PARSE_DISPATCH_SIZE
             value: ${var.parse_dispatch_size}
           - name: IDP_MODE

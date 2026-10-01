@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     import_volume_name: str | None = None
     import_job_id: PositiveInt | None = None
     import_concurrency: int = Field(default=8, ge=1, le=32)
+    # Document chat: request a Knowledge Assistant Sync after documents are added or deleted.
+    ka_sync_enabled: bool = False
+    ka_id: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    )
 
     @property
     def folder_import_enabled(self) -> bool:
@@ -89,6 +94,12 @@ class Settings(BaseSettings):
             if value == "":
                 return None
         return value
+
+    @field_validator("ka_id", mode="before")
+    @classmethod
+    def blank_ka_id_is_unset(cls, value: Any) -> Any:
+        # The bundle passes " " until the KA exists (Apps rejects empty environment values).
+        return value.strip() or None if isinstance(value, str) else value
 
     @field_validator("chat_app_url", mode="before")
     @classmethod
@@ -131,6 +142,8 @@ class Settings(BaseSettings):
             required["IDP_EXPORT_JOB_ID"] = self.export_job_id
         if self.import_volume_name:
             required["IDP_IMPORT_JOB_ID"] = self.import_job_id
+        if self.ka_sync_enabled:
+            required["IDP_KA_ID"] = self.ka_id
         missing = [name for name, value in required.items() if not value]
         if missing:
             raise ValueError("IDP_MODE=databricks requires configuration: " + ", ".join(missing))

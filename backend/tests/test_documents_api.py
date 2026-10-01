@@ -338,3 +338,30 @@ def test_databricks_delete_tolerates_missing_file_but_preserves_other_errors():
     delete.side_effect = PermissionDenied("denied")
     with pytest.raises(PermissionDenied):
         storage.delete("document.pdf")
+
+
+def test_source_changes_are_signalled_on_registration_and_deletion(tmp_path: Path) -> None:
+    from idp_app.services.document_registry import SQLiteDocumentRegistry
+    from idp_app.services.document_storage import LocalVolumeStorage
+
+    changes: list[str] = []
+    service = DocumentService(
+        LocalVolumeStorage(tmp_path),
+        SQLiteDocumentRegistry(tmp_path / "registry.sqlite3"),
+        1024 * 1024,
+        on_source_changed=lambda: changes.append("changed"),
+    )
+    app = create_app(Settings(_env_file=None, local_data_dir=tmp_path))
+    app.state.document_service = service
+    client = TestClient(app)
+
+    uploaded = upload_file(client)
+    assert uploaded.status_code == 201, uploaded.text
+    assert changes == ["changed"]
+    duplicate = upload_file(client)
+    assert duplicate.status_code == 409
+    assert changes == ["changed"]  # nothing new reached the volume
+
+    document_id = uploaded.json()["documents"][0]["document_id"]
+    assert client.delete(f"/api/documents/{document_id}").status_code == 204
+    assert changes == ["changed", "changed"]

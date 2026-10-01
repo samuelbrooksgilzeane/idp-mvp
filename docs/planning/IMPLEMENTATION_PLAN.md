@@ -102,7 +102,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
 | 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
 | 6 | US workspace deployment | 1 | Blocked: US workspace access |
-| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7 done (decision below); 7a next |
+| 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7 and 7a done (1 Oct); 7b next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Blocked: Batch 7 |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -366,6 +366,18 @@ and KA + Supervisor move back to the US workspace after Batch 6 using 7a's code 
 for the recorded API shapes.
 
 ### 7a — Functions, provisioning and sync (code session, no workspace)
+
+Status: Done 1 October 2026. Deviations: (1) the functions are a SQL template applied by a bootstrap
+`spark_python_task` (`databricks_etl/src/create_chat_functions.py`), because function bodies cannot
+use the SQL tasks' parameter markers; (2) `_chat_fields` gained `field_path`/`field_type` (legacy rows
+have no `schema_path`); (3) functions are `chat_document_fields`, `chat_find_documents`,
+`chat_invoices`, `chat_invoice_totals` (per seller and currency), `chat_case_documents`, created and
+called on dev; (4) Sync is debounced (60 s quiet, at most every 10 min) on every registration and
+deletion rather than counting batch completion; the import Job flushes before exiting; settings
+`IDP_KA_SYNC_ENABLED`/`IDP_KA_ID` from bundle variables `ka_sync_enabled`/`ka_id`; (5) KA permission
+levels are only CAN_MANAGE/CAN_QUERY, so the App needs CAN_MANAGE to sync. Grants are in
+DEPLOYMENT_NOTES "Document chat". Not provisioned on dev (KA cannot answer there); the probe
+Supervisor answered from a function tool.
 
 1. **UC SQL functions** over the `_chat_*` views (read `create_chat_views.sql` columns first):
    invoice totals by supplier and date range, find documents by field value, fields of one

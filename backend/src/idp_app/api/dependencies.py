@@ -84,7 +84,11 @@ def build_document_service(settings: Settings) -> DocumentService:
         storage = LocalVolumeStorage(settings.local_data_dir)
         registry = SQLiteDocumentRegistry(settings.local_data_dir / "registry.sqlite3")
         return DocumentService(
-            storage, registry, settings.max_upload_bytes, _registration_callback(settings, registry)
+            storage,
+            registry,
+            settings.max_upload_bytes,
+            _registration_callback(settings, registry),
+            _source_changed_callback(settings),
         )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
@@ -119,7 +123,16 @@ def build_document_service(settings: Settings) -> DocumentService:
         databricks_registry,
         settings.max_upload_bytes,
         _registration_callback(settings, databricks_registry),
+        _source_changed_callback(settings),
     )
+
+
+def _source_changed_callback(settings: Settings) -> Callable[[], object] | None:
+    if not (settings.ka_sync_enabled and settings.ka_id):
+        return None
+    from idp_app.services.chat_sync import shared_knowledge_sync
+
+    return shared_knowledge_sync(settings.ka_id).request
 
 
 def get_parsing_service(request: Request) -> ParsingService:
@@ -198,6 +211,7 @@ def get_viewer_service(request: Request) -> ViewerService:
 
 def build_viewer_service(settings: Settings) -> ViewerService:
     from idp_app.services.viewer_projection import ViewerProjection
+
     database_path = settings.local_data_dir / "registry.sqlite3"
     if settings.mode is IdpMode.MOCK:
         return ViewerService(
@@ -245,7 +259,8 @@ def build_viewer_service(settings: Settings) -> ViewerService:
             artifacts_volume_name,
         ),
         ViewerProjection(sql=documents, namespace=f"{catalog}.{project_schema}.{table_prefix}")
-        if settings.viewer_projection_enabled else None,
+        if settings.viewer_projection_enabled
+        else None,
     )
 
 

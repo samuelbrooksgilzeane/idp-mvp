@@ -8,6 +8,8 @@ from idp_app.core.config import IdpMode, Settings
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
     "chat_app_url",
+    "ka_sync_enabled",
+    "ka_id",
     "upload_parallel_transfers",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
@@ -528,6 +530,14 @@ def validate_import_job() -> None:
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
     if env.get("IDP_IMPORT_JOB_ID") != "${resources.jobs.folder_importer.id}":
         raise ValueError("The App must start the bundle's import Job")
+    # The App and the import Job must sync the same Knowledge Assistant, under one switch.
+    if (
+        pairs.get("--ka-sync-enabled") != "${var.ka_sync_enabled}"
+        or pairs.get("--ka-id") != "${var.ka_id}"
+        or env.get("IDP_KA_SYNC_ENABLED") != "${var.ka_sync_enabled}"
+        or env.get("IDP_KA_ID") != "${var.ka_id}"
+    ):
+        raise ValueError("App and import Job must take KA Sync settings from the bundle variables")
 
 
 def validate_application_resource() -> None:
