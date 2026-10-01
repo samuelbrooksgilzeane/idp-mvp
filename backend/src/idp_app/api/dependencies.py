@@ -754,8 +754,7 @@ def build_document_chat_service(
             registry, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
         )
 
-    def file_name(document_id: str) -> str | None:
-        document = registry.get(document_id)
-        return document.file_name if document else None
+    def file_names(document_ids: list[str]) -> dict[str, str]:
+        return {key: record.file_name for key, record in registry.get_many(document_ids).items()}
 
-    return DocumentChatService(client, repository, file_name)
+    return DocumentChatService(client, repository, file_names)

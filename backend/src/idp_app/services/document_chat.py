@@ -8,6 +8,7 @@ is stored or shown. History is kept per user: every read and write is scoped to 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -265,12 +266,12 @@ class DocumentChatService:
         self,
         client: ChatClient,
         repository: ChatRepository,
-        file_name: Callable[[str], str | None],
+        file_names: Callable[[list[str]], dict[str, str]],
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.client = client
         self.repository = repository
-        self.file_name = file_name
+        self.file_names = file_names
         self.clock = clock
         self._names: dict[str, str] = {}
 
@@ -315,13 +316,12 @@ class DocumentChatService:
         return {"conversation_id": conversation_id, "messages": [asked, reply]}
 
     def _lookup(self, ids: set[str]) -> dict[str, str]:
-        for document_id in sorted(ids - self._names.keys())[:20]:
-            try:
-                name = self.file_name(document_id)
-            except Exception:
-                name = None  # unknown ids stay as they are; the answer is still shown
-            if name:
-                self._names[document_id] = name
+        missing = sorted(ids - self._names.keys())[:20]
+        if missing:
+            # One query, not one per document. On failure the ids stay as they are; the answer
+            # is still shown.
+            with contextlib.suppress(Exception):
+                self._names.update(self.file_names(missing))
         return {key: self._names[key] for key in ids if key in self._names}
 
 

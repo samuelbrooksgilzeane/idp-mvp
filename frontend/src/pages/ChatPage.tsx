@@ -25,7 +25,7 @@ export function ChatPage() {
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const skipLoad = useRef<string | null>(null);
-  const end = useRef<HTMLDivElement>(null);
+  const thread = useRef<HTMLDivElement>(null);
   // Scroll to the newest message only after asking, so opening a conversation shows its start.
   const followNewest = useRef(false);
 
@@ -60,7 +60,9 @@ export function ChatPage() {
   }, [conversationId]);
 
   useEffect(() => {
-    if (followNewest.current) end.current?.scrollIntoView?.({ block: "end" });
+    // Scroll only the thread, never the page around it.
+    const box = thread.current;
+    if (followNewest.current && box) box.scrollTop = box.scrollHeight;
   }, [messages, pending]);
 
   async function ask(event?: FormEvent) {
@@ -116,7 +118,7 @@ export function ChatPage() {
         )}
       </aside>
       <div className="chat-main">
-        <div className="chat-thread" aria-live="polite">
+        <div className="chat-thread" ref={thread} aria-live="polite">
           {messages.length === 0 && !pending ? (
             <div className="page-state">
               <strong>Ask about invoices, forms or extracted fields</strong>
@@ -130,7 +132,6 @@ export function ChatPage() {
               <p className="chat-thinking" role="status">Looking through your documents… this can take up to a minute.</p>
             </>
           ) : null}
-          <div ref={end} />
         </div>
         {error ? <p className="chat-error" role="alert">{error}</p> : null}
         <form className="chat-composer" onSubmit={(event) => void ask(event)}>

@@ -53,12 +53,12 @@ def service(tmp_path: Path) -> tuple[DocumentChatService, FakeClient, list[str]]
     client = FakeClient()
     lookups: list[str] = []
 
-    def file_name(document_id: str) -> str | None:
-        lookups.append(document_id)
-        return "50080tihd.pdf" if document_id == DOC else None
+    def file_names(document_ids: list[str]) -> dict[str, str]:
+        lookups.extend(document_ids)
+        return {DOC: "50080tihd.pdf"} if DOC in document_ids else {}
 
     repository = SQLiteChatRepository(tmp_path / "chat.sqlite3")
-    return DocumentChatService(client, repository, file_name), client, lookups
+    return DocumentChatService(client, repository, file_names), client, lookups
 
 
 def test_parse_keeps_the_final_answer_tools_and_citations() -> None:
