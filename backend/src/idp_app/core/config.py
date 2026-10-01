@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     import_volume_name: str | None = None
     import_job_id: PositiveInt | None = None
     import_concurrency: int = Field(default=8, ge=1, le=32)
+    # Document chat page: the Supervisor serving endpoint printed by scripts/provision_chat.py.
+    chat_endpoint: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
     # Document chat: request a Knowledge Assistant Sync after documents are added or deleted.
     ka_sync_enabled: bool = False
     ka_id: str | None = Field(
@@ -95,10 +97,14 @@ class Settings(BaseSettings):
                 return None
         return value
 
-    @field_validator("ka_id", mode="before")
+    @property
+    def chat_enabled(self) -> bool:
+        return self.mode is IdpMode.MOCK or bool(self.chat_endpoint)
+
+    @field_validator("ka_id", "chat_endpoint", mode="before")
     @classmethod
-    def blank_ka_id_is_unset(cls, value: Any) -> Any:
-        # The bundle passes " " until the KA exists (Apps rejects empty environment values).
+    def blank_is_unset(cls, value: Any) -> Any:
+        # The bundle passes " " until provisioned (Apps rejects empty environment values).
         return value.strip() or None if isinstance(value, str) else value
 
     @field_validator("chat_app_url", mode="before")

@@ -170,4 +170,17 @@ export type InvoiceSummary = {
 export type AppConfig = {
   project_name: string;
   chat_app_url: string | null;
+  chat_enabled?: boolean;
 };
+
+export type ChatMessage = {
+  seq: number;
+  role: "user" | "assistant";
+  text: string;
+  tools?: string[];
+  citations?: string[];
+  elapsed_seconds?: number;
+  created_at: string;
+};
+
+export type ConversationSummary = { conversation_id: string; title: string; updated_at: string };

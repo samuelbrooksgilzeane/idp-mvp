@@ -11,6 +11,7 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(module => ({ default: module.ResultDetailPage })));
 import { ResultsPage } from "./pages/ResultsPage";
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
+const ChatPage = lazy(() => import("./pages/ChatPage").then(module => ({ default: module.ChatPage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useFolderImport } from "./hooks/useFolderImport";
 import { useDocumentPage } from "./hooks/useDocumentPage";
@@ -62,6 +63,7 @@ export function App() {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
   const [chatAppUrl, setChatAppUrl] = useState<string | null>(null);
+  const [chatEnabled, setChatEnabled] = useState(false);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
 
@@ -144,7 +146,10 @@ export function App() {
         if (!response.ok) throw new Error("Configuration request failed");
         return response.json() as Promise<AppConfig>;
       })
-      .then((config) => setChatAppUrl(config.chat_app_url ?? null))
+      .then((config) => {
+        setChatAppUrl(config.chat_app_url ?? null);
+        setChatEnabled(Boolean(config.chat_enabled));
+      })
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
@@ -168,7 +173,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatAppUrl={chatAppUrl} />
+      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatAppUrl={chatAppUrl} chatEnabled={chatEnabled} />
       <div className="app-main">
       <header className="top-bar" aria-label="Location">
         {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1
@@ -223,6 +228,8 @@ export function App() {
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:runId" element={<ResultDetailPage />} />
           <Route path="/schema" element={<SchemaPage />} />
+          <Route path="/chat" element={<ChatPage />} />
+          <Route path="/chat/:conversationId" element={<ChatPage />} />
         </Routes>
         )}
         </Suspense>

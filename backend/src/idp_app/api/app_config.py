@@ -15,4 +15,8 @@ def app_config(
 ) -> dict[str, Any]:
     del user
     settings = request.app.state.settings
-    return {"project_name": settings.app_name, "chat_app_url": settings.chat_app_url}
+    return {
+        "project_name": settings.app_name,
+        "chat_app_url": settings.chat_app_url,
+        "chat_enabled": settings.chat_enabled,
+    }

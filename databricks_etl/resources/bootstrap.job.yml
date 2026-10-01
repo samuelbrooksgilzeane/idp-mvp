@@ -239,6 +239,17 @@ resources:
               - --sql-path
               - ${workspace.file_path}/databricks_etl/sql/create_chat_functions.sql
           environment_key: default
+        - task_key: migrate_chat_history
+          depends_on:
+            - task_key: create_governed_objects
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_chat_history.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
         - task_key: migrate_work_batches
           depends_on:
             - task_key: create_governed_objects

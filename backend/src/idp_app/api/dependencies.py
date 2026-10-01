@@ -9,6 +9,7 @@ from idp_app.services.work_batches import WorkRepository
 
 if TYPE_CHECKING:
     from idp_app.services.batch_repository import BatchRepository
+    from idp_app.services.document_chat import DocumentChatService
     from idp_app.services.folder_import import FolderImportService
     from idp_app.services.upload_batches import UploadBatchService
 
@@ -705,3 +706,56 @@ def _registration_callback(
     preparation = _preparation(settings, documents, runs)
     assert preparation is not None
     return lambda document: preparation.request(document.document_id, document.uploaded_by)
+
+
+def get_document_chat_service(request: Request) -> "DocumentChatService":
+    from idp_app.services.document_chat import ChatError, DocumentChatService
+
+    existing = getattr(request.app.state, "document_chat_service", None)
+    if isinstance(existing, DocumentChatService):
+        return existing
+    settings = cast(Settings, request.app.state.settings)
+    if not settings.chat_enabled:
+        raise ChatError("CHAT_DISABLED", "Document chat is not configured for this app.", 404)
+    service = build_document_chat_service(settings, get_document_service(request))
+    request.app.state.document_chat_service = service
+    return service
+
+
+def build_document_chat_service(
+    settings: Settings, documents: DocumentService
+) -> "DocumentChatService":
+    from databricks.sdk.core import Config
+
+    from idp_app.services.document_chat import (
+        ChatClient,
+        ChatRepository,
+        DatabricksChatRepository,
+        DocumentChatService,
+        MockChatClient,
+        ServingEndpointChatClient,
+        SQLiteChatRepository,
+    )
+
+    registry = documents.registry
+    client: ChatClient
+    repository: ChatRepository
+    if settings.mode is IdpMode.MOCK:
+        client = MockChatClient()
+        repository = SQLiteChatRepository(settings.local_data_dir / "registry.sqlite3")
+    else:
+        assert isinstance(registry, DatabricksDocumentRegistry)
+        # Supervisor answers can take a minute when several tools run.
+        client = ServingEndpointChatClient(
+            WorkspaceClient(config=Config(http_timeout_seconds=170)),
+            _required(settings.chat_endpoint, "chat"),
+        )
+        repository = DatabricksChatRepository(
+            registry, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
+        )
+
+    def file_name(document_id: str) -> str | None:
+        document = registry.get(document_id)
+        return document.file_name if document else None
+
+    return DocumentChatService(client, repository, file_name)

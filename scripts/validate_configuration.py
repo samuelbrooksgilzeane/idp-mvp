@@ -10,6 +10,7 @@ TRUSTED_VARIABLES = {
     "chat_app_url",
     "ka_sync_enabled",
     "ka_id",
+    "chat_endpoint",
     "upload_parallel_transfers",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
@@ -166,6 +167,7 @@ def validate_data_bootstrap() -> None:
         "migrate_generic_extraction_fields",
         "create_chat_views",
         "create_chat_functions",
+        "migrate_chat_history",
         "migrate_work_batches",
     ]
     if (
@@ -602,6 +604,8 @@ def validate_chat_configuration() -> None:
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
     if env.get("IDP_CHAT_APP_URL") != "${var.chat_app_url}":
         raise ValueError("IDP_CHAT_APP_URL must use the chat_app_url bundle variable")
+    if env.get("IDP_CHAT_ENDPOINT") != "${var.chat_endpoint}":
+        raise ValueError("IDP_CHAT_ENDPOINT must use the chat_endpoint bundle variable")
     bootstrap = load_yaml(ROOT / "databricks_etl/resources/bootstrap.job.yml")
     jobs = bootstrap["resources"]["jobs"]
     tasks = next(iter(jobs.values()))["tasks"]

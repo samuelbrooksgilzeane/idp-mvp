@@ -19,6 +19,9 @@ variables:
     # Databricks Apps rejects an environment entry whose substituted value is empty.
     # Settings strips this placeholder to None until the chat app is deployed.
     default: " "
+  chat_endpoint:
+    description: Chat Supervisor serving endpoint from scripts/provision_chat.py; blank hides the chat page
+    default: " "
   ka_sync_enabled:
     description: Request a Knowledge Assistant Sync after documents are added or deleted
     default: "false"

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 
 from idp_app.api.app_config import router as app_config_router
 from idp_app.api.batches import batches_router
+from idp_app.api.chat import chat_router
 from idp_app.api.documents import documents_router
 from idp_app.api.export_requests import router as export_requests_router
 from idp_app.api.extraction import extraction_router
@@ -31,6 +32,7 @@ api_router.include_router(schemas_router)
 api_router.include_router(extraction_router)
 api_router.include_router(validation_router)
 api_router.include_router(results_router)
+api_router.include_router(chat_router)
 
 
 @api_router.get("/health", response_model=HealthResponse, tags=["system"])

@@ -158,6 +158,10 @@ resources:
             value: ${var.import_volume_name}
           - name: IDP_IMPORT_JOB_ID
             value: ${resources.jobs.folder_importer.id}
+          # Document chat page. The App is at the binding cap, so CAN_QUERY on the Supervisor and
+          # the chat table grants are applied directly (DEPLOYMENT_NOTES "Document chat").
+          - name: IDP_CHAT_ENDPOINT
+            value: ${var.chat_endpoint}
           # Document chat: KA Sync after uploads, imports and deletions (needs CAN_MANAGE on the KA).
           - name: IDP_KA_SYNC_ENABLED
             value: ${var.ka_sync_enabled}

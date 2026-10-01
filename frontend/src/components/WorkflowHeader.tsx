@@ -9,10 +9,11 @@ const NAVIGATION = [
 
 type WorkflowHeaderProps = {
   appName: string; runtimeMode?: string; apiStatus?: string; chatAppUrl?: string | null;
+  chatEnabled?: boolean;
 };
 
 /** Sidebar navigation; the runtime footer only reports live connection state. */
-export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl }: WorkflowHeaderProps) {
+export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl, chatEnabled }: WorkflowHeaderProps) {
   return (
     <aside className="app-sidebar">
       <div className="brand-lockup">
@@ -28,7 +29,13 @@ export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatAppUrl }: 
               </NavLink>
             </li>
           ))}
-          {chatAppUrl ? (
+          {chatEnabled ? (
+            <li>
+              <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : undefined)}>
+                <MessageSquare size={16} aria-hidden="true" />Ask documents
+              </NavLink>
+            </li>
+          ) : chatAppUrl ? (
             <li>
               <a href={chatAppUrl} target="_blank" rel="noopener noreferrer"
                 aria-label="Ask documents (opens in a new tab)">

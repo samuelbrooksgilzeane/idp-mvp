@@ -76,6 +76,10 @@ class DocumentService:
         # Non-blocking notice that the source volume gained or lost a PDF (KA Sync).
         self._on_source_changed = on_source_changed
 
+    @property
+    def registry(self) -> DocumentRegistry:
+        return self._registry
+
     async def upload(
         self,
         upload: UploadFile,

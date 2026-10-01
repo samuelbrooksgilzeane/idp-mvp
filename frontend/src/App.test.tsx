@@ -87,6 +87,22 @@ describe("App", () => {
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
   });
 
+  it("links to the built-in chat page when chat is enabled", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => {
+        const path = input.toString();
+        if (path.endsWith("/health")) return health;
+        if (path.endsWith("/app-config")) return { project_name: "IDP MVP", chat_app_url: null, chat_enabled: true };
+        return path.includes("/documents/page?") ? { items: [], next_cursor: null } : [];
+      },
+    })));
+    renderApp();
+    const link = await screen.findByRole("link", { name: /Ask documents/ });
+    expect(link).toHaveAttribute("href", "/chat");
+    expect(link).not.toHaveAttribute("target");
+  });
+
   it("shows registered documents without exposing their storage path", async () => {
     vi.stubGlobal(
       "fetch",
