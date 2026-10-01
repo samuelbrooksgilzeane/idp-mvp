@@ -121,6 +121,8 @@ class Report:
     actions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     endpoints: dict[str, str | None] = field(default_factory=dict)
+    # MLflow experiments holding each agent's traces (the App needs CAN_EDIT to tag them).
+    experiments: dict[str, str | None] = field(default_factory=dict)
 
 
 class Provisioner:
@@ -155,6 +157,7 @@ class Provisioner:
         self.report.endpoints["knowledge_assistant"] = (
             ka.get("endpoint_name") if ka else None
         )
+        self.report.experiments["knowledge_assistant"] = ka.get("experiment_id") if ka else None
         if ka is None:
             self.report.actions.append(f"create knowledge source {SOURCE_DISPLAY_NAME}")
             return None
@@ -202,6 +205,9 @@ class Provisioner:
         )
         self.report.endpoints["supervisor"] = (
             supervisor.get("endpoint_name") if supervisor else None
+        )
+        self.report.experiments["supervisor"] = (
+            supervisor.get("experiment_id") if supervisor else None
         )
         tools = self._desired_tools(ka)
         if supervisor is None:

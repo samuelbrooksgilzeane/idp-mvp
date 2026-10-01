@@ -17,6 +17,7 @@ from idp_app.services.document_chat import (
 )
 
 DOC = "d964074f-52b7-5c2e-9fd7-3cfcec27bc08"
+TRACE = "tr-10764b64efd67c5236438c723a6bcd05"
 
 # Shape of a real Supervisor reply (probe, 1 October 2026): progress notes, agent name tags, tool
 # calls named <catalog>__<schema>__<function>, then the answer.
@@ -36,13 +37,21 @@ SUPERVISOR_REPLY: dict[str, Any] = {
                 }
             ],
         },
-    ]
+    ],
+    "databricks_output": {"trace": {"info": {"trace_id": TRACE}, "data": {"spans": []}}},
 }
 
 
 class FakeClient:
     def __init__(self) -> None:
         self.requests: list[list[dict[str, str]]] = []
+        self.tags: list[tuple[str, dict[str, str]]] = []
+        self.tagging_fails = False
+
+    def tag_trace(self, trace_id: str, tags: dict[str, str]) -> None:
+        if self.tagging_fails:
+            raise RuntimeError("PERMISSION_DENIED")
+        self.tags.append((trace_id, tags))
 
     def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         self.requests.append(messages)
@@ -147,3 +156,53 @@ def test_chat_is_off_in_databricks_mode_without_an_endpoint() -> None:
     )
     assert settings.chat_endpoint is None and settings.chat_enabled is False
     assert settings.model_copy(update={"chat_endpoint": "mas-1-endpoint"}).chat_enabled
+
+
+def test_trace_id_is_stored_and_tagged_but_never_returned(tmp_path: Path) -> None:
+    chat, client, _ = service(tmp_path)
+
+    asked = chat.ask("ann@example.com", None, "Q")
+    conversation_id = asked["conversation_id"]
+
+    assert parse_response(SUPERVISOR_REPLY).trace_id == TRACE
+    assert all("trace_id" not in message for message in asked["messages"])
+    assert all("trace_id" not in m for m in chat.conversation("ann@example.com", conversation_id))
+    stored = chat.repository.messages("ann@example.com", conversation_id)
+    assert stored[1]["trace_id"] == TRACE
+    assert client.tags == [
+        (TRACE, {"idp.user": "ann@example.com", "idp.conversation_id": conversation_id})
+    ]
+
+
+def test_tagging_failure_or_missing_trace_never_blocks_the_answer(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    chat, client, _ = service(tmp_path)
+    client.tagging_fails = True
+    assert chat.ask("ann@example.com", None, "Q")["messages"][1]["role"] == "assistant"
+    assert "trace tagging failed" in caplog.text
+
+    untraced = {key: value for key, value in SUPERVISOR_REPLY.items() if key != "databricks_output"}
+    assert parse_response(untraced).trace_id is None
+    bad = {**SUPERVISOR_REPLY, "databricks_output": {"trace": {"info": {"trace_id": "x/../y"}}}}
+    assert parse_response(bad).trace_id is None
+
+
+def test_endpoint_client_requests_the_trace_and_tags_it() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    from idp_app.services.document_chat import ServingEndpointChatClient
+
+    api = Mock()
+    api.do.return_value = SUPERVISOR_REPLY
+    client = ServingEndpointChatClient(SimpleNamespace(api_client=api), "mas-1-endpoint")
+
+    client.ask([{"role": "user", "content": "Q"}])
+    method, path = api.do.call_args.args
+    assert (method, path) == ("POST", "/serving-endpoints/mas-1-endpoint/invocations")
+    assert api.do.call_args.kwargs["body"]["databricks_options"] == {"return_trace": True}
+
+    client.tag_trace(TRACE, {"idp.user": "ann@example.com"})
+    assert api.do.call_args.args == ("PATCH", f"/api/2.0/mlflow/traces/{TRACE}/tags")
+    assert api.do.call_args.kwargs == {"body": {"key": "idp.user", "value": "ann@example.com"}}

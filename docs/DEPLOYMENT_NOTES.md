@@ -165,6 +165,10 @@ for v in documents extractions fields records; do
   sql "GRANT SELECT ON TABLE $CATALOG.$SCHEMA.${PREFIX}_chat_$v TO \`$APP_SP\`"
 done
 sql "GRANT SELECT, MODIFY ON TABLE $CATALOG.$SCHEMA.${PREFIX}_chat_messages TO \`$APP_SP\`"
+# Trace tagging: the App labels each answer's MLflow trace with the user and conversation.
+# $SUPERVISOR_EXPERIMENT_ID is "experiments.supervisor" in the provisioning output.
+databricks experiments update-permissions $SUPERVISOR_EXPERIMENT_ID -p $PROFILE --json \
+  "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_EDIT\"}]}"
 # Where a KA exists: CAN_QUERY for the App (the Supervisor calls it), CAN_MANAGE for automatic Sync.
 databricks knowledge-assistants update-permissions $KA_ID -p $PROFILE --json \
   "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_MANAGE\"}]}"
@@ -174,6 +178,25 @@ databricks knowledge-assistants update-permissions $KA_ID -p $PROFILE --json \
 
 Re-running the bootstrap replaces the chat functions and views, which drops their grants: deploy and
 re-apply the grants above afterwards. Answers can take up to a minute when several tools run.
+
+**Finding the trace behind a user's conversation.** Every answer stores its MLflow trace id in the
+history row (never shown to users), and the trace is tagged `idp.user` and `idp.conversation_id`.
+Either start from the history:
+
+```sql
+SELECT conversation_id, seq, created_at,
+       get_json_object(payload, '$.text')     AS answer,
+       get_json_object(payload, '$.trace_id') AS trace_id
+FROM <catalog>.<schema>.<prefix>_chat_messages
+WHERE user_id = 'ann@example.com' AND role = 'assistant'
+ORDER BY created_at DESC;
+```
+
+then open the Supervisor's experiment, **Traces**, and search for the `tr-...` id; or start in the
+Traces tab and filter with ``tags.`idp.user` = 'ann@example.com'`` (or
+``tags.`idp.conversation_id` = '<id>'``). Tagging is best effort: without CAN_EDIT on the
+experiment the App logs `Chat trace tagging failed`, and the stored trace id still links the two.
+Answers given before this change have no trace id.
 
 Historical detailed instructions and evidence, including the retired chat space: see
 [docs/archive](archive/) and [implementation handoff](archive/performance/intake-implementation-progress.md).

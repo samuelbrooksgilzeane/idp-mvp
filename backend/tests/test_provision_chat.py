@@ -42,6 +42,7 @@ class FakeAgentBricks:
                 item["endpoint_name"] = f"ka-{item_id}-endpoint"
             if collection == "supervisor-agents":
                 item["endpoint_name"] = f"mas-{item_id}-endpoint"
+                item["experiment_id"] = f"exp-{item_id}"
             if collection.endswith("/tools"):
                 item["tool_id"] = item_id
             self.items.setdefault(collection, []).append(item)
@@ -83,6 +84,7 @@ def test_creates_ka_source_supervisor_and_tools_then_rerun_is_a_no_op() -> None:
         "knowledge_assistant": "ka-id1-endpoint",
         "supervisor": "mas-id3-endpoint",
     }
+    assert report.experiments["supervisor"] == "exp-id3"
     ka = api.items["knowledge-assistants"][0]
     assert ka["display_name"] == "idp-mvp-dev-documents-ka"
     source = api.items["knowledge-assistants/id1/knowledge-sources"][0]

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 DOCUMENT_FILE = re.compile(
     r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.pdf)?\b"
 )
+TRACE_ID = re.compile(r"^tr-[0-9a-f]{32}$")
 AGENT_NAME = re.compile(r"^\s*<name>.*</name>\s*$", re.DOTALL)
 # Older turns sent back to the endpoint; enough context, bounded request size.
 HISTORY_TURNS = 12
@@ -44,6 +45,7 @@ class Answer:
     text: str
     tools: list[str]
     citations: list[str]
+    trace_id: str | None = None
 
 
 def parse_response(response: dict[str, Any]) -> Answer:
@@ -74,7 +76,15 @@ def parse_response(response: dict[str, Any]) -> Answer:
             messages.append(text.strip())
     if not messages:
         raise ChatError("CHAT_EMPTY_ANSWER", "The assistant returned no answer.", 502)
-    return Answer(messages[-1], tools, citations)
+    return Answer(messages[-1], tools, citations, trace_id(response))
+
+
+def trace_id(response: dict[str, Any]) -> str | None:
+    """The MLflow trace id the endpoint returns when asked with return_trace (else None)."""
+    trace = (response.get("databricks_output") or {}).get("trace") or {}
+    info = trace.get("info") or {}
+    value = info.get("trace_id") or info.get("request_id")
+    return value if isinstance(value, str) and TRACE_ID.fullmatch(value) else None
 
 
 def rewrite_document_names(text: str, names: dict[str, str]) -> str:
@@ -93,6 +103,10 @@ def document_ids(*texts: str) -> set[str]:
 class ChatClient(Protocol):
     def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]: ...
 
+    def tag_trace(self, trace_id: str, tags: dict[str, str]) -> None:
+        """Label the endpoint's MLflow trace so operators can search it by user/conversation."""
+        ...
+
 
 class ServingEndpointChatClient:
     def __init__(self, client: Any, endpoint: str) -> None:
@@ -101,7 +115,12 @@ class ServingEndpointChatClient:
 
     def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         try:
-            response: dict[str, Any] = self.api.do("POST", self.path, body={"input": messages})
+            # return_trace adds the MLflow trace (id, spans) under databricks_output.trace.
+            response: dict[str, Any] = self.api.do(
+                "POST",
+                self.path,
+                body={"input": messages, "databricks_options": {"return_trace": True}},
+            )
         except Exception as error:
             # No raw text: endpoint errors can echo request content or configuration.
             logger.warning(
@@ -114,9 +133,17 @@ class ServingEndpointChatClient:
             ) from error
         return response
 
+    def tag_trace(self, trace_id: str, tags: dict[str, str]) -> None:
+        path = f"/api/2.0/mlflow/traces/{trace_id}/tags"
+        for key, value in tags.items():
+            self.api.do("PATCH", path, body={"key": key, "value": value})
+
 
 class MockChatClient:
     """Local development: a canned answer that exercises tables, tools and citations."""
+
+    def tag_trace(self, trace_id: str, tags: dict[str, str]) -> None:
+        return None
 
     def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]:
         question = messages[-1]["content"]
@@ -282,7 +309,7 @@ class DocumentChatService:
         messages = self.repository.messages(user, _conversation_id(conversation_id))
         if not messages:
             raise ChatError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404)
-        return messages
+        return [_public(message) for message in messages]
 
     def ask(self, user: str, conversation_id: str | None, text: str) -> dict[str, Any]:
         question = text.strip()
@@ -312,8 +339,25 @@ class DocumentChatService:
             "elapsed_seconds": round(time.monotonic() - started, 1),
             "created_at": now,
         }
+        if answer.trace_id:
+            # Stored for operators (history row -> MLflow trace); never sent to the browser.
+            reply["trace_id"] = answer.trace_id
+            self._tag(answer.trace_id, user, conversation_id)
         self.repository.append(user, conversation_id, [asked, reply])
-        return {"conversation_id": conversation_id, "messages": [asked, reply]}
+        return {"conversation_id": conversation_id, "messages": [asked, _public(reply)]}
+
+    def _tag(self, trace: str, user: str, conversation_id: str) -> None:
+        try:
+            self.client.tag_trace(
+                trace, {"idp.user": user, "idp.conversation_id": conversation_id}
+            )
+        except Exception as error:
+            # Best effort: the trace id is already stored with the answer.
+            logger.warning(
+                "Chat trace tagging failed: %s %s",
+                type(error).__name__,
+                getattr(error, "error_code", None) or "",
+            )
 
     def _lookup(self, ids: set[str]) -> dict[str, str]:
         missing = sorted(ids - self._names.keys())[:20]
@@ -330,3 +374,8 @@ def _conversation_id(value: str) -> str:
         return str(uuid.UUID(value))
     except ValueError as error:
         raise ChatError("CONVERSATION_NOT_FOUND", "Conversation not found.", 404) from error
+
+
+def _public(message: dict[str, Any]) -> dict[str, Any]:
+    """A history message as the browser sees it: operator-only fields removed."""
+    return {key: value for key, value in message.items() if key != "trace_id"}
