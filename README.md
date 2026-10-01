@@ -68,7 +68,6 @@ Server settings use the `IDP_` environment prefix:
 | `IDP_ARTIFACTS_VOLUME_NAME` | Artifact volume name |
 | `IDP_WAREHOUSE_ID` | SQL warehouse identifier |
 | `IDP_PARSE_JOB_ID` | Deployed document-parser Job identifier |
-| `IDP_VALIDATION_ENDPOINT` | Future validation endpoint |
 | `IDP_APP_NAME` | Application display name |
 | `IDP_LOCAL_DATA_DIR` | Ignored local mock storage root |
 | `IDP_MAX_UPLOAD_BYTES` | Maximum size of each streamed PDF |

@@ -143,7 +143,6 @@ def test_chat_is_off_in_databricks_mode_without_an_endpoint() -> None:
         warehouse_id="abc",
         parse_job_id=1,
         extraction_job_id=1,
-        validation_endpoint="unused",
         chat_endpoint=" ",
     )
     assert settings.chat_endpoint is None and settings.chat_enabled is False

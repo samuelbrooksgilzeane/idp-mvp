@@ -187,7 +187,5 @@ resources:
             value_from: document-parser
           - name: IDP_EXTRACTION_JOB_ID
             value_from: document-extractor
-          - name: IDP_VALIDATION_ENDPOINT
-            value: ${var.validation_endpoint}
           - name: IDP_APP_NAME
             value: IDP MVP (${bundle.target})

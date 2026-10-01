@@ -56,7 +56,6 @@ def main():
         parse_job_id=1,
         extraction_job_id=1,
         import_job_id=1,
-        validation_endpoint="unused",
         # Registered documents request preparation exactly as a browser upload does.
         auto_prepare_enabled=auto_prepare,
         dispatch_job_id=args.dispatch_job_id if auto_prepare else None,

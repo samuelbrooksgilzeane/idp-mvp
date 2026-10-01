@@ -118,7 +118,6 @@ def test_settings_require_a_ka_id_when_sync_is_enabled() -> None:
         "warehouse_id": "abc",
         "parse_job_id": 1,
         "extraction_job_id": 1,
-        "validation_endpoint": "unused",
     }
     assert Settings(**base, ka_id=" ").ka_id is None
     assert Settings(**base, ka_sync_enabled=True, ka_id=KA).ka_id == KA

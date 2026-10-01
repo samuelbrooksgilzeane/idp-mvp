@@ -66,5 +66,3 @@ env:
     value: "1021425465418844"
   - name: IDP_EXTRACTION_JOB_ID
     value: "948342095836775"
-  - name: IDP_VALIDATION_ENDPOINT
-    value: unused

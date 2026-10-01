@@ -37,7 +37,6 @@ make check
 cd databricks_etl
 VARS=(--var catalog=workspace --var project_schema=idp_mvp --var source_volume_name=idp_source
       --var artifacts_volume_name=idp_artifacts --var warehouse_id=647704f77f24020a
-      --var validation_endpoint=unused --var evaluation_experiment=unused
       --var viewer_projection_enabled=true)
 databricks bundle plan   -t dev -p idp-mvp "${VARS[@]}"
 databricks bundle deploy -t dev -p idp-mvp "${VARS[@]}"
@@ -73,7 +72,6 @@ ls databricks_etl/resources/*.generated.yml 2>/dev/null && echo "remove per-work
 cd databricks_etl
 VARS=(--var catalog=$CATALOG --var project_schema=$SCHEMA --var source_volume_name=idp_source
       --var artifacts_volume_name=idp_artifacts --var warehouse_id=$WAREHOUSE
-      --var validation_endpoint=unused --var evaluation_experiment=unused
       --var viewer_projection_enabled=true)
 sql() {  # run one statement on the warehouse and print its state
   python3 -c 'import json,sys; print(json.dumps({"warehouse_id": sys.argv[1], "statement": sys.argv[2], "wait_timeout": "50s"}))' "$WAREHOUSE" "$1" |

@@ -21,8 +21,6 @@ TRUSTED_VARIABLES = {
     "import_volume_name",
     "import_concurrency",
     "warehouse_id",
-    "validation_endpoint",
-    "evaluation_experiment",
     "app_name",
     "batch_concurrency",
     "auto_prepare_enabled",

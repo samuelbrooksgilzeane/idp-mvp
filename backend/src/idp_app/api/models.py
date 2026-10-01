@@ -17,7 +17,6 @@ class ConfigurationPresence(BaseModel):
     warehouse_id: bool
     parse_job_id: bool
     extraction_job_id: bool
-    validation_endpoint: bool
 
 
 class HealthResponse(BaseModel):

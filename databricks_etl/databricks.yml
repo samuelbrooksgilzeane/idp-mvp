@@ -73,10 +73,6 @@ variables:
     default: 8
   warehouse_id:
     description: SQL warehouse identifier
-  validation_endpoint:
-    description: Model serving endpoint used by a future validation increment
-  evaluation_experiment:
-    description: MLflow experiment used by a future evaluation increment
   app_name:
     description: Databricks App name
     default: idp-mvp

@@ -42,7 +42,6 @@ class Settings(BaseSettings):
     parse_dispatch_size: int = Field(default=100, ge=1, le=100)
     parse_max_attempts: int = Field(default=3, ge=1, le=5)
     parse_claim_seconds: int = Field(default=7200, ge=300, le=86400)
-    validation_endpoint: str | None = None
     app_name: str = "IDP MVP"
     local_data_dir: Path = Path(".local/idp")
     max_upload_bytes: PositiveInt = 25 * 1024 * 1024
@@ -88,7 +87,7 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("warehouse_id", "validation_endpoint", mode="before")
+    @field_validator("warehouse_id", mode="before")
     @classmethod
     def normalize_optional_text(cls, value: Any) -> Any:
         if isinstance(value, str):
@@ -140,7 +139,6 @@ class Settings(BaseSettings):
             "IDP_WAREHOUSE_ID": self.warehouse_id,
             "IDP_PARSE_JOB_ID": self.parse_job_id,
             "IDP_EXTRACTION_JOB_ID": self.extraction_job_id,
-            "IDP_VALIDATION_ENDPOINT": self.validation_endpoint,
         }
         if self.auto_prepare_enabled or self.bulk_extraction_enabled:
             required["IDP_DISPATCH_JOB_ID"] = self.dispatch_job_id

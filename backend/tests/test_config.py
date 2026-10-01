@@ -16,7 +16,6 @@ def test_valid_databricks_configuration_is_accepted() -> None:
         warehouse_id="abc123",
         parse_job_id=123,
         extraction_job_id=456,
-        validation_endpoint="idp-validation-endpoint",
     )
 
     assert settings.table_prefix == "idp_dev"
@@ -55,7 +54,6 @@ def test_databricks_mode_reports_all_missing_configuration() -> None:
     assert "IDP_CATALOG" in message
     assert "IDP_PARSE_JOB_ID" in message
     assert "IDP_EXTRACTION_JOB_ID" in message
-    assert "IDP_VALIDATION_ENDPOINT" in message
 
 
 def test_idp_mode_environment_variable_activates_databricks_validation(

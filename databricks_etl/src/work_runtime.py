@@ -33,7 +33,6 @@ def build_preparation(
         warehouse_id=warehouse_id,
         parse_job_id=parser_job_id,
         extraction_job_id=1,
-        validation_endpoint="unused",
         auto_prepare_enabled=False,
         bulk_extraction_enabled=False,
     )

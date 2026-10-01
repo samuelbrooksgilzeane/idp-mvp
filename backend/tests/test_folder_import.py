@@ -260,7 +260,6 @@ def test_databricks_mode_enables_folder_import_only_when_fully_configured():
         "warehouse_id": "w",
         "parse_job_id": 1,
         "extraction_job_id": 2,
-        "validation_endpoint": "v",
     }
     assert Settings(**base).folder_import_enabled is False
     assert Settings(**base, import_volume_name="idp_import", import_job_id=3).folder_import_enabled
