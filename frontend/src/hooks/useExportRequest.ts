@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { readJson, writeJson } from "../lib/safeStorage";
 
 type ExportState = { export_id: string; state: string; selected_count: number; runs_processed: number;
   bytes: number | null; filename: string | null; error: string | null; download_url: string | null };
@@ -6,14 +7,13 @@ type Pending = { client_request_id: string; run_ids: string[]; format: "xlsx" | 
 
 export function useExportRequest(scope: string) {
   const key = `idp-export:${scope}`;
-  const [saved, setSaved] = useState<{ id?: string; pending?: Pending }>(() => {
-    try { return JSON.parse(localStorage.getItem(key) || "{}"); } catch { return {}; }
-  });
+  const [saved, setSaved] = useState<{ id?: string; pending?: Pending }>(() => readJson(key) ?? {});
   const [status, setStatus] = useState<ExportState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => { localStorage.setItem(key, JSON.stringify(saved)); }, [key, saved]);
+  // Blocked or full storage only loses reload recovery; the export itself still runs.
+  useEffect(() => { writeJson(key, saved); }, [key, saved]);
   useEffect(() => {
     if (!saved.id) return;
     const controller = new AbortController();
@@ -35,8 +35,9 @@ export function useExportRequest(scope: string) {
     return () => { controller.abort(); clearTimeout(timer); };
   }, [saved.id]);
   async function submit(pending: Pending) {
-    // Persist the exact idempotent request before transport; a reload can replay it.
-    localStorage.setItem(key, JSON.stringify({ pending }));
+    // Persist the exact idempotent request before transport; a reload can replay it. Without
+    // storage, submit anyway: the server deduplicates replays by client_request_id.
+    writeJson(key, { pending });
     setSaved({ pending }); setSubmitting(true); setError(null); setStatus(null); setConfirmation(false);
     try {
       const result = await fetch("/api/export-requests", { method: "POST",

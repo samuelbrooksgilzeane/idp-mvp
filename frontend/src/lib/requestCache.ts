@@ -32,6 +32,8 @@ export class RequestCache<T> {
 let scope = "initial";
 const resetters = new Set<() => void>();
 export function cacheScope() { return scope; }
+// "initial" (not asked yet) and "signed-out" (the check failed) say nothing about who is signed in.
+export function isSignedInScope(value: string) { return value !== "initial" && value !== "signed-out"; }
 export function onScopeReset(reset: () => void) { resetters.add(reset); }
 export function setCacheScope(value: string) {
   if (value === scope) return;

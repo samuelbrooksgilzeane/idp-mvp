@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { UploadItem } from "./useUploadBatch";
+import { isSignedInScope } from "../lib/requestCache";
+import { readJson, removeKey, writeJson } from "../lib/safeStorage";
 
 // A folder import is an upload batch registered by a server Job, so progress uses the same
 // upload-batch endpoints. Nothing transfers from the browser; closing the tab does not stop it.
@@ -11,7 +13,7 @@ type Snapshot = {
   batch: FolderImportBatch | null; folders: string[] | null; root: string | null;
   busy: boolean; running: boolean; error: string | null;
 };
-const STORAGE_KEY = "idp:folder-import:v1";
+const STORAGE_KEY = "idp:folder-import:v1"; // Suffixed with the signed-in user's cache scope.
 export const IMPORT_POLL_MS = 5_000;
 const unfinished = (item: UploadItem) => item.state === "QUEUED" || item.state === "UPLOADING";
 
@@ -32,22 +34,38 @@ export class FolderImportManager {
   private snapshot: Snapshot = { batch: null, folders: null, root: null, busy: false, running: false, error: null };
   private listeners = new Set<() => void>();
   private timer: number | null = null;
-  constructor(private readonly onProgress: () => void = () => {}) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as FolderImportBatch | null;
-      if (saved && typeof saved.folder === "string" && Array.isArray(saved.items)) this.snapshot = { ...this.snapshot, batch: saved };
-    } catch { /* A blocked or invalid storage entry must not prevent imports. */ }
+  private scope: string | null = null; // Nothing is saved until the signed-in user is known.
+  constructor(private readonly onProgress: () => void = () => {}, scope: string | null = null) {
+    removeKey(STORAGE_KEY); // The unscoped entry from before per-user keys; its owner is unknown.
+    if (scope && isSignedInScope(scope)) { this.scope = scope; this.snapshot = { ...this.snapshot, batch: this.load() }; }
   }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private load(): FolderImportBatch | null {
+    const saved = readJson<FolderImportBatch>(`${STORAGE_KEY}:${this.scope}`);
+    return saved && typeof saved.folder === "string" && Array.isArray(saved.items) ? saved : null;
+  }
   private update(changes: Partial<Snapshot>) {
     this.snapshot = { ...this.snapshot, ...changes };
-    try {
-      if (this.snapshot.batch) localStorage.setItem(STORAGE_KEY, JSON.stringify(this.snapshot.batch));
-      else localStorage.removeItem(STORAGE_KEY);
-    } catch { /* Progress still works with storage disabled. */ }
+    if (this.scope) {
+      // Progress still works with storage disabled.
+      if (this.snapshot.batch) writeJson(`${STORAGE_KEY}:${this.scope}`, this.snapshot.batch);
+      else removeKey(`${STORAGE_KEY}:${this.scope}`);
+    }
     this.listeners.forEach((listener) => listener());
   }
+  // Another signed-in user sees their own saved import, never the previous user's folders or
+  // progress; "signed-out" (often a failed check) changes nothing.
+  setScope = (scope: string) => {
+    if (!isSignedInScope(scope) || scope === this.scope) return;
+    const previous = this.scope;
+    this.scope = scope;
+    // An import started before the first answer belongs to this user: save it under their scope.
+    if (previous === null && this.snapshot.batch) { this.update({}); return; }
+    this.stopPolling();
+    this.update({ batch: this.load(), folders: null, root: null, running: false, error: null });
+    void this.restore();
+  };
   private fail(error: unknown) {
     this.update({ error: error instanceof Error ? error.message : "The folder import request failed." });
   }
@@ -71,14 +89,18 @@ export class FolderImportManager {
     await this.create(batch);
   };
   private async create(batch: FolderImportBatch) {
+    // A user switch during the request: the answer is about a batch no longer shown.
+    const current = () => this.snapshot.batch?.client_request_id === batch.client_request_id;
     try {
       const created = await json<{ batch_id: string; items: UploadItem[]; skipped_files: number }>(await call("/api/imports", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ client_request_id: batch.client_request_id, folder: batch.folder, case_id: batch.case_id }),
       }));
+      if (!current()) return;
       this.update({ batch: { ...batch, batch_id: created.batch_id, items: created.items, skipped_files: created.skipped_files } });
       this.schedule();
     } catch (error) {
+      if (!current()) return;
       // Rejected (empty folder, too many files, unknown folder): nothing was saved, so forget it.
       // Otherwise keep the identity; Retry replays the same request.
       const rejected = error instanceof ImportHttpError && error.status >= 400 && error.status < 500;
@@ -139,12 +161,13 @@ export class FolderImportManager {
   dispose = () => this.stopPolling();
 }
 
-export function useFolderImport(onProgress: () => void) {
+export function useFolderImport(onProgress: () => void, scope: string) {
   const callback = useRef(onProgress);
   callback.current = onProgress;
-  const [manager] = useState(() => new FolderImportManager(() => callback.current()));
+  const [manager] = useState(() => new FolderImportManager(() => callback.current(), scope));
   const state = useSyncExternalStore(manager.subscribe, manager.getSnapshot);
   useEffect(() => { void manager.restore(); return manager.dispose; }, [manager]);
+  useEffect(() => { manager.setScope(scope); }, [manager, scope]);
   return { ...state, loadFolders: manager.loadFolders, start: manager.start, retry: manager.retry,
     clear: manager.clear, refresh: manager.refresh };
 }

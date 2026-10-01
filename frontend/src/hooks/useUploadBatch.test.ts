@@ -36,13 +36,14 @@ function finish(id: string, items: UploadItem[]) {
   item.state = "REGISTERED"; item.document_id = `doc-${id}`;
   return reply({ documents: [{ document_id: item.document_id }], errors: [] }, 201);
 }
+const SCOPE = "user-a";
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("durable upload transfers", () => {
   it("enforces the deployed file-count limit before creating a manifest", async () => {
     const fetchMock = vi.fn(async () => reply({ max_files: 2, max_file_bytes: 1024 }));
     vi.stubGlobal("fetch", fetchMock);
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     await manager.restore();
     await manager.start({ files: [file("a.pdf"), file("b.pdf"), file("c.pdf")], caseId: "" });
     expect(manager.getSnapshot().maxFiles).toBe(2);
@@ -61,7 +62,7 @@ describe("durable upload transfers", () => {
       active--;
       return finish(id, items);
     });
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     await manager.start({ files: Array.from({ length: 1000 }, (_, i) => file(`${i}.pdf`)), caseId: "synthetic" });
     expect(peak).toBe(3);
     expect(manager.getSnapshot().error).toBeNull();
@@ -71,7 +72,7 @@ describe("durable upload transfers", () => {
     expect(items.every((item) => item.state === "REGISTERED")).toBe(true);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(1000);
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/items?"))).toHaveLength(10);
-    const restored = new UploadTransferManager();
+    const restored = new UploadTransferManager(undefined, SCOPE);
     await restored.restore();
     expect(restored.getSnapshot().batch!.items).toHaveLength(1000);
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(1000);
@@ -79,7 +80,7 @@ describe("durable upload transfers", () => {
 
   it("stops a repeated pagination cursor without discarding saved outcomes", async () => {
     server(async (id, items) => finish(id, items));
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     await manager.start({ files: [file("one.pdf")], caseId: "" });
     const saved = manager.getSnapshot().batch;
     const fetchMock = vi.fn(async () => reply({ items: [], next_cursor: "-1" }));
@@ -98,7 +99,7 @@ describe("durable upload transfers", () => {
       return finish(id, items);
     });
     const changed = vi.fn();
-    const manager = new UploadTransferManager(changed);
+    const manager = new UploadTransferManager(changed, SCOPE);
     const running = manager.start({ files: Array.from({ length: 5 }, (_, i) => file(`${i}.pdf`)), caseId: "case" });
     await waitFor(() => expect(pending).toHaveLength(3));
     pending.shift()!();
@@ -124,7 +125,7 @@ describe("durable upload transfers", () => {
         await new Promise<void>((resolve) => pending.push(() => { active--; resolve(); }));
         return finish(id, items);
       }, { max_files: 1000, max_file_bytes: 1024, parallel_transfers: configured });
-      const manager = new UploadTransferManager();
+      const manager = new UploadTransferManager(undefined, SCOPE);
       await manager.restore();
       expect(manager.getSnapshot().parallelTransfers).toBe(expected);
       const running = manager.start({ files: Array.from({ length: 12 }, (_, i) => file(`${i}.pdf`)), caseId: "" });
@@ -145,8 +146,8 @@ describe("durable upload transfers", () => {
       return finish(id, items);
     });
     const input = { files: [file("good.pdf"), file("bad.pdf")], caseId: "" };
-    await new UploadTransferManager().start(input);
-    const restored = new UploadTransferManager();
+    await new UploadTransferManager(undefined, SCOPE).start(input);
+    const restored = new UploadTransferManager(undefined, SCOPE);
     await restored.restore();
     expect(restored.getSnapshot().batch!.items[1].error_message).toContain("too large");
     await restored.retry();
@@ -165,8 +166,8 @@ describe("durable upload transfers", () => {
       throw new Error("network lost");
     }));
     const input = { files: [file("one.pdf")], caseId: "" };
-    await new UploadTransferManager().start(input);
-    await new UploadTransferManager().start(input);
+    await new UploadTransferManager(undefined, SCOPE).start(input);
+    await new UploadTransferManager(undefined, SCOPE).start(input);
     expect(requests).toHaveLength(2);
     expect(requests[0]).toBe(requests[1]);
   });
@@ -176,7 +177,7 @@ describe("durable upload transfers", () => {
       finish(id, items);
       throw new Error("connection lost after commit");
     });
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     await manager.start({ files: [file("one.pdf")], caseId: "" });
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/documents")).toHaveLength(1);
     expect(manager.getSnapshot().batch!.items[0].state).toBe("REGISTERED");
@@ -188,7 +189,7 @@ describe("durable upload transfers", () => {
       await new Promise<void>((resolve) => pending.push(resolve));
       return finish(id, items);
     });
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     const running = manager.start({ files: Array.from({ length: 5 }, (_, i) => file(`${i}.pdf`)), caseId: "" });
     await waitFor(() => expect(pending).toHaveLength(3));
     manager.pause();
@@ -204,7 +205,7 @@ describe("durable upload transfers", () => {
     const { fetchMock } = server(async (id, items) => ++calls === 1
       ? reply({ error: { code: "UPLOAD_BUSY", message: "Already uploading." } }, 409)
       : finish(id, items));
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     const running = manager.start({ files: [file("one.pdf")], caseId: "" });
     await vi.advanceTimersByTimeAsync(0);
     expect(manager.getSnapshot().batch!.items[0]).toMatchObject({ state: "QUEUED", error_code: null });
@@ -220,7 +221,7 @@ describe("durable upload transfers", () => {
   ])("pauses the whole batch on %s and resumes after sign-in", async (_label, signedOut) => {
     let expired = true;
     const { fetchMock } = server(async (id, items) => expired ? signedOut() : finish(id, items));
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     const input = { files: Array.from({ length: 5 }, (_, i) => file(`${i}.pdf`)), caseId: "" };
     await manager.start(input);
     const snapshot = manager.getSnapshot();
@@ -239,7 +240,7 @@ describe("durable upload transfers", () => {
     vi.useFakeTimers();
     let down = true;
     server(async (id, items) => down ? reply({ error: { code: "HTTP_503", message: "Unavailable" } }, 503) : finish(id, items));
-    const manager = new UploadTransferManager();
+    const manager = new UploadTransferManager(undefined, SCOPE);
     const running = manager.start({ files: [file("one.pdf")], caseId: "" });
     await vi.advanceTimersByTimeAsync(750 + 1500);
     expect(manager.getSnapshot().batch!.items[0]).toMatchObject({ state: "FAILED", retryable: true });
@@ -260,7 +261,7 @@ describe("durable upload transfers", () => {
     try {
       const pending: (() => void)[] = [];
       server(async (id, items) => { await new Promise<void>((resolve) => pending.push(resolve)); return finish(id, items); });
-      const manager = new UploadTransferManager();
+      const manager = new UploadTransferManager(undefined, SCOPE);
       const running = manager.start({ files: [file("one.pdf")], caseId: "" });
       await waitFor(() => expect(pending).toHaveLength(1));
       expect(added).toHaveBeenCalledWith("beforeunload", expect.any(Function));
@@ -274,5 +275,45 @@ describe("durable upload transfers", () => {
       added.mockRestore(); removed.mockRestore();
       delete (navigator as { wakeLock?: unknown }).wakeLock;
     }
+  });
+
+  it("keeps each signed-in user's batch to themselves and ignores a failed identity check", async () => {
+    localStorage.setItem("idp:upload-batch:v1", "{}");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network lost"); }));
+    const manager = new UploadTransferManager(undefined, "user-a");
+    expect(localStorage.getItem("idp:upload-batch:v1")).toBeNull(); // unscoped: owner unknown
+    await manager.start({ files: [file("ann.pdf")], caseId: "case-ann" });
+    manager.setScope("signed-out");
+    expect(manager.getSnapshot().batch?.case_id).toBe("case-ann");
+    manager.setScope("user-b");
+    expect(manager.getSnapshot().batch).toBeNull();
+    expect(new UploadTransferManager(undefined, "user-b").getSnapshot().batch).toBeNull();
+    manager.setScope("user-a");
+    expect(manager.getSnapshot().batch?.case_id).toBe("case-ann");
+  });
+
+  it("saves a batch started before the user was known under that user", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network lost"); }));
+    const manager = new UploadTransferManager();
+    await manager.start({ files: [file("ann.pdf")], caseId: "case-ann" });
+    expect(localStorage.length).toBe(0);
+    manager.setScope("user-a");
+    expect(manager.getSnapshot().batch?.case_id).toBe("case-ann");
+    expect(new UploadTransferManager(undefined, "user-a").getSnapshot().batch?.case_id).toBe("case-ann");
+  });
+
+  it("drops a creation answer that arrives after another user signs in", async () => {
+    let answer: ((response: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn((url: string) => url === "/api/upload-batches"
+      ? new Promise<Response>((resolve) => { answer = resolve; })
+      : Promise.resolve(reply({ items: [], next_cursor: null }))));
+    const manager = new UploadTransferManager(undefined, "user-a");
+    const started = manager.start({ files: [file("ann.pdf")], caseId: "" });
+    await waitFor(() => expect(answer).toBeDefined());
+    manager.setScope("user-b");
+    answer!(reply({ batch_id: "batch-ann", items: [] }));
+    await started;
+    expect(manager.getSnapshot().batch).toBeNull();
+    expect(localStorage.getItem("idp:upload-batch:v1:user-b")).toBeNull();
   });
 });

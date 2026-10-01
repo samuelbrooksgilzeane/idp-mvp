@@ -102,14 +102,14 @@ export function App() {
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null; invalidateDocumentReviews(); void refreshDocuments();
     }, 750);
-  });
+  }, scope);
   // Polls server-side progress; owned here so it keeps going while the user navigates.
   const folderImport = useFolderImport(() => {
     if (refreshTimer.current) return;
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null; invalidateDocumentReviews(); void refreshDocuments();
     }, 750);
-  });
+  }, scope);
   useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
   useEffect(() => {
     let active = true;

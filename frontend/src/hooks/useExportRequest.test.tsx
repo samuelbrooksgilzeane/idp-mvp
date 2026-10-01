@@ -22,3 +22,17 @@ it("restores an ambiguous submission and replays the same request identity", asy
   await waitFor(() => expect(restored.result.current.status?.state).toBe("SUCCEEDED"));
   expect(bodies[1]).toBe(bodies[0]);
 });
+
+it("submits an export when browser storage is blocked", async () => {
+  const blocked = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    throw new DOMException("blocked", "QuotaExceededError");
+  });
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ export_id: "one", state: "SUCCEEDED",
+    selected_count: 1, runs_processed: 1, download_url: "/api/export-requests/one/download" }) })));
+  try {
+    const hook = renderHook(() => useExportRequest("test"));
+    await act(() => hook.result.current.start(["run"]));
+    await waitFor(() => expect(hook.result.current.status?.state).toBe("SUCCEEDED"));
+    expect(hook.result.current.error).toBeNull();
+  } finally { blocked.mockRestore(); }
+});

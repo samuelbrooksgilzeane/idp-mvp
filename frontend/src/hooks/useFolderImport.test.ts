@@ -22,6 +22,7 @@ function server() {
   vi.stubGlobal("fetch", fetchMock);
   return { fetchMock, set: (next: UploadItem[]) => { items = next; } };
 }
+const SCOPE = "user-a";
 afterEach(() => { localStorage.clear(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("folder import progress", () => {
@@ -29,7 +30,7 @@ describe("folder import progress", () => {
     vi.useFakeTimers();
     const { fetchMock, set } = server();
     const progress = vi.fn();
-    const manager = new FolderImportManager(progress);
+    const manager = new FolderImportManager(progress, SCOPE);
     await manager.loadFolders();
     expect(manager.getSnapshot()).toMatchObject({ root: "/Volumes/c/s/idp_import", folders: ["invoices"] });
 
@@ -61,25 +62,39 @@ describe("folder import progress", () => {
 
   it("restores a saved import after a reload and replays an unconfirmed start with its identity", async () => {
     const { fetchMock } = server();
-    localStorage.setItem("idp:folder-import:v1", JSON.stringify({
+    localStorage.setItem(`idp:folder-import:v1:${SCOPE}`, JSON.stringify({
       client_request_id: "request-9", batch_id: null, folder: "invoices", case_id: null, items: [],
     }));
-    const manager = new FolderImportManager();
+    const manager = new FolderImportManager(undefined, SCOPE);
     expect(manager.getSnapshot().batch?.folder).toBe("invoices");
     await manager.retry();
     const body = JSON.parse(fetchMock.mock.calls.find(([url]) => url === "/api/imports")![1]!.body as string);
     expect(body.client_request_id).toBe("request-9");
-    expect(JSON.parse(localStorage.getItem("idp:folder-import:v1")!).batch_id).toBe("batch-1");
+    expect(JSON.parse(localStorage.getItem(`idp:folder-import:v1:${SCOPE}`)!).batch_id).toBe("batch-1");
     manager.clear();
-    expect(localStorage.getItem("idp:folder-import:v1")).toBeNull();
+    expect(localStorage.getItem(`idp:folder-import:v1:${SCOPE}`)).toBeNull();
   });
 
   it("shows the server's reason when a folder cannot be imported", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => reply({ error: { message: "The folder contains no PDF files." } }, 422)));
-    const manager = new FolderImportManager();
+    const manager = new FolderImportManager(undefined, SCOPE);
     await manager.start("empty", "");
     expect(manager.getSnapshot().error).toBe("The folder contains no PDF files.");
     expect(manager.getSnapshot().busy).toBe(false);
     expect(manager.getSnapshot().batch).toBeNull(); // Nothing was saved; choose another folder.
+  });
+
+  it("shows only the signed-in user's own import", () => {
+    localStorage.setItem("idp:folder-import:v1:user-a", JSON.stringify({
+      client_request_id: "request-ann", batch_id: null, folder: "ann", case_id: null, items: [],
+    }));
+    const manager = new FolderImportManager(undefined, "user-a");
+    manager.setScope("signed-out");
+    expect(manager.getSnapshot().batch?.folder).toBe("ann");
+    manager.setScope("user-b");
+    expect(manager.getSnapshot().batch).toBeNull();
+    manager.setScope("user-a");
+    expect(manager.getSnapshot().batch?.folder).toBe("ann");
+    manager.dispose();
   });
 });

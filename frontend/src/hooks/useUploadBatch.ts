@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { UploadInput } from "../components/UploadPanel";
+import { isSignedInScope } from "../lib/requestCache";
+import { readJson, removeKey, writeJson } from "../lib/safeStorage";
 
 export type UploadItem = {
   client_file_id: string; name: string; relative_path?: string | null; size: number; last_modified: number | null;
@@ -13,7 +15,8 @@ type SavedBatch = {
   batch_id: string | null; items: UploadItem[];
 };
 type Snapshot = { batch: SavedBatch | null; busy: boolean; paused: boolean; error: string | null; maxFiles: number; maxFileBytes: number | null; parallelTransfers: number; signInRequired?: boolean; retryingSoon?: boolean; automaticPreparation?: boolean; bulkExtraction?: boolean; folderImport?: boolean };
-const STORAGE_KEY = "idp:upload-batch:v1"; // Storage is isolated by this project's app origin.
+// Suffixed with the signed-in user's cache scope: another account in this browser never sees it.
+const STORAGE_KEY = "idp:upload-batch:v1";
 const complete = (item: UploadItem) => item.state === "REGISTERED" || item.state === "ALREADY_REGISTERED";
 const signature = (file: { name: string; size: number; lastModified?: number; last_modified?: number | null }) =>
   JSON.stringify([file.name, file.size, file.lastModified ?? file.last_modified]);
@@ -62,24 +65,38 @@ export class UploadTransferManager {
   private sleepers = new Set<() => void>();
   private guarding = false;
   private wakeLock: WakeLockSentinel | null = null;
-  constructor(private readonly onFinished: () => void = () => {}) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as SavedBatch | null;
-      if (saved && Array.isArray(saved.files) && saved.files.length <= 1000 && Array.isArray(saved.items)) {
-        this.snapshot = { ...this.snapshot, batch: saved };
-      }
-    } catch { /* A blocked or invalid storage entry must not prevent intake. */ }
+  private scope: string | null = null; // Nothing is saved until the signed-in user is known.
+  constructor(private readonly onFinished: () => void = () => {}, scope: string | null = null) {
+    removeKey(STORAGE_KEY); // The unscoped entry from before per-user keys; its owner is unknown.
+    if (scope && isSignedInScope(scope)) { this.scope = scope; this.snapshot = { ...this.snapshot, batch: this.load() }; }
   }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private load(): SavedBatch | null {
+    const saved = readJson<SavedBatch>(`${STORAGE_KEY}:${this.scope}`);
+    return saved && Array.isArray(saved.files) && saved.files.length <= 1000 && Array.isArray(saved.items) ? saved : null;
+  }
   private update(changes: Partial<Snapshot>) {
     this.snapshot = { ...this.snapshot, ...changes };
-    try {
-      if (this.snapshot.batch) localStorage.setItem(STORAGE_KEY, JSON.stringify(this.snapshot.batch));
-      else localStorage.removeItem(STORAGE_KEY);
-    } catch { /* Transfers still work with storage disabled. */ }
+    if (this.scope) {
+      // Transfers still work with storage disabled.
+      if (this.snapshot.batch) writeJson(`${STORAGE_KEY}:${this.scope}`, this.snapshot.batch);
+      else removeKey(`${STORAGE_KEY}:${this.scope}`);
+    }
     this.listeners.forEach((listener) => listener());
   }
+  // The app's cache scope identifies the signed-in user. Another user stops the previous user's
+  // transfers and shows their own saved batch; "signed-out" (often a failed check) changes nothing.
+  setScope = (scope: string) => {
+    if (!isSignedInScope(scope) || scope === this.scope) return;
+    const previous = this.scope;
+    this.scope = scope;
+    // A batch started before the first answer belongs to this user: save it under their scope.
+    if (previous === null && this.snapshot.batch) { this.update({}); return; }
+    if (previous !== null) { this.stop = true; this.wakeSleepers(); this.files.clear(); }
+    this.update({ batch: this.load(), error: null, paused: false, signInRequired: false, retryingSoon: false });
+    void this.resume();
+  };
   private patch(id: string, changes: Partial<UploadItem>) {
     const batch = this.snapshot.batch;
     if (batch) this.update({ batch: { ...batch, items: batch.items.map((item) => item.client_file_id === id ? { ...item, ...changes } : item) } });
@@ -97,13 +114,14 @@ export class UploadTransferManager {
           folderImport: Boolean(limits.folder_import) });
       }
     } catch { /* The API still enforces limits when configuration is unavailable. */ }
-    if (this.snapshot.busy) return;
-    if (this.snapshot.batch?.batch_id) {
-      this.update({ busy: true });
-      try { await this.refresh(); } catch (error) { this.fail(error); }
-      finally { this.update({ busy: false }); }
-    }
+    await this.resume();
   };
+  private async resume() {
+    if (this.snapshot.busy || !this.snapshot.batch?.batch_id) return;
+    this.update({ busy: true });
+    try { await this.refresh(); } catch (error) { this.fail(error); }
+    finally { this.update({ busy: false }); }
+  }
   private fail(error: unknown) {
     if (error instanceof SignInRequiredError) { this.signInLost(); return; }
     this.update({ error: error instanceof Error ? error.message : "Upload interrupted. Retry when ready." });
@@ -175,6 +193,7 @@ export class UploadTransferManager {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ client_request_id: batch.client_request_id, case_id: batch.case_id, files: batch.files }),
         }));
+        if (this.snapshot.batch?.client_request_id !== batch.client_request_id) return; // Another user's now.
         this.update({ batch: { ...batch, batch_id: created.batch_id, items: created.items } });
       } else await this.refresh();
       await this.drain();
@@ -298,12 +317,13 @@ export class UploadTransferManager {
   }
 }
 
-export function useUploadBatch(onFinished: () => void) {
+export function useUploadBatch(onFinished: () => void, scope: string) {
   const callback = useRef(onFinished);
   callback.current = onFinished;
-  const [manager] = useState(() => new UploadTransferManager(() => callback.current()));
+  const [manager] = useState(() => new UploadTransferManager(() => callback.current(), scope));
   const state = useSyncExternalStore(manager.subscribe, manager.getSnapshot);
   useEffect(() => { void manager.restore(); }, [manager]);
+  useEffect(() => { manager.setScope(scope); }, [manager, scope]);
   return { ...state, start: manager.start, retry: manager.retry, pause: manager.pause,
     clear: manager.clear, refresh: manager.refresh };
 }
