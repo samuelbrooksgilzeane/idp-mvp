@@ -26,6 +26,8 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const skipLoad = useRef<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
+  // Scroll to the newest message only after asking, so opening a conversation shows its start.
+  const followNewest = useRef(false);
 
   const loadConversations = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -44,6 +46,7 @@ export function ChatPage() {
 
   useEffect(() => {
     setError(null);
+    followNewest.current = false;
     if (!conversationId) {
       setMessages([]);
       return;
@@ -56,12 +59,15 @@ export function ChatPage() {
     return () => controller.abort();
   }, [conversationId]);
 
-  useEffect(() => { end.current?.scrollIntoView?.({ block: "end" }); }, [messages, pending]);
+  useEffect(() => {
+    if (followNewest.current) end.current?.scrollIntoView?.({ block: "end" });
+  }, [messages, pending]);
 
   async function ask(event?: FormEvent) {
     event?.preventDefault();
     const text = draft.trim();
     if (!text || pending) return;
+    followNewest.current = true;
     setPending(text);
     setDraft("");
     setError(null);
@@ -110,12 +116,6 @@ export function ChatPage() {
         )}
       </aside>
       <div className="chat-main">
-        <div className="page-heading">
-          <div>
-            <h1>Ask documents</h1>
-            <p>Questions about your documents and their extracted data. Extracted values are model output, not approved.</p>
-          </div>
-        </div>
         <div className="chat-thread" aria-live="polite">
           {messages.length === 0 && !pending ? (
             <div className="page-state">

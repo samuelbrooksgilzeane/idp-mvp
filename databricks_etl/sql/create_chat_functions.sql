@@ -23,14 +23,14 @@ WHERE d.status <> 'DELETED' AND (d.document_id = doc_id OR d.file_name = doc_id)
 ORDER BY e.schema_id, f.field_path;
 
 CREATE OR REPLACE FUNCTION {object:chat_find_documents}(
-  field_name STRING COMMENT 'Field name without path, for example seller_name, invoice_number, total',
+  field_name STRING COMMENT 'Field name, alone or with its parents joined by _ or ., for example organization, payee_organization or payee.organization',
   value_contains STRING COMMENT 'Case-insensitive text the field value must contain'
 )
 RETURNS TABLE (
   document_id STRING, file_name STRING, case_id STRING, schema_id STRING, field_path STRING,
   value STRING
 )
-COMMENT 'Documents whose extracted field (matched by its last name segment, any nesting) contains the given text. At most 200 rows.'
+COMMENT 'Documents whose extracted field contains the given text. The field matches by its own name or by any trailing part of its path (array positions ignored). At most 200 rows.'
 RETURN
 SELECT d.document_id, d.file_name, d.case_id, e.schema_id, f.field_path, f.value_string
 FROM {object:chat_documents} d
@@ -38,7 +38,12 @@ JOIN {object:chat_extractions} e ON e.document_id = d.document_id
 JOIN {object:chat_fields} f
   ON f.extraction_run_id = e.extraction_run_id AND f.document_id = e.document_id
 WHERE d.status <> 'DELETED'
-  AND lower(regexp_extract(f.field_path, '([A-Za-z0-9_]+)$', 1)) = lower(field_name)
+  -- payee.organization and invoices[0].seller_name normalise to payee_organization and
+  -- invoices_seller_name; a name matches the whole normalised path or a trailing part of it.
+  AND endswith(
+    concat('_', regexp_replace(lower(regexp_replace(f.field_path, '\\[[0-9]*\\]', '')), '[^a-z0-9]+', '_')),
+    concat('_', regexp_replace(lower(field_name), '[^a-z0-9]+', '_'))
+  )
   AND f.value_string ILIKE '%' || value_contains || '%'
 ORDER BY d.file_name, f.field_path
 LIMIT 200;

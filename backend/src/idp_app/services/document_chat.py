@@ -9,6 +9,7 @@ is stored or shown. History is kept per user: every read and write is scoped to 
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
 import time
@@ -23,6 +24,7 @@ from idp_app.services.document_registry import DatabricksDocumentRegistry
 from idp_app.services.documents import DocumentServiceError
 from idp_app.services.sql_retry import run_with_retries
 
+logger = logging.getLogger(__name__)
 DOCUMENT_FILE = re.compile(
     r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.pdf)?\b"
 )
@@ -101,6 +103,11 @@ class ServingEndpointChatClient:
             response: dict[str, Any] = self.api.do("POST", self.path, body={"input": messages})
         except Exception as error:
             # No raw text: endpoint errors can echo request content or configuration.
+            logger.warning(
+                "Chat endpoint call failed: %s %s",
+                type(error).__name__,
+                getattr(error, "error_code", None) or "",
+            )
             raise ChatError(
                 "CHAT_ENDPOINT_FAILED", "The document assistant could not answer. Try again.", 502
             ) from error

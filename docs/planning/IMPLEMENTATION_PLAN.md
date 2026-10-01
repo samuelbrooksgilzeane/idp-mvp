@@ -418,6 +418,13 @@ finish the app, so the chat was built from our own code:
   conversation can collide on `seq`; the MERGE keeps the first.
 - Setting `IDP_CHAT_ENDPOINT` from bundle variable `chat_endpoint` (blank hides the page); grants in
   DEPLOYMENT_NOTES "Document chat". No third app and no Lakebase.
+- **Live on dev (1 October):** bootstrap created `idp_dev_chat_messages`; `provision_chat.py` was
+  refused (**Free Edition allows one Supervisor Agent**, held by the G7 probe), so dev points
+  `chat_endpoint` at the probe Supervisor `mas-0297dd39-endpoint`, given the five function tools and
+  the production instructions. The App needed CAN_QUERY on the serving endpoints themselves (agent
+  permissions do not propagate; failures logged as `PermissionDenied`). Questions answered through
+  the UI in 22–90 s with tables and plain-text sources; history listed and reopened.
+  `chat_find_documents` now also matches parent-qualified names (`payee_organization`).
 - The design notes below were for the template route and are kept for reference only.
 
 1. Add `e2e-chatbot-app-next` under `chat_app/` (pin the template commit), bundle resource

@@ -916,7 +916,7 @@ tbody tr:hover td { background: var(--hover); }
 
 /* Ask documents */
 .chat-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 28px; align-items: start; }
-.chat-history { position: sticky; top: 24px; display: grid; gap: 10px; padding-top: 6px; }
+.chat-history { position: sticky; top: 76px; display: grid; gap: 10px; padding-top: 6px; }
 .chat-history ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; max-height: 70vh; overflow: auto; }
 .chat-history a { display: block; padding: 8px 10px; border-radius: 4px; color: var(--text-2); font-size: 13px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-history a:hover { background: var(--hover); color: var(--text); }

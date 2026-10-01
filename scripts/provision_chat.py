@@ -54,7 +54,7 @@ FUNCTION_TOOLS: dict[str, tuple[str, str]] = {
     ),
     "find_documents": (
         "chat_find_documents",
-        "Documents whose extracted field (by name, e.g. seller_name) contains some text.",
+        "Documents whose extracted field (e.g. seller_name or payee_organization) contains text.",
     ),
     "invoices": (
         "chat_invoices",

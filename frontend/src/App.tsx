@@ -44,6 +44,11 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
     blurb: "Every extraction run. Filter, open one to review it beside its source, or export.",
   },
   "result-detail": { crumbs: ["Results", "Extraction run"] },
+  chat: {
+    crumbs: ["Ask documents"],
+    title: "Ask documents",
+    blurb: "Ask about your documents and their extracted data. Extracted values are model output, not approved.",
+  },
   schema: {
     crumbs: ["Schemas"],
     title: "Schemas",
@@ -244,5 +249,6 @@ function sectionFor(pathname: string): string {
   if (pathname.startsWith("/results/")) return "result-detail";
   if (pathname.startsWith("/results")) return "results";
   if (pathname.startsWith("/schema")) return "schema";
+  if (pathname.startsWith("/chat")) return "chat";
   return "documents";
 }

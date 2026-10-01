@@ -139,7 +139,8 @@ uv run --project ../backend python provision_chat.py --host https://<workspace-h
   --target $TARGET --catalog $CATALOG --project-schema $SCHEMA --dry-run
 uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
   --target $TARGET --catalog $CATALOG --project-schema $SCHEMA
-# Free Edition: the KA indexes but cannot answer (G7), so provision the Supervisor alone:
+# Free Edition allows ONE Supervisor Agent (delete the G7 probe first) and its KA indexes but
+# cannot answer (G7), so provision the Supervisor alone:
 #   ... --no-knowledge-assistant
 ```
 
@@ -151,8 +152,15 @@ The App is at the 20-binding cap, so these grants are direct (`*_ID` from the sc
 
 ```bash
 # The App queries the Supervisor, which runs the chat functions (and the KA, where present).
+# Agent permissions do not reach the serving endpoints: without CAN_QUERY on each endpoint (the
+# Supervisor's and the KA's) every question fails with PERMISSION_DENIED.
 databricks supervisor-agents update-permissions $SUPERVISOR_ID -p $PROFILE --json \
   "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
+for ENDPOINT in $SUPERVISOR_ENDPOINT $KA_ENDPOINT; do   # omit $KA_ENDPOINT without a KA
+  EID=$(databricks serving-endpoints get $ENDPOINT -p $PROFILE -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+  databricks serving-endpoints update-permissions $EID -p $PROFILE --json \
+    "{\"access_control_list\": [{\"service_principal_name\": \"$APP_SP\", \"permission_level\": \"CAN_QUERY\"}]}"
+done
 for f in document_fields find_documents invoices invoice_totals case_documents; do
   sql "GRANT EXECUTE ON FUNCTION $CATALOG.$SCHEMA.${PREFIX}_chat_$f TO \`$APP_SP\`"
 done
