@@ -27,6 +27,8 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
 
 ## Deploying the existing dev target
 
+Commands for a new machine and for other workspaces: [deployment guide](DEPLOYMENT_GUIDE.md).
+
 The `dev` target in `databricks_etl/databricks.yml` holds the live dev values (catalog, warehouse,
 viewer projections, chat endpoint), so no `--var` flags are needed. The CLI profile chooses the
 workspace (default `idp-mvp`; override with `PROFILE=...`).
@@ -51,37 +53,17 @@ it as its last task, because replacing views drops their grants.
 
 ## Deploying to another workspace
 
-The bundle has no fixed workspace host; the CLI profile chooses the workspace. Prerequisites: an
-existing Unity Catalog catalog you may create a schema in, a SQL warehouse, serverless Jobs, and AI
-Functions (`ai_parse_document`, `ai_extract`) available in the workspace's region. Deploy from a
-checkout of the release branch after `make setup`.
-
-```bash
-databricks auth login --host https://YOUR-WORKSPACE --profile NEW_PROFILE
-ls databricks_etl/resources/*.generated.yml 2>/dev/null && echo "remove per-workspace overlays first"
-make deploy-first PROFILE=NEW_PROFILE BUNDLE_VARS="--var catalog=YOUR_CATALOG --var project_schema=idp_mvp \
-  --var source_volume_name=idp_source --var artifacts_volume_name=idp_artifacts \
-  --var warehouse_id=YOUR_WAREHOUSE_ID --var viewer_projection_enabled=true"
-```
-
-`deploy-first` deploys (the App step fails the first time: its bound grants name tables the
-bootstrap creates), runs the bootstrap, deploys again, runs the grants Job and starts the App. Later
-deployments are `make deploy` with the same `PROFILE` and `BUNDLE_VARS`; to stop passing them, add the
-workspace's values as a target in `databricks.yml` like `dev`. For prod use `TARGET=prod` (tables
+The bundle has no fixed workspace host; the CLI profile chooses the workspace. A new workspace needs
+its own tables, grants and deployment state: `make deploy-first` deploys (the App step fails the
+first time: its bound grants name tables the bootstrap creates), runs the bootstrap, deploys again,
+runs the grants Job and starts the App. Because the `dev` target holds the original dev workspace's
+values, every command for another workspace passes that workspace's values in `BUNDLE_VARS`,
+including `chat_endpoint` (blank until its agents exist). The full commands, from a new machine to
+chat, are in the [deployment guide](DEPLOYMENT_GUIDE.md). For prod use `TARGET=prod` (tables
 `idp_*`, production mode).
 
-One grant stays manual because it is an access decision: who may drop folders in for import. They
-need to write into the import volume (and to see it):
-
-```bash
-PROFILE=NEW_PROFILE; CATALOG=YOUR_CATALOG; SCHEMA=idp_mvp; WAREHOUSE=YOUR_WAREHOUSE_ID
-USERS_GROUP='account users'   # or the workspace's all-users group
-for statement in "GRANT USE CATALOG ON CATALOG $CATALOG TO \`$USERS_GROUP\`" \
-  "GRANT USE SCHEMA ON SCHEMA $CATALOG.$SCHEMA TO \`$USERS_GROUP\`" \
-  "GRANT READ VOLUME, WRITE VOLUME ON VOLUME $CATALOG.$SCHEMA.idp_import TO \`$USERS_GROUP\`"; do
-  databricks api post /api/2.0/sql/statements -p $PROFILE --json "$(python3 -c 'import json,sys; print(json.dumps({"warehouse_id": sys.argv[1], "statement": sys.argv[2], "wait_timeout": "50s"}))' "$WAREHOUSE" "$statement")"
-done
-```
+Who may drop folders in for import stays a manual grant, because it is an access decision (guide,
+step 3.4).
 
 Folder import in use: copy a folder of PDFs with `databricks fs cp -r ./invoices
 dbfs:/Volumes/$CATALOG/$SCHEMA/idp_import/invoices -p PROFILE` (or upload it in Catalog Explorer), then

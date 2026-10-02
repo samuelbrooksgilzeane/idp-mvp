@@ -3,7 +3,8 @@
 Start with the [shareable app release checklist](RELEASE_CHECKLIST.md). It is the current plan,
 including mandatory 1,000-file upload verification, deployment blockers and colleague acceptance.
 
-Use the repository [README](../README.md) for setup and commands and the
+Use the repository [README](../README.md) for setup and commands, the
+[deployment guide](DEPLOYMENT_GUIDE.md) for step-by-step deploy commands, and the
 [deployment notes](DEPLOYMENT_NOTES.md) for release-specific operational constraints.
 
 All earlier documentation, plans, status trackers and reviews are in [archive](archive/README.md).
