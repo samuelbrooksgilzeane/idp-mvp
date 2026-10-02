@@ -31,6 +31,7 @@ from idp_app.services.extraction_runs import SQLiteExtractionRunRepository
 from idp_app.services.parse_runs import SQLiteParseRunRepository
 from idp_app.services.schema_registry import SQLiteSchemaRepository
 from idp_app.services.schemas import load_source_manifests
+from idp_app.services.sql_retry import SqlOutcomeUnknownError
 
 
 @pytest.fixture
@@ -102,6 +103,25 @@ def test_databricks_claim_that_lost_the_race_is_not_reported_as_won() -> None:
     mine = Mock(status="EXTRACTING", extraction_run_id="my-run")
     registry.get = Mock(return_value=mine)  # type: ignore[method-assign]
     assert registry.begin_extraction("doc", ELIGIBLE_DOCUMENT_STATES, "invoice", 2, "my-run")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("[DELTA_CONCURRENT_APPEND.ROW_LEVEL_CHANGES] Transaction conflict detected"),
+        SqlOutcomeUnknownError("passed its deadline; it may still have committed"),
+    ],
+)
+def test_databricks_claim_conflict_or_unknown_outcome_is_settled_by_its_token(failure) -> None:
+    registry = DatabricksDocumentRegistry(Mock(), "wh", "c", "s", "idp")
+    registry.execute_sql = Mock(side_effect=failure)  # type: ignore[method-assign]
+    registry.get = Mock(return_value=Mock(status="EXTRACTING", extraction_run_id="winner"))  # type: ignore[method-assign]
+    with pytest.raises(InvalidDocumentStateError):  # busy, not a 500
+        registry.begin_extraction("doc", ELIGIBLE_DOCUMENT_STATES, "invoice", 1, "loser")
+    assert registry.begin_extraction("doc", ELIGIBLE_DOCUMENT_STATES, "invoice", 1, "winner")
+    registry.execute_sql = Mock(side_effect=RuntimeError("syntax error"))  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="syntax"):
+        registry.begin_extraction("doc", ELIGIBLE_DOCUMENT_STATES, "invoice", 1, "winner")
 
 
 # I2: validation publishes only the owning extraction's outcome.

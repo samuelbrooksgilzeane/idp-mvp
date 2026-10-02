@@ -16,7 +16,12 @@ from databricks.sdk.service import sql
 from idp_app.core.performance import record_sql_statement
 from idp_app.services.bulk_ids import id_chunks, id_parameters
 from idp_app.services.document_models import DocumentRecord
-from idp_app.services.sql_retry import SqlOutcomeUnknownError, run_with_retries
+from idp_app.services.sql_retry import (
+    DELTA_CONFLICTS,
+    SqlOutcomeUnknownError,
+    retry_reason,
+    run_with_retries,
+)
 
 logger = logging.getLogger(__name__)
 # Status polls start fast for short statements and back off to this interval.
@@ -555,7 +560,7 @@ class DatabricksDocumentRegistry:
         if extraction_run_id is not None:
             owner = " AND extraction_run_id = :extraction_run_id"
             values["extraction_run_id"] = extraction_run_id
-        self.execute_sql(
+        self._conditional_write(
             f"UPDATE {self._table} SET status = :new_status, "
             "updated_at = CAST(:updated_at AS TIMESTAMP) "
             f"WHERE document_id = :document_id AND status IN ({expected_markers}){owner}",
@@ -595,7 +600,7 @@ class DatabricksDocumentRegistry:
         )
         # The read-back decides, not the row count: the owner token tells this claim apart from
         # a competing one, and recognizes a claim whose success answer was lost.
-        self.execute_sql(
+        self._conditional_write(
             f"UPDATE {self._table} SET status = 'EXTRACTING', "
             "selected_schema_id = :schema_id, "
             "selected_schema_version = CAST(:schema_version AS INT), "
@@ -605,6 +610,19 @@ class DatabricksDocumentRegistry:
             values,
         )
         return _claimed(self.get(document_id), document_id, expected_statuses, extraction_run_id)
+
+    def _conditional_write(self, statement: str, values: dict[str, object]) -> None:
+        """A guarded write whose caller reads the row back to decide the outcome. A concurrent
+        writer's conflict (this write was aborted) or an unknown outcome (it may have committed)
+        is settled by that read-back, not reported as a failure; other errors are raised."""
+        try:
+            self.execute_sql(statement, values)
+        except Exception as error:
+            if not (
+                isinstance(error, SqlOutcomeUnknownError) or retry_reason(error) in DELTA_CONFLICTS
+            ):
+                raise
+            logger.info("Guarded document write settled by read-back: %s", type(error).__name__)
 
     def execute_sql(
         self, statement: str, values: dict[str, object] | None = None
