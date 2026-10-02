@@ -272,6 +272,17 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
+        - task_key: migrate_document_extraction_owner
+          depends_on:
+            - task_key: migrate_extraction_columns
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file:
+              path: ../sql/migrate_document_extraction_owner.sql
+            parameters:
+              catalog: ${var.catalog}
+              project_schema: ${var.project_schema}
+              table_prefix: ${var.table_prefix}
         # Replacing views drops their grants; restore the App's direct grants last.
         - task_key: grant_app_access
           depends_on:
@@ -279,6 +290,7 @@ resources:
             - task_key: migrate_chat_history
             - task_key: migrate_work_batches
             - task_key: migrate_viewer_projection
+            - task_key: migrate_document_extraction_owner
           run_job_task:
             job_id: ${resources.jobs.app_access_grants.id}
       environments:

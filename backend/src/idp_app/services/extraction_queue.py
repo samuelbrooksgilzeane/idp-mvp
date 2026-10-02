@@ -207,15 +207,13 @@ class ExtractionQueue:
             self.mark_document(item, "EXTRACT_FAILED")
 
     def mark_document(self, item: WorkItem, status: str) -> None:
-        # The work/run owns the outcome. The overview is only a best-effort projection.
-        document = self.batches.documents.get(item.document_id)
+        # The work/run owns the outcome. The overview is only a best-effort projection, written
+        # only while this item's run still owns the document's claim.
         if item.error_code == "DOCUMENT_BUSY":
             return
-        latest = self.runs.list_for_document(item.document_id)
-        if latest and latest[0].extraction_run_id != item.extraction_run_id:
-            return
-        if document and document.status == "EXTRACTING":
-            from idp_app.services.document_registry import InvalidDocumentStateError
+        from idp_app.services.document_registry import InvalidDocumentStateError
 
-            with suppress(InvalidDocumentStateError):
-                self.batches.documents.update_status(item.document_id, {"EXTRACTING"}, status)
+        with suppress(InvalidDocumentStateError, KeyError):
+            self.batches.documents.update_status(
+                item.document_id, {"EXTRACTING"}, status, item.extraction_run_id
+            )

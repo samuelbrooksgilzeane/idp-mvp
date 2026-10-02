@@ -167,6 +167,7 @@ def validate_data_bootstrap() -> None:
         "migrate_chat_history",
         "migrate_work_batches",
         "migrate_viewer_projection",
+        "migrate_document_extraction_owner",
         "grant_app_access",
     ]
     if (
@@ -185,6 +186,14 @@ def validate_data_bootstrap() -> None:
         or projection.get("sql_task", {}).get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS
     ):
         raise ValueError("Viewer projection tables require the reviewed additive migration")
+    owner = by_key["migrate_document_extraction_owner"]
+    if (
+        owner.get("sql_task", {}).get("file", {}).get("path")
+        != "../sql/migrate_document_extraction_owner.sql"
+        or owner.get("sql_task", {}).get("parameters") != EXPECTED_PARSING_MIGRATION_PARAMETERS
+        or owner.get("depends_on") != [{"task_key": "migrate_extraction_columns"}]
+    ):
+        raise ValueError("Extraction ownership requires the reviewed additive migration")
     grants = by_key["grant_app_access"]
     if grants.get("run_job_task", {}).get("job_id") != "${resources.jobs.app_access_grants.id}":
         raise ValueError("The bootstrap must restore the App's direct grants last")

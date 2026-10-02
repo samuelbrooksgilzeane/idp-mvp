@@ -225,9 +225,13 @@ def main() -> None:
             SELECT case_id, source_path, template_id, content_sha256
             FROM {documents}
             WHERE document_id = :document_id AND status = 'EXTRACTING'
+              AND extraction_run_id = :extraction_run_id
             LIMIT 1
             """,
-            args={"document_id": parameters.document_id},
+            args={
+                "document_id": parameters.document_id,
+                "extraction_run_id": parameters.extraction_run_id,
+            },
         ).first()
         if document is None:
             raise ValueError("The document is not in the extraction state")
@@ -332,8 +336,12 @@ def main() -> None:
             UPDATE {documents}
             SET status = 'EXTRACTED', updated_at = CURRENT_TIMESTAMP()
             WHERE document_id = :document_id AND status = 'EXTRACTING'
+              AND extraction_run_id = :extraction_run_id
             """,
-            args={"document_id": parameters.document_id},
+            args={
+                "document_id": parameters.document_id,
+                "extraction_run_id": parameters.extraction_run_id,
+            },
         )
     except Exception as error:
         spark.sql(  # type: ignore[name-defined]  # noqa: F821
@@ -353,8 +361,12 @@ def main() -> None:
             UPDATE {documents}
             SET status = 'EXTRACT_FAILED', updated_at = CURRENT_TIMESTAMP()
             WHERE document_id = :document_id AND status = 'EXTRACTING'
+              AND extraction_run_id = :extraction_run_id
             """,
-            args={"document_id": parameters.document_id},
+            args={
+                "document_id": parameters.document_id,
+                "extraction_run_id": parameters.extraction_run_id,
+            },
         )
         raise
 

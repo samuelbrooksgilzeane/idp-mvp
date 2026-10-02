@@ -78,7 +78,11 @@ def execute_extraction(
 
         verify_schema_content(schema)
         queue.batches.documents.begin_extraction(
-            item.document_id, ELIGIBLE_DOCUMENT_STATES, run.schema_id, run.schema_version
+            item.document_id,
+            ELIGIBLE_DOCUMENT_STATES,
+            run.schema_id,
+            run.schema_version,
+            run.extraction_run_id,
         )
         document_owned = True
         if not retained:

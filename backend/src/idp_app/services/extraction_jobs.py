@@ -4,7 +4,9 @@ import itertools
 import re
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import Enum
 from threading import Lock
 from typing import Any, Protocol, cast
@@ -18,7 +20,7 @@ from idp_app.services.document_models import (
     ParseRunRecord,
     ParseRunReference,
 )
-from idp_app.services.document_registry import DocumentRegistry
+from idp_app.services.document_registry import DocumentRegistry, InvalidDocumentStateError
 from idp_app.services.extraction_result import (
     build_invoice_candidates,
     build_invoice_line_candidates,
@@ -56,6 +58,12 @@ class ExtractionJobRunner(Protocol):
 
     def poll(self, job_run_id: int) -> ExtractionJobPoll: ...
 
+    def find(self, extraction_run_id: str, since: datetime) -> int | None:
+        """The job run submitted for this extraction run, if any. Jobs records an accepted run
+        at once (even while it waits in a queue), so None after a short grace period means the
+        submission was never accepted."""
+        ...
+
 
 class MockExtractionJobRunner:
     def __init__(
@@ -73,6 +81,7 @@ class MockExtractionJobRunner:
         self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="idp-extractor")
         self._ids = itertools.count(10_001)
         self._futures: dict[int, list[Future[None]]] = {}
+        self._submitted: dict[str, int] = {}
         self._lock = Lock()
 
     def trigger(self, requests: list[ExtractionJobRequest]) -> int:
@@ -82,7 +91,14 @@ class MockExtractionJobRunner:
         submitted = [self._executor.submit(self._execute, request) for request in requests]
         with self._lock:
             self._futures[job_run_id] = submitted
+            self._submitted.update(
+                {request.run.extraction_run_id: job_run_id for request in requests}
+            )
         return job_run_id
+
+    def find(self, extraction_run_id: str, since: datetime) -> int | None:
+        with self._lock:
+            return self._submitted.get(extraction_run_id)
 
     def poll(self, job_run_id: int) -> ExtractionJobPoll:
         with self._lock:
@@ -131,7 +147,12 @@ class MockExtractionJobRunner:
                 records,
                 generic_fields,
             )
-            self._documents.update_status(request.document.document_id, {"EXTRACTING"}, "EXTRACTED")
+            self._documents.update_status(
+                request.document.document_id,
+                {"EXTRACTING"},
+                "EXTRACTED",
+                request.run.extraction_run_id,
+            )
         except Exception as error:
             current = self._runs.get(request.run.extraction_run_id)
             if current and current.status == "RUNNING":
@@ -139,10 +160,12 @@ class MockExtractionJobRunner:
                     request.run.extraction_run_id,
                     str(error)[:500] or "Document extraction failed.",
                 )
-            document = self._documents.get(request.document.document_id)
-            if document and document.status == "EXTRACTING":
+            with suppress(InvalidDocumentStateError, KeyError):
                 self._documents.update_status(
-                    document.document_id, {"EXTRACTING"}, "EXTRACT_FAILED"
+                    request.document.document_id,
+                    {"EXTRACTING"},
+                    "EXTRACT_FAILED",
+                    request.run.extraction_run_id,
                 )
 
 
@@ -177,6 +200,15 @@ class DatabricksExtractionJobRunner:
         if run.run_id is None:
             raise RuntimeError("Databricks Jobs trigger did not return a run identifier")
         return run.run_id
+
+    def find(self, extraction_run_id: str, since: datetime) -> int | None:
+        # Every submission names its extraction runs in the `inputs` job parameter.
+        start = int((since - timedelta(minutes=5)).timestamp() * 1000)
+        for run in self._client.jobs.list_runs(job_id=self._job_id, start_time_from=start):
+            parameters = {item.name: item.value for item in run.job_parameters or []}
+            if extraction_run_id in (parameters.get("inputs") or ""):
+                return run.run_id
+        return None
 
     def poll(self, job_run_id: int) -> ExtractionJobPoll:
         run = self._client.jobs.get_run(job_run_id)

@@ -20,6 +20,9 @@ class DocumentRecord:
     uploaded_by: str
     uploaded_at: datetime
     updated_at: datetime
+    # The extraction run that owns the status: it holds the EXTRACTING claim, or produced the
+    # extracted/validated status shown. Writes about an extraction are conditional on it.
+    extraction_run_id: str | None = None
 
 
 @dataclass(frozen=True)

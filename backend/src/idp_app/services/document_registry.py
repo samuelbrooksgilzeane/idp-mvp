@@ -37,6 +37,7 @@ DOCUMENT_COLUMNS = (
     "uploaded_by",
     "uploaded_at",
     "updated_at",
+    "extraction_run_id",
 )
 
 
@@ -139,7 +140,12 @@ class DocumentRegistry(Protocol):
         document_id: str,
         expected_statuses: set[str],
         new_status: str,
-    ) -> DocumentRecord: ...
+        extraction_run_id: str | None = None,
+    ) -> DocumentRecord:
+        """Move from one of `expected_statuses` to `new_status` in one conditional write. With
+        `extraction_run_id`, only while that run owns the document (see DocumentRecord), so a
+        stale or competing extraction or validation cannot overwrite a newer one."""
+        ...
 
     def begin_extraction(
         self,
@@ -147,7 +153,13 @@ class DocumentRegistry(Protocol):
         expected_statuses: set[str],
         schema_id: str,
         schema_version: int,
-    ) -> DocumentRecord: ...
+        extraction_run_id: str,
+    ) -> DocumentRecord:
+        """Claim the document for one extraction run, atomically: status EXTRACTING and owner
+        `extraction_run_id` in one conditional write. Raises InvalidDocumentStateError unless
+        this run holds the claim afterwards; a claim it already holds (a retry after a lost
+        answer) is returned as is."""
+        ...
 
 
 class SQLiteDocumentRegistry:
@@ -179,10 +191,15 @@ class SQLiteDocumentRegistry:
                     status TEXT NOT NULL,
                     uploaded_by TEXT NOT NULL,
                     uploaded_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    extraction_run_id TEXT
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(documents)")}
+            if "extraction_run_id" not in columns:
+                # Additive migration for a local registry created before ownership tokens.
+                connection.execute("ALTER TABLE documents ADD COLUMN extraction_run_id TEXT")
 
     def find_by_hash(self, content_sha256: str) -> DocumentRecord | None:
         with self._connect() as connection:
@@ -296,25 +313,27 @@ class SQLiteDocumentRegistry:
         document_id: str,
         expected_statuses: set[str],
         new_status: str,
+        extraction_run_id: str | None = None,
     ) -> DocumentRecord:
-        now = datetime.now(UTC).isoformat()
+        markers = ", ".join("?" for _ in expected_statuses)
+        owner = "" if extraction_run_id is None else " AND extraction_run_id = ?"
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM documents WHERE document_id = ? LIMIT 1",
-                (document_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(document_id)
-            document = _sqlite_row_to_document(row)
-            if document.status not in expected_statuses:
-                raise InvalidDocumentStateError(document, expected_statuses)
-            connection.execute(
-                "UPDATE documents SET status = ?, updated_at = ? WHERE document_id = ?",
-                (new_status, now, document_id),
-            )
+            changed = connection.execute(
+                f"UPDATE documents SET status = ?, updated_at = ? WHERE document_id = ? "
+                f"AND status IN ({markers}){owner}",
+                (
+                    new_status,
+                    datetime.now(UTC).isoformat(),
+                    document_id,
+                    *sorted(expected_statuses),
+                    *([] if extraction_run_id is None else [extraction_run_id]),
+                ),
+            ).rowcount
         updated = self.get(document_id)
         if updated is None:
-            raise RuntimeError("Document status update did not produce a readable row")
+            raise KeyError(document_id)
+        if changed != 1:
+            raise InvalidDocumentStateError(updated, expected_statuses)
         return updated
 
     def begin_extraction(
@@ -323,27 +342,24 @@ class SQLiteDocumentRegistry:
         expected_statuses: set[str],
         schema_id: str,
         schema_version: int,
+        extraction_run_id: str,
     ) -> DocumentRecord:
-        now = datetime.now(UTC).isoformat()
+        markers = ", ".join("?" for _ in expected_statuses)
         with self._connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM documents WHERE document_id = ? LIMIT 1",
-                (document_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(document_id)
-            document = _sqlite_row_to_document(row)
-            if document.status not in expected_statuses:
-                raise InvalidDocumentStateError(document, expected_statuses)
             connection.execute(
                 "UPDATE documents SET status = 'EXTRACTING', selected_schema_id = ?, "
-                "selected_schema_version = ?, updated_at = ? WHERE document_id = ?",
-                (schema_id, schema_version, now, document_id),
+                "selected_schema_version = ?, extraction_run_id = ?, updated_at = ? "
+                f"WHERE document_id = ? AND status IN ({markers})",
+                (
+                    schema_id,
+                    schema_version,
+                    extraction_run_id,
+                    datetime.now(UTC).isoformat(),
+                    document_id,
+                    *sorted(expected_statuses),
+                ),
             )
-        updated = self.get(document_id)
-        if updated is None:
-            raise RuntimeError("Document extraction update did not produce a readable row")
-        return updated
+        return _claimed(self.get(document_id), document_id, expected_statuses, extraction_run_id)
 
 
 class DatabricksDocumentRegistry:
@@ -511,11 +527,14 @@ class DatabricksDocumentRegistry:
         document_id: str,
         expected_statuses: set[str],
         new_status: str,
+        extraction_run_id: str | None = None,
     ) -> DocumentRecord:
         existing = self.get(document_id)
         if existing is None:
             raise KeyError(document_id)
-        if existing.status not in expected_statuses:
+        if existing.status not in expected_statuses or (
+            extraction_run_id is not None and existing.extraction_run_id != extraction_run_id
+        ):
             raise InvalidDocumentStateError(existing, expected_statuses)
 
         expected_markers = ", ".join(
@@ -532,16 +551,22 @@ class DatabricksDocumentRegistry:
                 for index, status in enumerate(sorted(expected_statuses))
             }
         )
+        owner = ""
+        if extraction_run_id is not None:
+            owner = " AND extraction_run_id = :extraction_run_id"
+            values["extraction_run_id"] = extraction_run_id
         self.execute_sql(
             f"UPDATE {self._table} SET status = :new_status, "
             "updated_at = CAST(:updated_at AS TIMESTAMP) "
-            f"WHERE document_id = :document_id AND status IN ({expected_markers})",
+            f"WHERE document_id = :document_id AND status IN ({expected_markers}){owner}",
             values,
         )
         updated = self.get(document_id)
         if updated is None:
             raise RuntimeError("Document status update did not produce a readable row")
-        if updated.status != new_status:
+        if updated.status != new_status or (
+            extraction_run_id is not None and updated.extraction_run_id != extraction_run_id
+        ):
             raise InvalidDocumentStateError(updated, expected_statuses)
         return updated
 
@@ -551,12 +576,8 @@ class DatabricksDocumentRegistry:
         expected_statuses: set[str],
         schema_id: str,
         schema_version: int,
+        extraction_run_id: str,
     ) -> DocumentRecord:
-        existing = self.get(document_id)
-        if existing is None:
-            raise KeyError(document_id)
-        if existing.status not in expected_statuses:
-            raise InvalidDocumentStateError(existing, expected_statuses)
         expected_markers = ", ".join(
             f":expected_status_{index}" for index, _ in enumerate(sorted(expected_statuses))
         )
@@ -564,6 +585,7 @@ class DatabricksDocumentRegistry:
             "document_id": document_id,
             "schema_id": schema_id,
             "schema_version": schema_version,
+            "extraction_run_id": extraction_run_id,
         }
         values.update(
             {
@@ -571,20 +593,18 @@ class DatabricksDocumentRegistry:
                 for index, status in enumerate(sorted(expected_statuses))
             }
         )
+        # The read-back decides, not the row count: the owner token tells this claim apart from
+        # a competing one, and recognizes a claim whose success answer was lost.
         self.execute_sql(
             f"UPDATE {self._table} SET status = 'EXTRACTING', "
             "selected_schema_id = :schema_id, "
             "selected_schema_version = CAST(:schema_version AS INT), "
+            "extraction_run_id = :extraction_run_id, "
             "updated_at = CURRENT_TIMESTAMP() "
             f"WHERE document_id = :document_id AND status IN ({expected_markers})",
             values,
         )
-        updated = self.get(document_id)
-        if updated is None:
-            raise RuntimeError("Document extraction update did not produce a readable row")
-        if updated.status != "EXTRACTING":
-            raise InvalidDocumentStateError(updated, expected_statuses)
-        return updated
+        return _claimed(self.get(document_id), document_id, expected_statuses, extraction_run_id)
 
     def execute_sql(
         self, statement: str, values: dict[str, object] | None = None
@@ -711,6 +731,7 @@ def _document_values(document: DocumentRecord) -> tuple[object, ...]:
         document.uploaded_by,
         document.uploaded_at.isoformat(),
         document.updated_at.isoformat(),
+        document.extraction_run_id,
     )
 
 
@@ -730,6 +751,7 @@ def _sqlite_row_to_document(row: sqlite3.Row) -> DocumentRecord:
         uploaded_by=cast(str, row["uploaded_by"]),
         uploaded_at=datetime.fromisoformat(cast(str, row["uploaded_at"])),
         updated_at=datetime.fromisoformat(cast(str, row["updated_at"])),
+        extraction_run_id=cast(str | None, row["extraction_run_id"]),
     )
 
 
@@ -752,7 +774,21 @@ def _databricks_row_to_document(row: list[str]) -> DocumentRecord:
         uploaded_by=values["uploaded_by"],
         uploaded_at=_parse_timestamp(values["uploaded_at"]),
         updated_at=_parse_timestamp(values["updated_at"]),
+        extraction_run_id=values["extraction_run_id"] or None,
     )
+
+
+def _claimed(
+    document: DocumentRecord | None,
+    document_id: str,
+    expected_statuses: set[str],
+    extraction_run_id: str,
+) -> DocumentRecord:
+    if document is None:
+        raise KeyError(document_id)
+    if document.status != "EXTRACTING" or document.extraction_run_id != extraction_run_id:
+        raise InvalidDocumentStateError(document, expected_statuses)
+    return document
 
 
 def _parse_timestamp(value: str) -> datetime:

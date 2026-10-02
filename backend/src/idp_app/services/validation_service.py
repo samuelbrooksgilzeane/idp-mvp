@@ -6,6 +6,7 @@ extraction it needs no Databricks Job and completes synchronously.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -15,7 +16,7 @@ from idp_app.services.document_models import (
     ValidationResultRecord,
     ValidationRunRecord,
 )
-from idp_app.services.document_registry import DocumentRegistry
+from idp_app.services.document_registry import DocumentRegistry, InvalidDocumentStateError
 from idp_app.services.documents import DocumentServiceError
 from idp_app.services.extraction_runs import ExtractionRunRepository
 from idp_app.services.parse_runs import ParseRunRepository
@@ -149,13 +150,21 @@ class ValidationService:
         ]
         await run_in_threadpool(self._runs.save, run, results)
 
-        if document.status in VALIDATABLE_DOCUMENT_STATES:
-            await run_in_threadpool(
-                self._documents.update_status,
-                document_id,
-                VALIDATABLE_DOCUMENT_STATES,
-                document_status,
-            )
+        # The report is kept either way, but the document's status describes one extraction:
+        # the run that owns it. Validating an older run, or one overtaken by a newer extraction
+        # while this ran, must not publish its outcome as the document's.
+        if (
+            document.status in VALIDATABLE_DOCUMENT_STATES
+            and document.extraction_run_id == extraction.extraction_run_id
+        ):
+            with suppress(InvalidDocumentStateError):
+                await run_in_threadpool(
+                    self._documents.update_status,
+                    document_id,
+                    VALIDATABLE_DOCUMENT_STATES,
+                    document_status,
+                    extraction.extraction_run_id,
+                )
         return run, results
 
     async def list_runs(self, document_id: str) -> list[ValidationRunRecord]:
