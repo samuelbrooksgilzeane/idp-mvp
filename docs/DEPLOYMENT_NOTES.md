@@ -86,9 +86,12 @@ done
 Folder import in use: copy a folder of PDFs with `databricks fs cp -r ./invoices
 dbfs:/Volumes/$CATALOG/$SCHEMA/idp_import/invoices -p PROFILE` (or upload it in Catalog Explorer), then
 choose **Import from folder** on the Documents page. The import Job registers each PDF exactly as a
-browser upload would (same dedupe, same outcomes, same automatic preparation) and deletes each file
-once it is registered; failed files stay in the folder with their reason in the app. **Retry
-unfinished files** starts another run; re-running is safe. Only the App and Jobs write `idp_source`.
+browser upload would (same dedupe, same outcomes, same automatic preparation). It never deletes from
+the import folder: a path names whatever file is there now, which may be a different file than the
+one registered, and the volume cannot delete conditionally. Remove a folder once the app shows its
+files registered; importing it again is harmless (each file resolves to its existing document).
+Failed files show their reason in the app. **Retry unfinished files** starts another run;
+re-running is safe. Only the App and Jobs write `idp_source`.
 Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pending files there.
 
 ## Document chat: Knowledge Assistant and Supervisor

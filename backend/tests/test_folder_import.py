@@ -49,7 +49,7 @@ def items(client: TestClient, batch_id: str) -> dict[str, dict]:
     return {item["relative_path"]: item for item in page["items"]}
 
 
-def test_mock_import_runs_in_background_and_empties_the_folder(client: TestClient):
+def test_mock_import_runs_in_background_and_leaves_the_folder_as_it_was(client: TestClient):
     write(client, "invoices/a.pdf")
     write(client, "invoices/nested/b.pdf", PDF + b"-b")
     notes = write(client, "invoices/notes.txt", b"not a pdf")
@@ -84,9 +84,10 @@ def test_mock_import_runs_in_background_and_empties_the_folder(client: TestClien
     documents = client.get("/api/documents").json()
     assert {document["file_name"] for document in documents} == {"a.pdf", "b.pdf"}
     assert {document["case_id"] for document in documents} == {"case-f"}
-    assert not (import_root(client) / "invoices" / "a.pdf").exists()
-    assert not (import_root(client) / "invoices" / "nested" / "b.pdf").exists()
-    assert notes.exists()  # Only imported PDFs are removed.
+    # Imports never delete: a path cannot prove it still holds the registered file.
+    assert (import_root(client) / "invoices" / "a.pdf").exists()
+    assert (import_root(client) / "invoices" / "nested" / "b.pdf").exists()
+    assert notes.exists()
 
 
 def test_rerun_and_replayed_start_are_idempotent(client: TestClient):
@@ -97,14 +98,13 @@ def test_rerun_and_replayed_start_are_idempotent(client: TestClient):
     assert first["counts"] == {"QUEUED": 2}  # Outcomes land after the create response.
     assert service.run(first["batch_id"]) == {"REGISTERED": 2}
 
-    # Put a registered file back, as if its deletion had failed: a re-run only removes it.
-    leftover = write(client, "batch/a.pdf")
+    # A different, unregistered file now at a finished item's path survives a re-run untouched.
+    replacement = write(client, "batch/a.pdf", PDF + b"-replacement")
     assert service.run(first["batch_id"]) == {"REGISTERED": 2}
-    assert not leftover.exists()
+    assert replacement.read_bytes() == PDF + b"-replacement"
     assert len(client.get("/api/documents").json()) == 2
-    # The same request identity names the same batch even though the folder is now empty
-    # (a lost response replayed after the Job removed the files), and does not import again.
-    assert not any((import_root(client) / "batch").iterdir())
+    # The same request identity names the same batch (a lost response replayed), and does not
+    # import again.
     replay = start(client, "batch").json()
     assert replay["batch_id"] == first["batch_id"]
     assert replay["counts"] == {"REGISTERED": 2}
@@ -131,7 +131,7 @@ def test_partial_failure_keeps_failed_files_and_resume_retries_them(client: Test
     assert rows["bad.pdf"]["error_code"] == "UNSUPPORTED_FILE_TYPE"
     assert rows["bad.pdf"]["retryable"] is False
     assert bad.exists()
-    assert not later.exists()  # Imported, so removed.
+    assert later.exists()  # Imported, and still kept.
 
     # A file removed before its run: recorded, retryable, and imported once it is back.
     write(client, "gone/one.pdf", PDF + b"-one")
@@ -176,7 +176,7 @@ def test_duplicate_content_resolves_to_the_registered_document(client: TestClien
     assert states == {"REGISTERED", "ALREADY_REGISTERED"}
     assert rows["x.pdf"]["document_id"] == rows["nested/x-again.pdf"]["document_id"]
     assert len(client.get("/api/documents").json()) == 2
-    assert not any(p.is_file() for p in (import_root(client) / "dupes").rglob("*"))
+    assert len([p for p in (import_root(client) / "dupes").rglob("*") if p.is_file()]) == 3
 
 
 def test_a_file_changed_after_start_is_not_imported(client: TestClient):
@@ -192,6 +192,25 @@ def test_a_file_changed_after_start_is_not_imported(client: TestClient):
     assert row["retryable"] is False
     assert changed.exists()
     assert client.get("/api/documents").json() == []
+
+
+def test_a_file_replaced_while_its_import_runs_survives(client: TestClient):
+    service = inline(client)
+    service.start_run = lambda batch_id, resume: None
+    write(client, "racing/a.pdf")
+    batch_id = start(client, "racing").json()["batch_id"]
+    upload = service.uploads.upload
+
+    async def upload_then_replace(*args, **kwargs):
+        result = await upload(*args, **kwargs)
+        write(client, "racing/a.pdf", PDF + b"-dropped-in-meanwhile")
+        return result
+
+    service.uploads.upload = upload_then_replace
+    service.run(batch_id)
+    assert items(client, batch_id)["a.pdf"]["state"] == "REGISTERED"
+    kept = import_root(client) / "racing" / "a.pdf"
+    assert kept.read_bytes() == PDF + b"-dropped-in-meanwhile"
 
 
 @pytest.mark.parametrize("folder", ["missing", "../import_volume", "a/b", ".hidden", "."])
@@ -302,8 +321,7 @@ def test_databricks_source_lists_recursively_and_runner_uses_stable_tokens():
         ("a.pdf", 9),
         ("sub/b.PDF", 7),
     ]
-    source.delete("inv", "sub/b.PDF")
-    client.files.delete.assert_called_once_with(f"{root}/inv/sub/b.PDF")
+    assert not hasattr(source, "delete")
 
     runner = DatabricksImportJobRunner(client, 42)
     runner("batch-1", False)

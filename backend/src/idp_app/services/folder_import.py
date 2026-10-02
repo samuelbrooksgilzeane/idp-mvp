@@ -48,7 +48,8 @@ class ImportSource(Protocol):
 
     def open(self, folder: str, relative_path: str) -> tuple[BinaryIO, int | None]: ...
 
-    def delete(self, folder: str, relative_path: str) -> None: ...
+    # No delete: a path names whatever file is there now, not the one that was registered, and
+    # neither store can delete conditionally. Imported files stay until someone removes them.
 
 
 def safe_relative(folder: str, relative_path: str = "") -> PurePosixPath:
@@ -104,9 +105,6 @@ class LocalImportSource:
         stream = path.open("rb")
         return stream, path.stat().st_size
 
-    def delete(self, folder: str, relative_path: str) -> None:
-        (self._root / safe_relative(folder, relative_path)).unlink(missing_ok=True)
-
 
 class DatabricksImportSource:
     def __init__(
@@ -153,10 +151,6 @@ class DatabricksImportSource:
             raise FileNotFoundError(path)
         length = response.content_length
         return response.contents, int(length) if length is not None else None
-
-    def delete(self, folder: str, relative_path: str) -> None:
-        with suppress(NotFound):
-            self._client.files.delete(f"{self._root}/{safe_relative(folder, relative_path)}")
 
 
 def client_file_id(relative_path: str) -> str:
@@ -282,8 +276,8 @@ class FolderImportService:
 
     def run(self, batch_id: str) -> dict[str, int]:
         """Register every unfinished item of one folder batch. Safe to repeat: finished items are
-        skipped (their import file is deleted if still present) and item claims stop two runs
-        from registering the same file."""
+        skipped and item claims stop two runs from registering the same file. Import files are
+        never deleted (see ImportSource)."""
         header = self.uploads.repository.header(batch_id)
         if header is None or header.get("source") != "folder":
             raise ValueError(f"{batch_id} is not a folder import batch")
@@ -310,7 +304,6 @@ class FolderImportService:
         folder = header["folder"]
         relative_path = item["relative_path"]
         if item["state"] in TERMINAL_UPLOAD_STATES:
-            await anyio.to_thread.run_sync(self._delete_quietly, folder, relative_path)
             return
         if item["state"] == "FAILED" and not item["retryable"]:
             return
@@ -353,13 +346,6 @@ class FolderImportService:
             return
         finally:
             stream.close()
-        await anyio.to_thread.run_sync(self._delete_quietly, folder, relative_path)
-
-    def _delete_quietly(self, folder: str, relative_path: str) -> None:
-        try:
-            self.source.delete(folder, relative_path)
-        except Exception:
-            logger.warning("Imported file could not be removed from the import folder")
 
     def _fail(self, item: dict[str, Any], code: str, message: str, retryable: bool) -> None:
         if item["state"] == "UPLOADING" and (item["lease_expires_at"] or "") > now_iso():
