@@ -60,6 +60,8 @@ export type CitationTarget = {
 };
 
 type Size = { width: number; height: number };
+type LoadedImage = { key: string; state: "ready" | "error"; natural: Size };
+const NO_SIZE: Size = { width: 0, height: 0 };
 type ViewerState =
   | { kind: "idle" }
   | { kind: "loading" }
@@ -91,9 +93,11 @@ export function DocumentViewer({
   const [resolvedParseId, setResolvedParseId] = useState(parseRunId);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedElementId, setSelectedElementId] = useState<number | null>(null);
-  const [imageState, setImageState] = useState<"loading" | "ready" | "error">("loading");
-  const [naturalSize, setNaturalSize] = useState<Size>({ width: 0, height: 0 });
-  const [renderedSize, setRenderedSize] = useState<Size>({ width: 0, height: 0 });
+  // Load state and sizes belong to one image (imageKey below). Keyed, a new page reads as loading
+  // by itself; reset in an effect, a load that landed before the effect ran (a cached image) was
+  // undone by it and the overlay never appeared.
+  const [loaded, setLoaded] = useState<LoadedImage | null>(null);
+  const [measured, setMeasured] = useState<{ key: string; size: Size } | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   // The parse on screen, so asking for that same parse again (a cited value, a tab switch or a
   // workflow status change) keeps the page rather than reloading it.
@@ -106,8 +110,6 @@ export function DocumentViewer({
     setPageIndex(0);
     setZoom(100);
     setSelectedElementId(null);
-    setNaturalSize({ width: 0, height: 0 });
-    setRenderedSize({ width: 0, height: 0 });
 
     // Workflow status can lag retained parse history (including historical extraction
     // evidence). Let the authenticated viewer endpoint determine availability.
@@ -153,17 +155,18 @@ export function DocumentViewer({
   const currentPage = viewer.kind === "ready" ? viewer.pages[pageIndex] : null;
 
   const nextPage = viewer.kind === "ready" ? viewer.pages[pageIndex + 1] ?? null : null;
+  const imageKey = `${documentId}:${resolvedParseId}:${currentPage?.page_id}`;
+  const shown = loaded?.key === imageKey ? loaded : null;
+  const imageState = shown?.state ?? "loading";
+  const naturalSize = shown?.natural ?? NO_SIZE;
+  const renderedSize = measured?.key === imageKey ? measured.size : NO_SIZE;
   const { elements, loading: elementsLoading, error: elementsError } = useViewerPage(
     documentId, resolvedParseId, currentPage, nextPage, imageState === "ready",
   );
-  const imageKey = `${documentId}:${resolvedParseId}:${currentPage?.page_id}`;
   const activeImage = useRef(imageKey);
   activeImage.current = imageKey;
   useEffect(() => {
     setSelectedElementId(null);
-    setImageState("loading");
-    setNaturalSize({ width: 0, height: 0 });
-    setRenderedSize({ width: 0, height: 0 });
     setSelectedTypes(new Set(currentPage?.element_types || []));
   }, [currentPage, imageKey]);
 
@@ -171,14 +174,14 @@ export function DocumentViewer({
     const image = imageRef.current;
     if (!image || imageState !== "ready") return;
     const measure = () => {
-      setRenderedSize({ width: image.clientWidth, height: image.clientHeight });
+      setMeasured({ key: imageKey, size: { width: image.clientWidth, height: image.clientHeight } });
     };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(image);
     return () => observer.disconnect();
-  }, [imageState, zoom, currentPage]);
+  }, [imageState, imageKey, zoom, currentPage]);
 
   useEffect(() => {
     if (!citationTarget || viewer.kind !== "ready") return;
@@ -386,14 +389,21 @@ export function DocumentViewer({
                   onLoad={(event) => {
                     if (activeImage.current !== imageKey) return;
                     const image = event.currentTarget;
-                    setNaturalSize({
-                      width: image.naturalWidth,
-                      height: image.naturalHeight,
+                    setLoaded({
+                      key: imageKey,
+                      state: "ready",
+                      natural: { width: image.naturalWidth, height: image.naturalHeight },
                     });
-                    setRenderedSize({ width: image.clientWidth, height: image.clientHeight });
-                    setImageState("ready");
+                    setMeasured({
+                      key: imageKey,
+                      size: { width: image.clientWidth, height: image.clientHeight },
+                    });
                   }}
-                  onError={() => { if (activeImage.current === imageKey) setImageState("error"); }}
+                  onError={() => {
+                    if (activeImage.current === imageKey) {
+                      setLoaded({ key: imageKey, state: "error", natural: NO_SIZE });
+                    }
+                  }}
                 />
                 {imageState === "ready" ? (
                   <div className="element-overlay" aria-label="Detected page elements">

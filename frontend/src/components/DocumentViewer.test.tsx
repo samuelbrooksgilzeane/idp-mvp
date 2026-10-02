@@ -113,6 +113,28 @@ describe("DocumentViewer", () => {
     expect(screen.getByRole("button", { name: /Reset zoom, currently 125%/ })).toBeInTheDocument();
   });
 
+  it("keeps an image that loads before the page-change effects run (a cached image)", async () => {
+    vi.stubGlobal("fetch", viewerFetch());
+    // Fire `load` the moment the image is inserted: after React commits it, before its passive
+    // effects run, as a browser can for a cached image.
+    const observer = new MutationObserver(() => {
+      const image = document.querySelector<HTMLImageElement>('img[alt="Rendered page 1"]');
+      if (!image || image.dataset.loaded) return;
+      image.dataset.loaded = "1";
+      setImageDimensions(image, 1600, 2200, 800, 1100);
+      image.dispatchEvent(new Event("load"));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      render(<DocumentViewer documentId={documentId} documentStatus="PARSED" />);
+      expect(
+        await screen.findByRole("button", { name: /text 7: Invoice number INV-5814/ }),
+      ).toHaveStyle({ width: "200px", height: "40px" });
+    } finally {
+      observer.disconnect();
+    }
+  });
+
   it("navigates incrementally and shows image failure without losing metadata", async () => {
     const fetchMock = viewerFetch();
     vi.stubGlobal("fetch", fetchMock);
