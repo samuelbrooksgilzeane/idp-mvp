@@ -1,3 +1,4 @@
+import asyncio
 import time
 from pathlib import Path
 
@@ -334,3 +335,16 @@ def test_databricks_source_lists_recursively_and_runner_uses_stable_tokens():
     }
     runner("batch-1", True)
     assert client.jobs.run_now.call_args.kwargs["idempotency_token"].startswith("import-batch-1-")
+
+
+def test_run_works_inside_a_running_event_loop(client: TestClient):
+    # Databricks runs Python job tasks inside an event loop, where anyio.run alone raises
+    # "Already running asyncio in this thread".
+    service = inline(client)
+    write(client, "batch/a.pdf")
+    batch_id = start(client, "batch").json()["batch_id"]
+
+    async def job_task() -> dict[str, int]:
+        return service.run(batch_id)
+
+    assert asyncio.run(job_task()) == {"REGISTERED": 1}

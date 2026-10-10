@@ -8,10 +8,12 @@ server's own listing, and each item's relative path is recorded when the batch i
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import threading
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -282,7 +284,15 @@ class FolderImportService:
         if header is None or header.get("source") != "folder":
             raise ValueError(f"{batch_id} is not a folder import batch")
         items = self.uploads.repository.items(batch_id, -1, self.uploads.max_files)
-        anyio.run(self._run_items, header, items)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            anyio.run(self._run_items, header, items)
+        else:
+            # Databricks runs Python job tasks inside an event loop, where anyio.run raises
+            # "Already running asyncio in this thread", so the import gets a thread of its own.
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(anyio.run, self._run_items, header, items).result()
         return self.uploads.repository.counts(batch_id)
 
     async def _run_items(self, header: dict[str, Any], items: list[dict[str, Any]]) -> None:
