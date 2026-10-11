@@ -12,6 +12,7 @@ const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(modu
 import { ResultsPage } from "./pages/ResultsPage";
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
 const ChatPage = lazy(() => import("./pages/ChatPage").then(module => ({ default: module.ChatPage })));
+const SourcePage = lazy(() => import("./pages/SourcePage").then(module => ({ default: module.SourcePage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useFolderImport } from "./hooks/useFolderImport";
 import { useDocumentPage } from "./hooks/useDocumentPage";
@@ -58,7 +59,20 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
 
 const viewLoading = <div className="results-state" role="status">Loading view…</div>;
 
+/** A cited source opens in its own tab without the sidebar; every other path is the workspace. */
 export function App() {
+  return (
+    <Routes>
+      <Route
+        path="/sources/:documentId"
+        element={<Suspense fallback={<p className="source-loading" role="status">Loading…</p>}><SourcePage /></Suspense>}
+      />
+      <Route path="*" element={<WorkspaceApp />} />
+    </Routes>
+  );
+}
+
+function WorkspaceApp() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
   const [scope, setScope] = useState("initial");
   // Pages wait for the first scope answer (no warehouse work, so it is quick). Rendering them

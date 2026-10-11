@@ -1,15 +1,20 @@
 import { Fragment, type ReactNode } from "react";
+import { MARKER } from "../lib/citations";
+
+type Marker = (number: number) => ReactNode;
 
 /**
  * Renders the small markdown subset assistant answers use: paragraphs, headings, bullet and
  * numbered lists, tables, **bold** and `code`. Builds React elements only, so answer text can
- * never inject HTML; links stay plain text.
+ * never inject HTML; links stay plain text. Citation markers (lib/citations) render through
+ * `renderMarker`.
  */
-export function Markdown({ text }: { text: string }) {
-  return <div className="markdown">{blocks(text.replace(/\r\n/g, "\n").split("\n"))}</div>;
+export function Markdown({ text, renderMarker }: { text: string; renderMarker?: Marker }) {
+  return <div className="markdown">{blocks(text.replace(/\r\n/g, "\n").split("\n"), renderMarker)}</div>;
 }
 
-function blocks(lines: string[]): ReactNode[] {
+function blocks(lines: string[], marker?: Marker): ReactNode[] {
+  const inline = (text: string) => inlineWithMarkers(text, marker);
   const out: ReactNode[] = [];
   let index = 0;
   while (index < lines.length) {
@@ -66,6 +71,20 @@ function startsBlock(lines: string[], index: number): boolean {
 const isTableRow = (line: string) => /^\s*\|.*\|\s*$/.test(line);
 const isSeparator = (line: string) => /^\s*\|(\s*:?-{2,}:?\s*\|)+\s*$/.test(line);
 const cells = (line: string) => line.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
+
+function inlineWithMarkers(text: string, marker?: Marker): ReactNode[] {
+  const pieces = text.split(new RegExp(`(${MARKER.source})`, "g"));
+  if (pieces.length === 1) return inline(text);
+  // split() also returns the captured number after each marker; skip those.
+  return pieces.flatMap((piece, i) => {
+    if (i % 3 === 2) return [];
+    if (i % 3 === 1) {
+      const match = MARKER.exec(piece);
+      return match && marker ? [<Fragment key={i}>{marker(Number(match[1]))}</Fragment>] : [];
+    }
+    return inline(piece).map((node, j) => <Fragment key={`${i}-${j}`}>{node}</Fragment>);
+  });
+}
 
 /** **bold** and `code`; everything else is literal text. */
 function inline(text: string): ReactNode[] {

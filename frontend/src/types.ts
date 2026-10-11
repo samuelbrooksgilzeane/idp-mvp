@@ -155,12 +155,27 @@ export type AppConfig = {
   chat_enabled?: boolean;
 };
 
+/** A numbered source of a chat answer. It links to its page when document_id is set. */
+export type ChatCitation = {
+  number: number;
+  file_name: string;
+  document_id: string | null;
+  /** 1-based page of the PDF, when the citation named one. */
+  page: number | null;
+  quotes: string[];
+  /** Indexes of the answer's text parts that carried this citation. */
+  parts: number[];
+};
+
 export type ChatMessage = {
   seq: number;
   role: "user" | "assistant";
   text: string;
   tools?: string[];
-  citations?: string[];
+  /** Plain labels in answers saved before numbered citations. */
+  citations?: (string | ChatCitation)[];
+  /** The answer's text parts, when citations name them. */
+  parts?: string[];
   elapsed_seconds?: number;
   created_at: string;
 };

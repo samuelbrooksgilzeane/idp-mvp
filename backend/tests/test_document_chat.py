@@ -11,7 +11,9 @@ from idp_app.main import create_app
 from idp_app.services.document_chat import (
     ChatError,
     DocumentChatService,
+    SourceLocation,
     SQLiteChatRepository,
+    citation_fragment,
     parse_response,
     rewrite_document_names,
 )
@@ -58,8 +60,10 @@ class FakeClient:
         return SUPERVISOR_REPLY
 
 
-def service(tmp_path: Path) -> tuple[DocumentChatService, FakeClient, list[str]]:
-    client = FakeClient()
+def service(
+    tmp_path: Path, client: FakeClient | None = None, sources: SourceLocation | None = None
+) -> tuple[DocumentChatService, FakeClient, list[str]]:
+    client = client or FakeClient()
     lookups: list[str] = []
 
     def file_names(document_ids: list[str]) -> dict[str, str]:
@@ -67,14 +71,150 @@ def service(tmp_path: Path) -> tuple[DocumentChatService, FakeClient, list[str]]
         return {DOC: "50080tihd.pdf"} if DOC in document_ids else {}
 
     repository = SQLiteChatRepository(tmp_path / "chat.sqlite3")
-    return DocumentChatService(client, repository, file_names), client, lookups
+    chat = DocumentChatService(client, repository, file_names, sources=sources)
+    return chat, client, lookups
+
+
+HOST = "dbc-1.cloud.databricks.com"
+SOURCES = SourceLocation(HOST, "idp_testing", "idp_mvp", "idp_source")
+OTHER_DOC = "7191bfd7-540e-5feb-a103-3e9085e288a1"
+
+
+def cited(document: str, fragment: str = "", host: str = HOST, folder: str = "") -> dict[str, str]:
+    folder = folder or "idp_testing/idp_mvp/idp_source/incoming"
+    return {
+        "type": "url_citation",
+        "title": f"{document}.pdf",
+        "url": f"https://{host}/ajax-api/2.0/fs/files/Volumes/{folder}/{document}.pdf{fragment}",
+    }
+
+
+# Knowledge Assistant shape (L7, 11 October): url_citation annotations on each text part, the
+# page and the URL-encoded passage after the PDF name, no offsets.
+KA_REPLY: dict[str, Any] = {
+    "output": [
+        {
+            "type": "message",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": f"Invoice {DOC}.pdf totals 888.55 EUR.",
+                    "annotations": [cited(DOC, "#page=1&text=TOTAL%20%3A%20888.55%20EUR")],
+                },
+                {
+                    "type": "output_text",
+                    "text": " It was due on 3 October 1997.",
+                    "annotations": [cited(DOC, "#page=1:~:text=Due%20Date%20%3A%2003-Oct-1997")],
+                },
+                {
+                    "type": "output_text",
+                    "text": "\n\nThe other invoice is unpaid.",
+                    "annotations": [
+                        cited(OTHER_DOC, "#page=2&text=Status%3A%20unpaid"),
+                        cited(DOC, "#page=1&text=TOTAL%20%3A%20888.55%20EUR"),
+                    ],
+                },
+            ],
+        }
+    ]
+}
+
+
+class KnowledgeAssistantClient(FakeClient):
+    def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        self.requests.append(messages)
+        return KA_REPLY
 
 
 def test_parse_keeps_the_final_answer_tools_and_citations() -> None:
     answer = parse_response(SUPERVISOR_REPLY)
     assert answer.text.startswith("| Document |")
     assert answer.tools == ["idp_dev_chat_document_fields"]
-    assert answer.citations == [f"{DOC}.pdf"]
+    assert [(c.label, c.document_id, c.parts) for c in answer.citations] == [
+        (f"{DOC}.pdf", None, [0])
+    ]
+
+
+def test_ka_citations_are_numbered_merged_by_page_and_linked() -> None:
+    answer = parse_response(KA_REPLY, SOURCES)
+
+    assert len(answer.parts) == 3
+    assert [
+        (c.number, c.document_id, c.page, c.quotes, c.parts) for c in answer.citations
+    ] == [
+        (1, DOC, 1, ["TOTAL : 888.55 EUR", "Due Date : 03-Oct-1997"], [0, 1, 2]),
+        (2, OTHER_DOC, 2, ["Status: unpaid"], [2]),
+    ]
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        cited(DOC, "#page=1", host="evil.example.com"),
+        cited(DOC, "#page=1", folder="idp_testing/idp_mvp/other_volume/incoming"),
+        cited(DOC, "#page=1", folder="idp_testing/idp_mvp/idp_source/incoming/../x"),
+        {**cited(DOC), "url": cited(DOC)["url"].replace("https://", "http://")},
+    ],
+)
+def test_citations_outside_the_source_volume_stay_plain_labels(annotation) -> None:
+    reply = {"output": [{"type": "message", "content": [
+        {"type": "output_text", "text": "Answer.", "annotations": [annotation]}
+    ]}]}
+    (citation,) = parse_response(reply, SOURCES).citations
+    assert citation.document_id is None and citation.page is None and citation.quotes == []
+    assert citation.label == f"{DOC}.pdf"
+
+
+def test_a_citation_without_a_page_still_links_to_the_document() -> None:
+    reply = {"output": [{"type": "message", "content": [
+        {"type": "output_text", "text": "Answer.", "annotations": [cited(DOC, "#text=Total")]}
+    ]}]}
+    (citation,) = parse_response(reply, SOURCES).citations
+    assert (citation.document_id, citation.page, citation.quotes) == (DOC, None, ["Total"])
+
+
+@pytest.mark.parametrize(
+    ("fragment", "expected"),
+    [
+        ("#page=9&text=Net%20income%20rose", (9, "Net income rose")),
+        ("#page=9:~:text=Net%20income%20rose", (9, "Net income rose")),
+        ("#page=9#:~:text=before-,Net%20income,-after", (9, "Net income")),
+        ("#page=3&text=Revenue%20was,in%20March", (3, "Revenue was … in March")),
+        ("#page=3&text=one,two,three", (3, "one,two,three")),
+        ("#page=0", (None, None)),
+        ("", (None, None)),
+    ],
+)
+def test_page_and_passage_are_read_from_the_fragment(fragment, expected) -> None:
+    assert citation_fragment(f"https://{HOST}/x/{DOC}.pdf{fragment}") == expected
+
+
+def test_ask_stores_numbered_citations_and_the_parts_they_follow(tmp_path: Path) -> None:
+    chat, _, _ = service(tmp_path, KnowledgeAssistantClient(), SOURCES)
+
+    reply = chat.ask("ann@example.com", None, "Total and due date?")["messages"][1]
+
+    assert reply["citations"][0] == {
+        "number": 1,
+        "file_name": "50080tihd.pdf",
+        "document_id": DOC,
+        "page": 1,
+        "quotes": ["TOTAL : 888.55 EUR", "Due Date : 03-Oct-1997"],
+        "parts": [0, 1, 2],
+    }
+    assert reply["citations"][1]["file_name"] == f"{OTHER_DOC}.pdf"  # unknown: label kept
+    assert reply["parts"][0] == "Invoice 50080tihd.pdf totals 888.55 EUR."
+    assert reply["text"] == "".join(reply["parts"]).strip()
+
+
+def test_history_rows_with_plain_citation_labels_still_load(tmp_path: Path) -> None:
+    chat, _, _ = service(tmp_path)
+    legacy = {"seq": 1, "role": "assistant", "text": "A", "citations": ["a.pdf"],
+              "created_at": "2026-10-01T00:00:00+00:00"}
+    conversation_id = "00000000-0000-4000-8000-000000000001"
+    asked = {"seq": 0, "role": "user", "text": "Q", "created_at": legacy["created_at"]}
+    chat.repository.append("ann@example.com", conversation_id, [asked, legacy])
+    assert chat.conversation("ann@example.com", conversation_id)[1]["citations"] == ["a.pdf"]
 
 
 def test_parse_rejects_a_reply_without_an_answer() -> None:
@@ -95,7 +235,9 @@ def test_ask_stores_rewritten_answer_and_continues_with_context(tmp_path: Path) 
     conversation_id = first["conversation_id"]
     reply = first["messages"][1]
     assert "| 50080tihd.pdf | t | 1 |" in reply["text"]
-    assert reply["citations"] == ["50080tihd.pdf"]
+    assert [(c["number"], c["file_name"], c["document_id"]) for c in reply["citations"]] == [
+        (1, "50080tihd.pdf", None)
+    ]
     assert reply["tools"] == ["idp_dev_chat_document_fields"]
 
     chat.ask("ann@example.com", conversation_id, "And the seller?")

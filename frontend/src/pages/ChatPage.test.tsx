@@ -57,6 +57,39 @@ describe("ChatPage", () => {
     expect(document.querySelectorAll(".chat-thread a")).toHaveLength(0);
   });
 
+  it("numbers Knowledge Assistant citations and opens each cited page in a new tab", async () => {
+    const DOC = "d0ed9896-da45-560a-8ddb-5b88d20dea1e";
+    const cited = {
+      seq: 1,
+      role: "assistant",
+      text: "The total is 888.55 EUR. It was due in 1997.",
+      parts: ["The total is 888.55 EUR.", " It was due in 1997."],
+      citations: [
+        { number: 1, file_name: "invoice.pdf", document_id: DOC, page: 1, quotes: ["TOTAL : 888.55 EUR"], parts: [0] },
+        { number: 2, file_name: "notes.pdf", document_id: null, page: null, quotes: [], parts: [1] },
+      ],
+      created_at: "",
+    };
+    vi.stubGlobal("fetch", vi.fn((url: string) => (url.startsWith("/api/chat/conversations/")
+      ? json({ messages: [{ seq: 0, role: "user", text: "Total?", created_at: "" }, cited] })
+      : json({ conversations: [] }))));
+    renderAt(`/chat/${CONVERSATION}`);
+
+    const marker = await screen.findByRole("link", { name: "Source 1: invoice.pdf, page 1" });
+    const href = `/sources/${DOC}?page=1&q=TOTAL+%3A+888.55+EUR&n=1&c=${CONVERSATION}&m=1`;
+    expect(marker).toHaveAttribute("href", href);
+    expect(marker).toHaveAttribute("target", "_blank");
+    expect(marker).toHaveAttribute("rel", "noopener noreferrer");
+    expect(marker.closest("p")?.textContent).toBe("The total is 888.55 EUR.1 It was due in 1997.2");
+    // A citation outside the source volume is numbered but not a link.
+    expect(screen.getByLabelText("Source 2: notes.pdf").tagName).toBe("SPAN");
+
+    const sources = screen.getByRole("list", { name: "Sources" });
+    expect(sources).toHaveTextContent("invoice.pdf · page 1“TOTAL : 888.55 EUR”");
+    expect(screen.getByRole("link", { name: "invoice.pdf · page 1" })).toHaveAttribute("href", href);
+    expect(screen.queryByText(/Sources:/)).toBeNull();
+  });
+
   it("loads an earlier conversation from the history list", async () => {
     vi.stubGlobal("fetch", vi.fn((url: string) => url.startsWith("/api/chat/conversations/")
       ? json({ conversation_id: CONVERSATION, messages: [{ seq: 0, role: "user", text: "Earlier question", created_at: "" }, answer] })

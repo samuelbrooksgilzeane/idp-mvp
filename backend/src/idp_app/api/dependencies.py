@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlsplit
 
 from idp_app.services.document_models import DocumentRecord
 from idp_app.services.document_registry import DocumentRegistry
@@ -721,14 +722,21 @@ def build_document_chat_service(
         DocumentChatService,
         MockChatClient,
         ServingEndpointChatClient,
+        SourceLocation,
         SQLiteChatRepository,
     )
 
     registry = documents.registry
     client: ChatClient
     repository: ChatRepository
+    sources: SourceLocation | None
     if settings.mode is IdpMode.MOCK:
-        client = MockChatClient()
+        # Mock answers cite the first registered document, so links work locally.
+        sources = SourceLocation("localhost", "local", "local", "source_volume")
+        client = MockChatClient(
+            sources,
+            lambda: next((d.document_id for d in registry.list_documents()), None),
+        )
         repository = SQLiteChatRepository(settings.local_data_dir / "registry.sqlite3")
     else:
         assert isinstance(registry, DatabricksDocumentRegistry)
@@ -737,9 +745,21 @@ def build_document_chat_service(
         recorded = app_settings_table(settings, registry)
         override = settings.chat_endpoint
         # Supervisor answers can take a minute when several tools run.
+        workspace = WorkspaceClient(config=Config(http_timeout_seconds=170))
         client = ServingEndpointChatClient(
-            WorkspaceClient(config=Config(http_timeout_seconds=170)),
-            lambda: override or recorded.get(CHAT_ENDPOINT),
+            workspace, lambda: override or recorded.get(CHAT_ENDPOINT)
+        )
+        host = urlsplit(str(workspace.config.host or "")).hostname or ""
+        # Knowledge Assistant citations link only to this workspace's source volume.
+        sources = (
+            SourceLocation(
+                host,
+                _required(settings.catalog, "IDP_CATALOG"),
+                _required(settings.project_schema, "IDP_PROJECT_SCHEMA"),
+                _required(settings.source_volume_name, "IDP_SOURCE_VOLUME_NAME"),
+            )
+            if host
+            else None
         )
         repository = DatabricksChatRepository(
             registry, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
@@ -748,4 +768,4 @@ def build_document_chat_service(
     def file_names(document_ids: list[str]) -> dict[str, str]:
         return {key: record.file_name for key, record in registry.get_many(document_ids).items()}
 
-    return DocumentChatService(client, repository, file_names)
+    return DocumentChatService(client, repository, file_names, sources=sources)

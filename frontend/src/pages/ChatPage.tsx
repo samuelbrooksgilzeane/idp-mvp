@@ -2,7 +2,8 @@ import { MessageSquarePlus, SendHorizontal } from "lucide-react";
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Markdown } from "../components/Markdown";
-import type { ChatMessage, ConversationSummary } from "../types";
+import { numberedCitations, sourceHref, textWithMarkers } from "../lib/citations";
+import type { ChatCitation, ChatMessage, ConversationSummary } from "../types";
 
 type AskResponse = { conversation_id: string; messages: ChatMessage[] };
 
@@ -125,7 +126,7 @@ export function ChatPage() {
               <span>For example: “Invoice totals by supplier” or “Show the extracted fields of 50080tihd.pdf”.</span>
             </div>
           ) : null}
-          {messages.map((message) => <Message key={message.seq} message={message} />)}
+          {messages.map((message) => <Message key={message.seq} message={message} conversationId={conversationId} />)}
           {pending ? (
             <>
               <Message message={{ seq: -1, role: "user", text: pending, created_at: "" }} />
@@ -148,19 +149,63 @@ export function ChatPage() {
   );
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function Message({ message, conversationId }: { message: ChatMessage; conversationId?: string }) {
   if (message.role === "user") {
     return <div className="chat-message chat-user"><p>{message.text}</p></div>;
   }
+  const citations = numberedCitations(message);
+  const labels = (message.citations ?? []).filter((item): item is string => typeof item === "string");
+  const byNumber = new Map(citations.map((citation) => [citation.number, citation]));
+  const href = (citation: ChatCitation) => sourceHref(citation, conversationId, message.seq);
   return (
     <div className="chat-message chat-assistant">
-      <Markdown text={message.text} />
-      {message.citations?.length ? (
-        <p className="chat-meta"><span>Sources:</span> {message.citations.join(", ")}</p>
+      <Markdown
+        text={textWithMarkers(message.text, message.parts, citations)}
+        renderMarker={(number) => {
+          const citation = byNumber.get(number);
+          return citation ? <CitationMarker citation={citation} href={href(citation)} /> : null;
+        }}
+      />
+      {citations.length ? (
+        <ol className="chat-sources" aria-label="Sources">
+          {citations.map((citation) => {
+            const link = href(citation);
+            const label = `${citation.file_name}${citation.page ? ` · page ${citation.page}` : ""}`;
+            return (
+              <li key={citation.number}>
+                <span className="citation-marker plain" aria-hidden="true">{citation.number}</span>
+                <span>
+                  {link ? <a href={link} target="_blank" rel="noopener noreferrer">{label}</a> : label}
+                  {citation.quotes[0] ? <small>“{shorten(citation.quotes[0])}”</small> : null}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      ) : null}
+      {labels.length ? (
+        <p className="chat-meta"><span>Sources:</span> {labels.join(", ")}</p>
       ) : null}
       {message.tools?.length ? (
         <p className="chat-meta"><span>Looked up with:</span> {message.tools.join(", ")}</p>
       ) : null}
     </div>
   );
+}
+
+/** A numbered marker after the text a citation supports; it opens the cited page in a new tab. */
+function CitationMarker({ citation, href }: { citation: ChatCitation; href: string | null }) {
+  const title = citation.quotes.length ? citation.quotes.map((quote) => `“${quote}”`).join("\n") : citation.file_name;
+  const name = `Source ${citation.number}: ${citation.file_name}${citation.page ? `, page ${citation.page}` : ""}`;
+  return href ? (
+    <a className="citation-marker" href={href} target="_blank" rel="noopener noreferrer" title={title} aria-label={name}>
+      {citation.number}
+    </a>
+  ) : (
+    <span className="citation-marker plain" title={title} aria-label={name}>{citation.number}</span>
+  );
+}
+
+function shorten(text: string, limit = 140): string {
+  return text.length > limit ? `${text.slice(0, limit - 1).trimEnd()}…` : text;
 }

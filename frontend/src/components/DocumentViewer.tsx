@@ -6,6 +6,7 @@ import {
   Layers3,
   LocateFixed,
   ScanSearch,
+  Undo2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -76,6 +77,8 @@ type DocumentViewerProps = {
   /** The page has yet to resolve which parse to show; hold the loading state until it has. */
   sourcePending?: boolean;
   citationTarget?: CitationTarget | null;
+  /** "source": the page, its controls and citation highlights only (the chat's source tab). */
+  variant?: "inspect" | "source";
 };
 
 const zoomLevels = [75, 100, 125, 150, 200];
@@ -86,10 +89,13 @@ export function DocumentViewer({
   parseRunId,
   sourcePending = false,
   citationTarget,
+  variant = "inspect",
 }: DocumentViewerProps) {
+  const inspect = variant === "inspect";
+  const baseZoom = inspect ? 100 : 75;
   const [viewer, setViewer] = useState<ViewerState>({ kind: "idle" });
   const [pageIndex, setPageIndex] = useState(0);
-  const [zoom, setZoom] = useState(100);
+  const [zoom, setZoom] = useState(baseZoom);
   const [resolvedParseId, setResolvedParseId] = useState(parseRunId);
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedElementId, setSelectedElementId] = useState<number | null>(null);
@@ -108,7 +114,7 @@ export function DocumentViewer({
     const controller = new AbortController();
     shownParse.current = null;
     setPageIndex(0);
-    setZoom(100);
+    setZoom(baseZoom);
     setSelectedElementId(null);
 
     // Workflow status can lag retained parse history (including historical extraction
@@ -150,7 +156,7 @@ export function DocumentViewer({
         }
       });
     return () => controller.abort();
-  }, [documentId, documentStatus, parseRunId, sourcePending]);
+  }, [documentId, documentStatus, parseRunId, sourcePending, baseZoom]);
 
   const currentPage = viewer.kind === "ready" ? viewer.pages[pageIndex] : null;
 
@@ -183,11 +189,12 @@ export function DocumentViewer({
     return () => observer.disconnect();
   }, [imageState, imageKey, zoom, currentPage]);
 
+  const citedIndex = citationTarget && viewer.kind === "ready"
+    ? viewer.pages.findIndex((page) => page.page_id === citationTarget.pageId)
+    : -1;
   useEffect(() => {
-    if (!citationTarget || viewer.kind !== "ready") return;
-    const index = viewer.pages.findIndex((page) => page.page_id === citationTarget.pageId);
-    if (index >= 0) setPageIndex(index);
-  }, [citationTarget, viewer]);
+    if (citedIndex >= 0) setPageIndex(citedIndex);
+  }, [citationTarget, citedIndex]);
 
   const visibleElements = useMemo(
     () => elements.filter((element) => selectedTypes.has(element.element_type)),
@@ -210,6 +217,12 @@ export function DocumentViewer({
     const cited = citedElementId(regions, elements);
     if (cited !== null) setSelectedElementId(cited);
   }, [citationTarget, citationBoxes, elements]);
+  // The source tab opens with the cited passage in view, however long the page.
+  const viewportRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (inspect || imageState !== "ready" || !citationBoxes.length || !renderedSize.width) return;
+    viewportRef.current?.querySelector(".citation-box")?.scrollIntoView?.({ block: "center" });
+  }, [inspect, imageState, citationBoxes, renderedSize.width]);
   const selectedElement =
     elements.find((element) => element.element_id === selectedElementId) ?? null;
   const allTypesSelected =
@@ -250,7 +263,12 @@ export function DocumentViewer({
   }
 
   return (
-    <section className="document-viewer" aria-labelledby="viewer-title">
+    <section
+      className={inspect ? "document-viewer" : "document-viewer viewer-source"}
+      aria-labelledby={inspect ? "viewer-title" : undefined}
+      aria-label={inspect ? undefined : "Cited page"}
+    >
+      {inspect ? (
       <header className="viewer-heading">
         <div>
           <p className="eyebrow">Visual debugger</p>
@@ -263,6 +281,7 @@ export function DocumentViewer({
           </div>
         ) : null}
       </header>
+      ) : null}
 
       {viewer.kind === "loading" ? <ViewerSkeleton /> : null}
       {viewer.kind === "empty" ? (
@@ -319,7 +338,7 @@ export function DocumentViewer({
               <button
                 className="zoom-readout"
                 type="button"
-                onClick={() => setZoom(100)}
+                onClick={() => setZoom(baseZoom)}
                 aria-label={`Reset zoom, currently ${zoom}%`}
               >
                 {zoom}%
@@ -334,8 +353,21 @@ export function DocumentViewer({
                 <ZoomIn size={16} strokeWidth={1.7} aria-hidden="true" />
               </button>
             </div>
+            {!inspect && citationTarget ? (
+              pageIndex === citedIndex ? (
+                <span className="citation-chip" role="status">
+                  <span className="citation-swatch" aria-hidden="true" />
+                  {citationBoxes.length ? "Cited passage highlighted" : "Cited page"}
+                </span>
+              ) : citedIndex >= 0 ? (
+                <button type="button" className="back-to-citation" onClick={() => setPageIndex(citedIndex)}>
+                  <Undo2 size={15} strokeWidth={1.8} aria-hidden="true" />Back to cited page
+                </button>
+              ) : null
+            ) : null}
           </div>
 
+          {inspect ? (
           <div className="element-filters" aria-label="Element type filters">
             <button
               type="button"
@@ -357,8 +389,9 @@ export function DocumentViewer({
               </button>
             ))}
           </div>
+          ) : null}
 
-          {citationTarget && citationBoxes.length > 0 ? (
+          {inspect && citationTarget && citationBoxes.length > 0 ? (
             <div className="citation-legend" role="status">
               <span className="citation-swatch" aria-hidden="true" />
               Highlighting extraction evidence for <strong>{citationTarget.fieldLabel}</strong>
@@ -367,7 +400,7 @@ export function DocumentViewer({
 
           {elementsError ? <p role="alert">{elementsError}</p> : null}
           <div className="viewer-workspace">
-            <div className="page-viewport" aria-busy={imageState === "loading"}>
+            <div className="page-viewport" ref={viewportRef} aria-busy={imageState === "loading"}>
               {imageState === "loading" ? <div className="page-image-skeleton" /> : null}
               {imageState === "error" ? (
                 <div className="page-image-error" role="alert">
@@ -405,7 +438,7 @@ export function DocumentViewer({
                     }
                   }}
                 />
-                {imageState === "ready" ? (
+                {inspect && imageState === "ready" ? (
                   <div className="element-overlay" aria-label="Detected page elements">
                     {visibleElements.flatMap((element) =>
                       element.boxes.map((box, boxIndex) => {
@@ -452,6 +485,7 @@ export function DocumentViewer({
               </div>
             </div>
 
+            {inspect ? (
             <aside className="element-inspector" aria-label="Selected element details">
               <div className="inspector-heading">
                 <LocateFixed size={16} strokeWidth={1.7} aria-hidden="true" />
@@ -484,6 +518,7 @@ export function DocumentViewer({
                 </ol>
               ) : null}
             </aside>
+            ) : null}
           </div>
         </>
       ) : null}

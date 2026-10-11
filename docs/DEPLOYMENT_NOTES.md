@@ -112,6 +112,13 @@ App CAN_QUERY on it, plus the Supervisor and sub-agent permissions when it is a 
 make workspace-setup   # provisions chat, grants it and deploys; repeat after changing chat_mode
 ```
 
+Knowledge Assistant answers carry numbered citations: a marker after the text each one supports
+and a numbered Sources list. A citation links only when it points at this workspace's source
+volume (`.../incoming/<document_id>.pdf#page=N` plus the passage); it opens a new tab,
+`/sources/<document_id>`, at the cited page with the passage highlighted by matching it to the
+page's parsed text. Every page stays reachable there, and users need no access to the files. Other
+citations stay plain labels.
+
 The App calls the chat endpoint itself, keeps per-user history in `<prefix>_chat_messages`
 (created by the bootstrap's `migrate_chat_history` task) and shows citations and extracted values as
 plain text, with `<document_id>.pdf` rewritten to the original file name. No separate chat app or

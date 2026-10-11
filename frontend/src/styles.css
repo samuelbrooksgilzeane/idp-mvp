@@ -944,3 +944,53 @@ main:has(> .chat-layout) { height: calc(100dvh - 52px); display: flex; flex-dire
 @media (max-width: 860px) { .chat-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); } .chat-history ul { max-height: 120px; } }
 .schema-form-actions .danger-action { margin-left: auto; border-color: var(--red-line); color: var(--red); }
 .schema-form-actions .danger-action:hover:not(:disabled) { background: var(--red-soft); }
+
+/* Chat citations: numbered markers after the text they support, and the answer's sources */
+.citation-marker { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: 3px; padding: 0 4px; border: 1px solid var(--accent-fill); border-radius: 5px; background: var(--accent-fill); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; text-decoration: none; vertical-align: 1px; }
+a.citation-marker:hover { border-color: var(--accent-2); background: var(--accent-2); }
+.citation-marker.plain { border-color: var(--border-2); background: var(--panel); color: var(--text-2); }
+.chat-sources { margin: 12px 0 0; padding: 12px 0 0; display: grid; gap: 8px; border-top: 1px solid var(--border); list-style: none; }
+.chat-sources li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; }
+.chat-sources .citation-marker { margin: 1px 0 0; }
+.chat-sources a { color: var(--accent); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.chat-sources a:hover { text-decoration: underline; }
+.chat-sources small { display: block; margin-top: 2px; color: var(--muted); }
+
+/* Source tab: the cited page of a document, opened from a chat answer */
+.source-page { height: 100dvh; display: grid; grid-template-rows: 56px minmax(0, 1fr); background: var(--bg); color: var(--text); }
+.source-header { display: flex; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+.source-header .brand-mark { width: 26px; height: 26px; border-radius: 7px; background: var(--brand-deep); font-size: 10.5px; }
+.source-crumbs { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.source-crumbs strong { color: var(--text); font-weight: 600; }
+.source-main { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+.source-viewer { min-height: 0; overflow: hidden; border-right: 1px solid var(--border); }
+.source-panel { min-height: 0; overflow: auto; padding: 24px; display: flex; flex-direction: column; gap: 22px; }
+.source-eyebrow { margin: 0 0 8px; color: var(--muted); font-size: 11.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; }
+.source-file { display: flex; align-items: flex-start; gap: 10px; }
+.source-file > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.source-file h1 { margin: 0; font-size: 16px; font-weight: 650; line-height: 1.35; letter-spacing: 0; overflow-wrap: anywhere; }
+.source-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.source-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border: 1px solid var(--border-2); border-radius: 999px; color: var(--text-2); font-size: 12.5px; font-weight: 500; }
+.source-quotes { display: grid; gap: 8px; }
+.source-quotes blockquote { margin: 0; padding: 12px 14px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--panel-2); font-weight: 600; overflow-wrap: anywhere; }
+.source-answer { padding: 14px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-2); line-height: 1.55; }
+.source-answer .markdown p { margin: 0 0 8px; }
+.source-answer .markdown p:last-child { margin-bottom: 0; }
+.source-question { margin: 0 0 10px; display: flex; gap: 8px; color: var(--muted); font-size: 12.5px; }
+.source-question svg { flex: none; margin-top: 2px; }
+.source-hint, .source-note { margin: 8px 0 0; color: var(--faint); font-size: 12px; line-height: 1.5; }
+.source-note { margin-top: auto; }
+.source-failure, .source-loading { margin: 32px; color: var(--muted); }
+
+/* The viewer in the source tab: page, controls and highlights only, filling the tab */
+.document-viewer.viewer-source { height: 100%; margin: 0; padding: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); border: 0; }
+.viewer-source .viewer-toolbar { justify-content: flex-start; padding: 6px 16px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; }
+.viewer-source .viewer-workspace { min-height: 0; display: block; border: 0; border-radius: 0; }
+.viewer-source .page-viewport { height: 100%; min-height: 0; max-height: none; }
+.citation-chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent-soft); color: var(--text); font-size: 12.5px; font-weight: 500; }
+.back-to-citation { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border: 1px solid var(--accent-fill); border-radius: 7px; background: var(--accent-fill); color: #fff; font-size: 12.5px; font-weight: 600; }
+.back-to-citation:hover { border-color: var(--accent-2); background: var(--accent-2); }
+@media (max-width: 980px) {
+  .source-main { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .source-viewer { border-right: 0; border-bottom: 1px solid var(--border); }
+}

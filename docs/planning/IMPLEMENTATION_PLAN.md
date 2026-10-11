@@ -153,7 +153,7 @@ exist to make the next workspace need none of the steps below.
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
 | 9 | Repeatable deployment: one settings file, one command | 2 | 9a, 9b done (11 Oct); live check L8 open |
-| 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Not started (after 9) |
+| 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Code done (11 Oct, `feat/batch-10-ka-citations`); live check open |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
 five-hour usage window.
@@ -608,14 +608,33 @@ parse, chat with citations) with no other commands. On US, L8 also recreates the
 
 ## Batch 10 — Knowledge Assistant chat with clickable page citations (1–2 sessions)
 
-Status: Not started. Best after Batch 9, so its live test uses the one-command deploy; it adds no
-deployment steps either way. Citations need the KA endpoint: a Supervisor may drop the KA's
+Status: Code done 11 October on `feat/batch-10-ka-citations` (branched from Batch 9; no workspace
+calls); the live check below is open. Notes for the live check: a citation links only when its
+host equals the App's `WorkspaceClient().config.host` and its path ends in
+`/<catalog>/<schema>/<source volume>/incoming/<uuid>.pdf`; other citations stay labels and the App
+logs `Citation kept as a label: <host>` (check the App log if no answer has links). The passage is
+read from a `text=` or `:~:text=` directive; KA pages are taken as 1-based and matched to the
+viewer's `page_number`. It adds no deployment steps. Citations need the KA endpoint: a Supervisor may drop the KA's
 `url_citation` links (unconfirmed community report), in which case answers show plain file names.
 
 Goal: every chat answer shows numbered citations `[1]`, `[2]` next to the text they support, plus a
 numbered Sources list (`[1] amazon-q1-2025.pdf · page 9 — "...passage..."`). Clicking one opens a
 **new tab** showing that document at the cited page with the passage highlighted. It works for every
 app user with no volume grant, and does not use the Documents page.
+
+Decisions (11 October, with the user, from a mockup kept locally at
+`output/mockups/source-tab/source-tab-chrome.png`):
+- **Layout:** no sidebar. A slim header (`IDP MVP › Cited source`); the page in the existing viewer
+  on the left (page arrows, zoom, a "N cited passages highlighted" chip); on the right the citation
+  number, file name, page and case, the cited passages, the question and answer it came from, and a
+  short note on how the passage is found. Wording is refined later.
+- **Pages:** the tab opens at the cited page, the arrows reach every page of the document, the
+  highlight shows only on the cited page, and a **Back to cited page** button appears on any other
+  page.
+- **Merging:** citations to the same document and page share one number and highlight every passage.
+- **No PDF fallback (step 5 dropped):** the Knowledge Assistant indexes the same `incoming/` folder
+  the app parses, and uploads are parsed automatically, so cited documents have page images. An
+  unparsed document shows the viewer's existing "waiting" message.
 
 1. **Citation shape** (L7 done): `type`, `url`, `title`, no text offsets. Ask the user for the
    exact characters after `.pdf` if unsure whether the passage uses `text=` or `:~:text=`; parse
@@ -633,17 +652,13 @@ app user with no volume grant, and does not use the Documents page.
    page's parsed elements (`/api/documents/{id}/elements?page_id=`; whitespace- and
    case-insensitive, best overlap). It shows the file name, page and passage. Check KA's page base
    (1-based) against the viewer's `page_id` with a real document.
-5. **Fallback for unparsed documents:** `GET /api/documents/{id}/source` streams the original PDF
-   with `Content-Type: application/pdf`, `Content-Disposition: inline`, `nosniff` and private
-   caching, through a new `DocumentStorage` read method (local and Databricks Files API). The
-   source tab redirects to it with `#page=N` when the document has no page images. No new grants
-   are needed: the app's binding already reads the source volume.
+5. ~~Fallback for unparsed documents~~ (dropped 11 October; see Decisions above).
 6. **Chat page:** numbered markers at the end of the text part (paragraph) that carried each
    citation; the passage on hover; the numbered Sources list. Links use `target="_blank"` and
    `rel="noopener noreferrer"`.
 7. **Tests:** parsing (encoded passage, two citations, missing page, foreign host, path outside the
-   volume, merged duplicates), legacy history rows, the PDF endpoint, passage matching, and
-   rendering of markers and the list.
+   volume, merged duplicates), legacy history rows, passage matching, the Back to cited page
+   button, and rendering of markers and the list.
 
 Live (user): three questions, one answered deep in a document; click each citation as an admin and
 as a non-admin user; confirm the page and highlight. Users need no `READ VOLUME`.

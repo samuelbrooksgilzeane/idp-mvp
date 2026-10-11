@@ -196,6 +196,35 @@ describe("DocumentViewer", () => {
     );
   });
 
+  it("shows only the page in the source tab, and returns to the cited page", async () => {
+    vi.stubGlobal("fetch", viewerFetch());
+    render(
+      <DocumentViewer
+        variant="source"
+        documentId={documentId}
+        documentStatus="PARSED"
+        citationTarget={{ pageId: 1, fieldLabel: "[1] Cited passage", nonce: 1, boxes: [{ page_id: 1, coord: [180, 1900, 1000, 1990] }] }}
+      />,
+    );
+
+    const cited = await screen.findByAltText("Rendered page 2");
+    setImageDimensions(cited, 1600, 2200, 800, 1100);
+    fireEvent.load(cited);
+    expect(await screen.findByRole("img", { name: /Cited evidence for \[1\] Cited passage on page 2/ })).toBeTruthy();
+    expect(screen.getByRole("status")).toHaveTextContent("Cited passage highlighted");
+    expect(screen.queryByLabelText("Element type filters")).toBeNull();
+    expect(screen.queryByLabelText("Selected element details")).toBeNull();
+    expect(screen.queryByLabelText("Detected page elements")).toBeNull();
+
+    // Every page stays reachable; away from the cited page a button leads back to it.
+    fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
+    expect(await screen.findByAltText("Rendered page 1")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back to cited page" }));
+    expect(await screen.findByAltText("Rendered page 2")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to cited page" })).toBeNull();
+  });
+
   it("selects the element a cited value was read from", async () => {
     vi.stubGlobal("fetch", viewerFetch());
     const { rerender } = render(<DocumentViewer documentId={documentId} documentStatus="PARSED" />);
