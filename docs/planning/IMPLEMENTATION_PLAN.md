@@ -92,6 +92,46 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 - Live dev: app `idp-mvp-dev`, warehouse `647704f77f24020a`, tables `workspace.idp_mvp.idp_dev_*`,
   source volume `workspace.idp_mvp.idp_source` (PDFs stored as `incoming/<document_id>.pdf`).
 
+## Facts from the US deployment (10–11 October 2026)
+
+Deployed by hand from `main` (`f24f4cc`) in a cluster's web terminal: catalog `idp_testing`, schema
+`idp_mvp`, prefix `idp_dev`, `-t dev` with `--var` overrides, app `idp-mvp-dev`. Batches 9 and 10
+exist to make the next workspace need none of the steps below.
+
+- **Deploying needs only the Databricks CLI.** `frontend/dist` is committed and matched its source;
+  the app installs its Python packages itself. Only `make deploy`'s `check` needs uv, Node and make.
+- **Cluster web terminal traps:** `DATABRICKS_CLUSTER_ID` is set there, and in `mode: development`
+  the CLI then moves every job onto that cluster (it refused: not all-purpose); it must be unset. uv
+  fails writing its cache under `/Workspace` ("operation not permitted"). Browser login is
+  unavailable, so the profile used a personal access token.
+- **A Git folder has no `.git`,** so bundle sync ignored `.gitignore` and uploaded `backend/.venv`;
+  the app deploy then failed: "exporting symlink ... in source format is not supported".
+- **`app_access_grants` is incomplete.** On Free Edition these were granted by hand; on US the first
+  upload failed (HTTP 500, `INSUFFICIENT_PRIVILEGES` on `idp_dev_upload_batches`) until the app's
+  service principal got `SELECT, MODIFY` on `upload_batches`, `upload_items`, `work_batches`,
+  `work_items`, `work_dispatches`, `invoice_line_candidates`, and `CAN_MANAGE_RUN` on the
+  `work_dispatcher` and `results_exporter` jobs. The four non-chat views are unused by the app. The
+  bootstrap does not create `export_requests`/`export_members` (`migrate_export_requests.sql` is not
+  wired in).
+- **Knowledge Assistant works on US and is fast;** the Supervisor with five UC functions was
+  noticeably slower. The app was pointed straight at the KA by setting `chat_endpoint` to the KA's
+  serving endpoint; the app's request format is accepted. `grant_app_access.py` only understands a
+  Supervisor (it fails with a KA endpoint), so the KA permissions came from an earlier
+  Supervisor-mode grants run. The first KA sync sat at "finalizing processing" for over 40 minutes.
+- **KA citations:** each answer's message content carries `annotations` of
+  `{"type": "url_citation", "url": ..., "title": <file name>}`. The URL points at the source-volume
+  file `.../<catalog>/idp_mvp/idp_source/incoming/<document_id>.pdf`, then `#page=N` and the cited
+  passage, URL-encoded (`%20`). Page numbers change with the passage and match the PDF. There are
+  **no** `start_index`/`end_index` offsets (L7). Opening the URL sometimes shows the PDF
+  at the page with the passage highlighted and sometimes downloads the file, and it needs the
+  viewer's own `READ VOLUME`, so it is not reliable as the click target.
+- **Folder import failed in its job** with `RuntimeError: Already running asyncio in this thread`:
+  Databricks runs Python job tasks inside an event loop, and `FolderImportService.run` called
+  `anyio.run`. Fixed on 11 October (runs the import in its own thread when a loop is running; test
+  `test_run_works_inside_a_running_event_loop`). Needs a redeploy, then **Retry** on the failed batch.
+- **To verify in Batch 9:** whether `mode: development` pauses the dispatcher's schedule despite
+  `recovery_schedule_status=UNPAUSED` (bundle docs say development mode pauses schedules).
+
 ## Progress
 
 | Batch | Title | Sessions (est.) | Status |
@@ -101,9 +141,11 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 | 3 | Upload robustness | 1 | Done (live check L3 open) |
 | 4 | Folder import | 2 | Done in 1 session (live smoke L4 open) |
 | 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
-| 6 | US workspace deployment | 1 | Blocked: US workspace access |
+| 6 | US workspace deployment | 1 | Done by hand 10–11 Oct (see Facts from the US deployment); Batch 9 makes it repeatable |
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
-| 8 | US capacity runs, access, retirement | 1 + user test time | Blocked: Batch 7 |
+| 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
+| 9 | Repeatable deployment: one settings file, one command | 2 | Not started (do first) |
+| 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Not started (after 9) |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
 five-hour usage window.
@@ -138,6 +180,8 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | G7 | Batch 7 gate | Free Edition workspace UI, CLI | KA and Supervisor feasibility on Free Edition; answers go in Batch 7's G7 table. **Blocks 7a/7b.** | Done 1 Oct (see G7 table). Probe KA, Supervisor and `idp_source/ka_probe/` still exist: user to delete. |
 | L5 | Batch 7 live | L1, G7, 7a, 7b | Provision, deploy, 10 set questions, restart and per-user history checks (see Batch 7). | Open |
 | L6 | Batch 7 live | L5 | Automatic KA Sync after upload and delete. | Open |
+| L7 | Batch 10 step 1 | US workspace, user's CLI | Save one KA reply about a public document (`databricks api post /serving-endpoints/<ka endpoint>/invocations`) and record each annotation's keys, especially `start_index`/`end_index`, and the exact URL shape after `.pdf`. Commit the reply under `docs/evidence/` only if the document is public. | Done 11 Oct: `type`, `url`, `title` only, no offsets; URL carries `#page=N` and the encoded passage |
+| L8 | Batch 9 live | Batch 9 code | Deploy to a workspace with only the new settings file and one command, from a fresh Git folder; then a non-admin user uploads, parses and chats. | Open |
 
 ## Batch 1 — Branch and Genie removal
 
@@ -298,7 +342,7 @@ Status: Merged into Batch 7 on 30 September. Steps 1–3 are built in Batch 7's 
 
 ## Batch 6 — US workspace deployment
 
-Status: Blocked: US workspace access
+Status: Done by hand 10–11 October (see Facts from the US deployment). Batch 9 replaces these steps.
 
 Needs from the user: US workspace host and CLI profile, admin rights, all-users group name.
 
@@ -455,7 +499,7 @@ No new code expected.
 
 ## Batch 8 — US capacity runs, access, retirement
 
-Status: Blocked: Batch 6 (US workspace) and Batch 7
+Status: Ready: the US workspace is deployed (Batch 6 done by hand)
 
 1. User runs `docs/CAPACITY_TEST_PROCEDURE.md` on US: browser 100 and 300 files; folder import 100,
    500 and 1,000. Record results in a new evidence doc.
@@ -463,3 +507,108 @@ Status: Blocked: Batch 6 (US workspace) and Batch 7
    chat).
 3. With the user's OK: delete the Free Edition Genie space and the old `_genie_*` views; remove the
    `.gitignore` entry.
+
+## Batch 9 — Repeatable deployment: one settings file, one command (2 sessions)
+
+Status: Not started
+
+Goal: deploying to any workspace means filling in one settings file and running one command (or
+deploying and running one job from the workspace UI). No uv, Node or make on the deploying machine,
+no hand-run grants, no endpoint or id lookups, no env files. Read **Facts from the US deployment**
+first: every trap listed there must be impossible afterwards. `make deploy` (dev, with the full
+checks) stays as it is.
+
+Session 9a (no workspace):
+
+1. **Sync excludes** in `databricks_etl/databricks.yml`: `**/.venv/**`, `**/node_modules/**`,
+   `**/__pycache__/**`, `.cache/**`, `.mypy_cache/**`, `.pytest_cache/**`, `.ruff_cache/**`,
+   `.local/**`, `**/.databricks/**`, so a copy without `.git` uploads nothing generated. Add
+   `.databricks/` to `.gitignore`. Extend `scripts/validate_configuration.py` to require these.
+2. **Complete grants.** `grant_app_access.py` grants the six tables in Facts (`SELECT, MODIFY`) and
+   `CAN_MANAGE_RUN` on the dispatcher and exporter jobs (job ids passed as parameters, like the
+   import job). Add a test that every name in `backend/src/idp_app/core/data_objects.py`
+   `TABLE_NAMES` is covered by an app resource binding or a grant, so a new table cannot be missed
+   again.
+3. **Chat mode setting** `chat_mode`: `off` | `knowledge_assistant` (new default) | `supervisor`.
+   - Provisioning becomes a bundle job task (the `provision_chat.py` logic run with the SDK, no
+     local uv): KA always; Supervisor only in `supervisor` mode, functions optional.
+   - The task writes the resolved serving endpoint and KA id to a small settings table
+     `<prefix>_app_settings`, and the app reads them from there (cached a few minutes). This removes
+     `chat_endpoint`/`ka_id` from deploy variables and the redeploy after provisioning.
+   - Grants handle both modes: KA mode grants `CAN_QUERY` on the KA endpoint and `CAN_MANAGE` on the
+     KA, with no Supervisor lookup.
+   - **Endpoint override** `chat_endpoint` (optional, blank by default): when set, the app sends
+     chat to exactly that serving endpoint (a Supervisor, another agent, or a specific KA) instead
+     of the provisioned KA, and the grants job gives the app `CAN_QUERY` on it (plus the Supervisor
+     and sub-agent permissions when it is a Supervisor). This keeps a one-setting route back to a
+     multi-tool Supervisor.
+   - Setup requests one KA sync right after provisioning, so documents uploaded before chat existed
+     are indexed without a manual sync. If the Agent Bricks previews are off or unavailable, the
+     task fails with a plain message naming the admin setting.
+4. **One setup job** `workspace_setup`: bootstrap tasks, then chat provisioning (unless `off`),
+   then app grants. It replaces separate `governed_data_bootstrap` and `app_access_grants` runs
+   (keep both jobs callable for repairs).
+
+Session 9b (no workspace, then the user's live check L8):
+
+5. **Per-workspace settings:** one file per workspace, `databricks_etl/targets/<name>.yml`
+   (included by glob), holding host, catalog, schema, prefix, warehouse, volumes, `chat_mode`,
+   feature switches and concurrency. Use a non-development mode so names carry no `[dev user]`
+   prefix and schedules follow `recovery_schedule_status` (check the Facts item on schedules). Add
+   `targets/example.yml.template` with comments for each value.
+6. **One deploy command** `scripts/deploy_workspace.py <target>`: Python standard library plus the
+   Databricks CLI (on Windows, run it with `py`). It clears `DATABRICKS_CLUSTER_ID`, validates the
+   target, deploys (tolerating the first run's expected app error), runs `workspace_setup`,
+   deploys again, starts the app and prints its URL. Each step says what it is doing and stops with
+   a plain-language message on failure. `make deploy-workspace TARGET=<name>` wraps it.
+7. **Stale build guard:** `make check` fails when `frontend/dist` differs from a fresh build, so a
+   CLI-only deploy can never ship an old frontend.
+8. **Docs:** rewrite `docs/DEPLOYMENT_GUIDE.md` section 3 as: create the settings file, sign in,
+   run one command. Move the Facts traps into Troubleshooting. Add a section for deploying from a
+   workspace Git folder (web terminal or the bundle UI) and record what L8 finds about the UI
+   Deploy button.
+
+Done when L8 passes: a fresh Git folder plus a settings file deploys a working app (upload, auto
+parse, chat with citations) with no other commands.
+
+## Batch 10 — Knowledge Assistant chat with clickable page citations (1–2 sessions)
+
+Status: Not started. Best after Batch 9, so its live test uses the one-command deploy; it adds no
+deployment steps either way. Citations need the KA endpoint: a Supervisor may drop the KA's
+`url_citation` links (unconfirmed community report), in which case answers show plain file names.
+
+Goal: every chat answer shows numbered citations `[1]`, `[2]` next to the text they support, plus a
+numbered Sources list (`[1] amazon-q1-2025.pdf · page 9 — "...passage..."`). Clicking one opens a
+**new tab** showing that document at the cited page with the passage highlighted. It works for every
+app user with no volume grant, and does not use the Documents page.
+
+1. **Citation shape** (L7 done): `type`, `url`, `title`, no text offsets. Ask the user for the
+   exact characters after `.pdf` if unsure whether the passage uses `text=` or `:~:text=`; parse
+   both. Build fixtures from that shape.
+2. **Parse citations** in `backend/src/idp_app/services/document_chat.py` (`parse_response`): for
+   each `url_citation`, keep the title, document id (the UUID file name under
+   `/<source volume>/incoming/`), page (`page=N`), passage (URL-decoded) and which text part of
+   the answer carried it (there are no offsets). Only URLs on the workspace host and inside the configured source volume become links;
+   any other citation stays a plain label. Merge citations to the same document and page.
+3. **History:** store citations as objects (`number`, `document_id`, `file_name`, `page`, `quote`,
+   text part) in the existing chat history row. Rows that hold the old list of strings keep
+   rendering as today.
+4. **Source tab:** a standalone route `/sources/:documentId?page=N&q=<passage>` with no sidebar.
+   It reuses `DocumentViewer` with a `CitationTarget` built by matching the passage against that
+   page's parsed elements (`/api/documents/{id}/elements?page_id=`; whitespace- and
+   case-insensitive, best overlap). It shows the file name, page and passage. Check KA's page base
+   (1-based) against the viewer's `page_id` with a real document.
+5. **Fallback for unparsed documents:** `GET /api/documents/{id}/source` streams the original PDF
+   with `Content-Type: application/pdf`, `Content-Disposition: inline`, `nosniff` and private
+   caching, through a new `DocumentStorage` read method (local and Databricks Files API). The
+   source tab redirects to it with `#page=N` when the document has no page images. No new grants
+   are needed: the app's binding already reads the source volume.
+6. **Chat page:** numbered markers at the end of the text part (paragraph) that carried each
+   citation; the passage on hover; the numbered Sources list. Links use `target="_blank"` and
+   `rel="noopener noreferrer"`.
+7. **Tests:** parsing (encoded passage, two citations, missing page, foreign host, path outside the
+   volume, merged duplicates), legacy history rows, the PDF endpoint, passage matching, and
+   rendering of markers and the list.
+
+Live (user): three questions, one answered deep in a document; click each citation as an admin and
+as a non-admin user; confirm the page and highlight. Users need no `READ VOLUME`.
