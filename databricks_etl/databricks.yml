@@ -7,6 +7,18 @@ include:
 sync:
   include:
     - ../frontend/dist/**
+  # A workspace Git folder has no .git, so .gitignore is not applied there; these keep generated
+  # files out of every deploy. Patterns are relative to this file, hence the leading ../.
+  exclude:
+    - ../**/.venv/**
+    - ../**/node_modules/**
+    - ../**/__pycache__/**
+    - ../**/.cache/**
+    - ../**/.mypy_cache/**
+    - ../**/.pytest_cache/**
+    - ../**/.ruff_cache/**
+    - ../**/.local/**
+    - ../**/.databricks/**
   paths:
     - ..
 
@@ -14,15 +26,22 @@ variables:
   upload_parallel_transfers:
     description: Browser upload transfers in flight per batch (1-8)
     default: 3
+  chat_mode:
+    description: >-
+      Document chat: off, knowledge_assistant (answers with page citations) or supervisor (the
+      Knowledge Assistant plus SQL tools, slower). workspace_setup provisions it.
+    default: knowledge_assistant
+  supervisor_functions_enabled:
+    description: In supervisor mode, attach the chat UC functions to the Supervisor as tools
+    default: "true"
   chat_endpoint:
-    description: Chat Supervisor serving endpoint from scripts/provision_chat.py; blank hides the chat page
+    description: >-
+      Optional serving endpoint that answers chat instead of the provisioned one (a Supervisor,
+      another agent or a specific Knowledge Assistant); blank uses the provisioned endpoint
     default: " "
   ka_sync_enabled:
     description: Request a Knowledge Assistant Sync after documents are added or deleted
-    default: "false"
-  ka_id:
-    description: Knowledge Assistant id printed by scripts/provision_chat.py; blank until provisioned
-    default: " "
+    default: "true"
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.
     default: "false"
@@ -91,6 +110,7 @@ targets:
       warehouse_id: 647704f77f24020a
       viewer_projection_enabled: "true"
       chat_endpoint: mas-0297dd39-endpoint
+      ka_sync_enabled: "false"
   prod:
     mode: production
     variables:

@@ -129,6 +129,12 @@ exist to make the next workspace need none of the steps below.
   Databricks runs Python job tasks inside an event loop, and `FolderImportService.run` called
   `anyio.run`. Fixed on 11 October (runs the import in its own thread when a loop is running; test
   `test_run_works_inside_a_running_event_loop`). Needs a redeploy, then **Retry** on the failed batch.
+- **The `work_dispatcher` job was deleted by hand on US (11 October)** to stop its hourly schedule
+  overnight: bundle-managed jobs cannot be edited in the UI. The next deploy must recreate it:
+  check that `plan` shows a create for `jobs.work_dispatcher` (not an error), then restart the app so
+  `IDP_DISPATCH_JOB_ID` points at the new job, and give the app's service principal
+  `CAN_MANAGE_RUN` on it (the hand-made grant was on the old job; Batch 9's grants job covers this).
+  Until then automatic preparation cannot start parsing.
 - **To verify in Batch 9:** whether `mode: development` pauses the dispatcher's schedule despite
   `recovery_schedule_status=UNPAUSED` (bundle docs say development mode pauses schedules).
 
@@ -144,7 +150,7 @@ exist to make the next workspace need none of the steps below.
 | 6 | US workspace deployment | 1 | Done by hand 10–11 Oct (see Facts from the US deployment); Batch 9 makes it repeatable |
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
-| 9 | Repeatable deployment: one settings file, one command | 2 | Not started (do first) |
+| 9 | Repeatable deployment: one settings file, one command | 2 | 9a done (11 Oct); 9b next |
 | 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Not started (after 9) |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -510,7 +516,18 @@ Status: Ready: the US workspace is deployed (Batch 6 done by hand)
 
 ## Batch 9 — Repeatable deployment: one settings file, one command (2 sessions)
 
-Status: Not started
+Status: 9a done 11 October on `feat/batch-9-repeatable-deploy` (no workspace calls). Notes for 9b:
+the table `<prefix>_app_settings` (`name`, `value`, `updated_at`) holds `chat_endpoint` and
+`ka_id`; the App reads it, and an `IDP_CHAT_ENDPOINT` override wins. `ka_id` is gone from the
+variables; new `chat_mode` and `supervisor_functions_enabled`; `ka_sync_enabled` now defaults to
+`"true"` (the dev target keeps `"false"` and its G7 Supervisor as the override, so `make deploy` on
+dev needs no setup run; running `workspace_setup` there would create a KA on Free Edition).
+`workspace_setup` runs the bootstrap as a nested job, which still grants at its end, then grants
+again after provisioning; a bootstrap job parameter to skip the first grant was dropped because job
+parameters are pushed down to its SQL file tasks (unverified effect). `scripts/provision_chat.py`
+moved to `databricks_etl/src/provision_chat.py` (job task, no local entry point).
+`docs/DEPLOYMENT_GUIDE.md` section 3 still shows the old provisioning commands until 9b step 8.
+Export tables (`migrate_export_requests.sql`) are still not in the bootstrap.
 
 Goal: deploying to any workspace means filling in one settings file and running one command (or
 deploying and running one job from the workspace UI). No uv, Node or make on the deploying machine,
@@ -561,15 +578,20 @@ Session 9b (no workspace, then the user's live check L8):
    target, deploys (tolerating the first run's expected app error), runs `workspace_setup`,
    deploys again, starts the app and prints its URL. Each step says what it is doing and stops with
    a plain-language message on failure. `make deploy-workspace TARGET=<name>` wraps it.
-7. **Stale build guard:** `make check` fails when `frontend/dist` differs from a fresh build, so a
+7. **Stop and start commands:** `scripts/deploy_workspace.py stop <target>` stops the app, pauses
+   the dispatcher's schedule through the Jobs API and stops the warehouse; `start <target>`
+   reverses it (the schedule follows the settings file). Pausing for the night must never need a
+   redeploy or deleting a job (see Facts).
+8. **Stale build guard:** `make check` fails when `frontend/dist` differs from a fresh build, so a
    CLI-only deploy can never ship an old frontend.
-8. **Docs:** rewrite `docs/DEPLOYMENT_GUIDE.md` section 3 as: create the settings file, sign in,
+9. **Docs:** rewrite `docs/DEPLOYMENT_GUIDE.md` section 3 as: create the settings file, sign in,
    run one command. Move the Facts traps into Troubleshooting. Add a section for deploying from a
    workspace Git folder (web terminal or the bundle UI) and record what L8 finds about the UI
    Deploy button.
 
 Done when L8 passes: a fresh Git folder plus a settings file deploys a working app (upload, auto
-parse, chat with citations) with no other commands.
+parse, chat with citations) with no other commands. On US, L8 also recreates the deleted
+`work_dispatcher` job (see Facts).
 
 ## Batch 10 — Knowledge Assistant chat with clickable page citations (1–2 sessions)
 

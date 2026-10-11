@@ -1,7 +1,8 @@
-"""Document chat: ask the chat Supervisor about IDP documents, with per-user history.
+"""Document chat: ask the chat endpoint about IDP documents, with per-user history.
 
-The Supervisor serving endpoint (scripts/provision_chat.py) answers from the chat UC functions and,
-where it works, the Knowledge Assistant. Answers and citations are plain text. Source PDFs are
+The endpoint is the Knowledge Assistant, or in supervisor mode a Supervisor over the KA and the chat
+UC functions, as provisioned by the workspace_setup Job (or the chat_endpoint override). Answers
+and citations are plain text. Source PDFs are
 stored as <document_id>.pdf, so document ids are rewritten to original file names before an answer
 is stored or shown. History is kept per user: every read and write is scoped to the caller.
 """
@@ -30,6 +31,7 @@ DOCUMENT_FILE = re.compile(
     r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(\.pdf)?\b"
 )
 TRACE_ID = re.compile(r"^tr-[0-9a-f]{32}$")
+ENDPOINT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
 AGENT_NAME = re.compile(r"^\s*<name>.*</name>\s*$", re.DOTALL)
 # Older turns sent back to the endpoint; enough context, bounded request size.
 HISTORY_TURNS = 12
@@ -109,16 +111,24 @@ class ChatClient(Protocol):
 
 
 class ServingEndpointChatClient:
-    def __init__(self, client: Any, endpoint: str) -> None:
+    def __init__(self, client: Any, endpoint: Callable[[], str | None]) -> None:
+        """``endpoint`` names the serving endpoint per question (None: not provisioned yet)."""
         self.api = client.api_client
-        self.path = f"/serving-endpoints/{endpoint}/invocations"
+        self.endpoint = endpoint
 
     def ask(self, messages: list[dict[str, str]]) -> dict[str, Any]:
+        endpoint = self.endpoint()
+        if endpoint is None or ENDPOINT_NAME.fullmatch(endpoint) is None:
+            raise ChatError(
+                "CHAT_NOT_READY",
+                "Document chat is still being set up. Try again in a few minutes.",
+                503,
+            )
         try:
             # return_trace adds the MLflow trace (id, spans) under databricks_output.trace.
             response: dict[str, Any] = self.api.do(
                 "POST",
-                self.path,
+                f"/serving-endpoints/{endpoint}/invocations",
                 body={"input": messages, "databricks_options": {"return_trace": True}},
             )
         except Exception as error:

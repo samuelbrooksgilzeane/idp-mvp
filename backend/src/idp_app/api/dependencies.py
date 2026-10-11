@@ -8,7 +8,9 @@ from idp_app.services.preparation import PreparationService
 from idp_app.services.work_batches import WorkRepository
 
 if TYPE_CHECKING:
+    from idp_app.services.app_settings import AppSettingsTable
     from idp_app.services.batch_repository import BatchRepository
+    from idp_app.services.chat_sync import KnowledgeSync
     from idp_app.services.document_chat import DocumentChatService
     from idp_app.services.folder_import import FolderImportService
     from idp_app.services.upload_batches import UploadBatchService
@@ -84,7 +86,7 @@ def build_document_service(settings: Settings) -> DocumentService:
             registry,
             settings.max_upload_bytes,
             _registration_callback(settings, registry),
-            _source_changed_callback(settings),
+            None,
         )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
@@ -120,16 +122,37 @@ def build_document_service(settings: Settings) -> DocumentService:
         databricks_registry,
         settings.max_upload_bytes,
         _registration_callback(settings, databricks_registry),
-        _source_changed_callback(settings),
+        _source_changed_callback(settings, databricks_registry),
     )
 
 
-def _source_changed_callback(settings: Settings) -> Callable[[], object] | None:
-    if not (settings.ka_sync_enabled and settings.ka_id):
+def app_settings_table(
+    settings: Settings, registry: DatabricksDocumentRegistry
+) -> "AppSettingsTable":
+    from idp_app.services.app_settings import shared_app_settings
+
+    namespace = f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
+    return shared_app_settings(f"{namespace}_app_settings", registry.execute_sql)
+
+
+def knowledge_sync(
+    settings: Settings, registry: DatabricksDocumentRegistry
+) -> "KnowledgeSync | None":
+    """The process's Knowledge Assistant Sync coalescer, or None when sync or chat is off."""
+    if not (settings.ka_sync_enabled and settings.chat_enabled):
         return None
+    from idp_app.services.app_settings import KA_ID
     from idp_app.services.chat_sync import shared_knowledge_sync
 
-    return shared_knowledge_sync(settings.ka_id).request
+    recorded = app_settings_table(settings, registry)
+    return shared_knowledge_sync(recorded.table, lambda: recorded.get(KA_ID))
+
+
+def _source_changed_callback(
+    settings: Settings, registry: DatabricksDocumentRegistry
+) -> Callable[[], object] | None:
+    sync = knowledge_sync(settings, registry)
+    return None if sync is None else sync.request
 
 
 def get_parsing_service(request: Request) -> ParsingService:
@@ -709,10 +732,14 @@ def build_document_chat_service(
         repository = SQLiteChatRepository(settings.local_data_dir / "registry.sqlite3")
     else:
         assert isinstance(registry, DatabricksDocumentRegistry)
+        from idp_app.services.app_settings import CHAT_ENDPOINT
+
+        recorded = app_settings_table(settings, registry)
+        override = settings.chat_endpoint
         # Supervisor answers can take a minute when several tools run.
         client = ServingEndpointChatClient(
             WorkspaceClient(config=Config(http_timeout_seconds=170)),
-            _required(settings.chat_endpoint, "chat"),
+            lambda: override or recorded.get(CHAT_ENDPOINT),
         )
         repository = DatabricksChatRepository(
             registry, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"

@@ -1,4 +1,4 @@
-.PHONY: setup dev-mock test check backend-test frontend-test deploy bootstrap grants deploy-first
+.PHONY: setup dev-mock test check backend-test frontend-test deploy workspace-setup bootstrap grants deploy-first
 
 UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export UV_CACHE_DIR
@@ -37,8 +37,13 @@ deploy: check
 	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) idp_app
 
-# Migrations and the App's direct grants. Replacing views also drops the App's bound grants, which
-# the deploy afterwards restores.
+# Tables and migrations, chat provisioning (unless chat_mode is off) and the App's direct grants in
+# one run. Replacing views also drops the App's bound grants, which the deploy afterwards restores.
+workspace-setup:
+	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) workspace_setup
+	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
+
+# Repairs: the bootstrap or the grants alone.
 bootstrap:
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) governed_data_bootstrap
 	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
@@ -50,7 +55,7 @@ grants:
 # grants name tables the bootstrap creates, so its failure is expected.
 deploy-first: check
 	-$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
-	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) governed_data_bootstrap
+	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) workspace_setup
 	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) app_access_grants
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) idp_app

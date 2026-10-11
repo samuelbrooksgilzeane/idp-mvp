@@ -12,7 +12,8 @@ import pytest
 
 def module():
     spec = importlib.util.spec_from_file_location(
-        "provision_chat", Path(__file__).resolve().parents[2] / "scripts/provision_chat.py"
+        "provision_chat",
+        Path(__file__).resolve().parents[2] / "databricks_etl/src/provision_chat.py",
     )
     assert spec and spec.loader
     result = importlib.util.module_from_spec(spec)
@@ -28,9 +29,15 @@ class FakeAgentBricks:
         self.items: dict[str, list[dict[str, Any]]] = {}
         self.writes: list[tuple[str, str]] = []
         self.ids = (f"id{n}" for n in itertools.count(1))
+        self.unavailable: Exception | None = None
 
     def do(self, method: str, path: str, query=None, body=None):
         collection = path.removeprefix("/api/2.1/")
+        if self.unavailable is not None:
+            raise self.unavailable
+        if collection.endswith(":sync"):
+            self.writes.append((method, collection))
+            return {}
         if method == "GET":
             key = collection.rsplit("/", 1)[-1].replace("-", "_")
             return {key: list(self.items.get(collection, []))}
@@ -74,11 +81,25 @@ def run(provision, api, dry_run=False, **overrides):
     return provision.Provisioner(client, settings(provision, **overrides), dry_run).run()
 
 
-def test_creates_ka_source_supervisor_and_tools_then_rerun_is_a_no_op() -> None:
+def test_knowledge_assistant_mode_creates_only_the_ka_and_its_source() -> None:
     provision = module()
     api = FakeAgentBricks()
 
     report = run(provision, api)
+
+    assert "supervisor-agents" not in api.items
+    assert report.knowledge_assistant_id == "id1"
+    assert report.chat_endpoint == "ka-id1-endpoint"
+    assert report.experiments == {"knowledge_assistant": None}
+    source = api.items["knowledge-assistants/id1/knowledge-sources"][0]
+    assert source["files"] == {"path": "/Volumes/workspace/idp_mvp/idp_source/incoming/"}
+
+
+def test_creates_ka_source_supervisor_and_tools_then_rerun_is_a_no_op() -> None:
+    provision = module()
+    api = FakeAgentBricks()
+
+    report = run(provision, api, supervisor=True)
 
     assert report.endpoints == {
         "knowledge_assistant": "ka-id1-endpoint",
@@ -99,8 +120,10 @@ def test_creates_ka_source_supervisor_and_tools_then_rerun_is_a_no_op() -> None:
     }
     assert len(tools) == 6
 
+    assert report.chat_endpoint == "mas-id3-endpoint"
+
     writes = len(api.writes)
-    again = run(provision, api)
+    again = run(provision, api, supervisor=True)
     assert len(api.writes) == writes
     assert again.actions == [] and again.warnings == []
     assert again.endpoints == report.endpoints
@@ -109,12 +132,12 @@ def test_creates_ka_source_supervisor_and_tools_then_rerun_is_a_no_op() -> None:
 def test_drifted_instructions_and_tool_descriptions_are_patched_in_place() -> None:
     provision = module()
     api = FakeAgentBricks()
-    run(provision, api)
+    run(provision, api, supervisor=True)
     api.items["supervisor-agents"][0]["instructions"] = "old"
     api.items["supervisor-agents/id3/tools"][1]["description"] = "old"
     api.writes.clear()
 
-    report = run(provision, api)
+    report = run(provision, api, supervisor=True)
 
     assert api.writes == [
         ("PATCH", "supervisor-agents/id3"),
@@ -131,29 +154,77 @@ def test_dry_run_only_reads() -> None:
     provision = module()
     api = FakeAgentBricks()
 
-    report = run(provision, api, dry_run=True)
+    provisioner = provision.Provisioner(
+        SimpleNamespace(api_client=api), settings(provision, supervisor=True), True
+    )
+    report = provisioner.run()
+    provisioner.request_sync()
 
     assert api.writes == []
     assert report.actions[0] == "create knowledge assistant idp-mvp-dev-documents-ka"
     assert "create tool documents" in report.actions
     assert report.endpoints == {"knowledge_assistant": None, "supervisor": None}
+    assert report.chat_endpoint is None
 
 
-def test_without_knowledge_assistant_the_supervisor_gets_functions_only() -> None:
+def test_supervisor_without_functions_gets_the_knowledge_assistant_only() -> None:
     provision = module()
     api = FakeAgentBricks()
 
-    run(provision, api, with_knowledge_assistant=False)
+    run(provision, api, supervisor=True, supervisor_functions=False)
 
-    assert "knowledge-assistants" not in api.items
-    tools = api.items["supervisor-agents/id1/tools"]
-    assert {t["tool_type"] for t in tools} == {"uc_function"}
+    tools = api.items["supervisor-agents/id3/tools"]
+    assert [t["tool_type"] for t in tools] == ["knowledge_assistant"]
+
+
+def test_setup_requests_one_sync_and_a_failed_request_is_only_a_warning() -> None:
+    provision = module()
+    api = FakeAgentBricks()
+    provisioner = provision.Provisioner(SimpleNamespace(api_client=api), settings(provision), False)
+    provisioner.run()
+    api.writes.clear()
+
+    provisioner.request_sync()
+    assert api.writes == [("POST", "knowledge-assistants/id1/knowledge-sources:sync")]
+
+    api.unavailable = RuntimeError("busy")
+    provisioner.request_sync()
+    assert provisioner.report.warnings == [
+        "sync request failed (RuntimeError); the next upload syncs"
+    ]
+
+
+def test_agent_bricks_turned_off_names_the_admin_setting() -> None:
+    provision = module()
+    api = FakeAgentBricks()
+    api.unavailable = type("NotFound", (Exception,), {"error_code": "FEATURE_DISABLED"})()
+
+    with pytest.raises(provision.AgentBricksUnavailable) as error:
+        run(provision, api)
+
+    assert "(FEATURE_DISABLED)" in str(error.value) and "Settings > Previews" in str(error.value)
+    assert '"Agent Bricks"' in str(error.value) and "chat_mode" in str(error.value)
+
+
+def test_recorded_settings_are_one_merge_of_checked_values() -> None:
+    provision = module()
+    table = settings(provision).settings_table
+    statement = provision.settings_statement(
+        table, {"chat_endpoint": "ka-1-endpoint", "ka_id": "0a1b2c3d-0000-4000-8000-000000000001"}
+    )
+    assert statement.startswith(
+        "MERGE INTO `workspace`.`idp_mvp`.`idp_dev_app_settings` AS target USING (SELECT * FROM "
+        "VALUES ('chat_endpoint', 'ka-1-endpoint'), ('ka_id', "
+        "'0a1b2c3d-0000-4000-8000-000000000001') AS source(name, value))"
+    )
+    with pytest.raises(ValueError):
+        provision.settings_statement(table, {"chat_endpoint": "x'; DROP TABLE t; --"})
 
 
 def test_foreign_source_and_tools_are_reported_never_changed() -> None:
     provision = module()
     api = FakeAgentBricks()
-    run(provision, api)
+    run(provision, api, supervisor=True)
     api.items["knowledge-assistants/id1/knowledge-sources"][0]["files"]["path"] = "/Volumes/x/y/z/"
     api.items["supervisor-agents/id3/tools"].append({"tool_id": "extra", "name": "n"})
     api.items["supervisor-agents/id3/tools"][0]["knowledge_assistant"] = {
@@ -161,7 +232,7 @@ def test_foreign_source_and_tools_are_reported_never_changed() -> None:
     }
     api.writes.clear()
 
-    report = run(provision, api)
+    report = run(provision, api, supervisor=True)
 
     assert api.writes == []
     assert len(report.warnings) == 3
@@ -175,7 +246,7 @@ def test_duplicate_display_names_stop_the_run() -> None:
         {"display_name": "idp-mvp-dev-chat-supervisor", "name": "supervisor-agents/b"},
     ]
     with pytest.raises(ValueError, match="More than one"):
-        run(provision, api, with_knowledge_assistant=False)
+        run(provision, api, supervisor=True)
 
 
 @pytest.mark.parametrize(

@@ -140,7 +140,9 @@ def test_api_round_trip_in_mock_mode(tmp_path: Path) -> None:
         assert missing.status_code == 404
 
 
-def test_chat_is_off_in_databricks_mode_without_an_endpoint() -> None:
+def test_chat_follows_the_chat_mode_and_keeps_a_blank_override_unset() -> None:
+    from idp_app.core.config import ChatMode
+
     settings = Settings(
         _env_file=None,
         mode=IdpMode.DATABRICKS,
@@ -154,8 +156,9 @@ def test_chat_is_off_in_databricks_mode_without_an_endpoint() -> None:
         extraction_job_id=1,
         chat_endpoint=" ",
     )
-    assert settings.chat_endpoint is None and settings.chat_enabled is False
-    assert settings.model_copy(update={"chat_endpoint": "mas-1-endpoint"}).chat_enabled
+    assert settings.chat_endpoint is None and settings.chat_enabled is True
+    assert settings.chat_mode is ChatMode.KNOWLEDGE_ASSISTANT
+    assert not settings.model_copy(update={"chat_mode": ChatMode.OFF}).chat_enabled
 
 
 def test_trace_id_is_stored_and_tagged_but_never_returned(tmp_path: Path) -> None:
@@ -196,8 +199,15 @@ def test_endpoint_client_requests_the_trace_and_tags_it() -> None:
 
     api = Mock()
     api.do.return_value = SUPERVISOR_REPLY
-    client = ServingEndpointChatClient(SimpleNamespace(api_client=api), "mas-1-endpoint")
+    endpoint: list[str | None] = [None]
+    client = ServingEndpointChatClient(SimpleNamespace(api_client=api), lambda: endpoint[0])
 
+    with pytest.raises(ChatError) as not_ready:
+        client.ask([{"role": "user", "content": "Q"}])
+    assert (not_ready.value.code, not_ready.value.status_code) == ("CHAT_NOT_READY", 503)
+    api.do.assert_not_called()
+
+    endpoint[0] = "mas-1-endpoint"
     client.ask([{"role": "user", "content": "Q"}])
     method, path = api.do.call_args.args
     assert (method, path) == ("POST", "/serving-endpoints/mas-1-endpoint/invocations")

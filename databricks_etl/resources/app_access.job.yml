@@ -3,8 +3,8 @@ resources:
     app_access_grants:
       name: ${var.app_name}-${bundle.target}-app-access-grants
       description: >-
-        Grants the App's service principal the tables, volume, Job and chat agents it uses beyond
-        its 20 bound resources. Additive and safe to re-run; the bootstrap runs it last.
+        Grants the App's service principal the tables, volume, Jobs and chat agents it uses beyond
+        its 20 bound resources. Additive and safe to re-run; workspace_setup runs it last.
       tasks:
       - task_key: grant_app_access
         spark_python_task:
@@ -22,6 +22,12 @@ resources:
           - ${var.import_volume_name}
           - --import-job-id
           - ${resources.jobs.folder_importer.id}
+          - --dispatch-job-id
+          - ${resources.jobs.work_dispatcher.id}
+          - --export-job-id
+          - ${resources.jobs.results_exporter.id}
+          - --chat-mode
+          - ${var.chat_mode}
           - --chat-endpoint
           - ${var.chat_endpoint}
         environment_key: default

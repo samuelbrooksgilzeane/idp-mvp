@@ -1,0 +1,60 @@
+resources:
+  jobs:
+    workspace_setup:
+      name: ${var.app_name}-${bundle.target}-workspace-setup
+      description: >-
+        Sets up or upgrades a workspace in one run: creates and migrates the tables, provisions
+        document chat (unless chat_mode is off) and grants the App what it uses. Safe to re-run.
+        governed_data_bootstrap and app_access_grants stay runnable alone for repairs.
+      tasks:
+      # The bootstrap also restores the App's grants at its end (needed when it runs alone); the
+      # last task grants again so chat permissions follow provisioning.
+      - task_key: bootstrap
+        run_job_task:
+          job_id: ${resources.jobs.governed_data_bootstrap.id}
+      - task_key: chat_enabled
+        depends_on:
+        - task_key: bootstrap
+        condition_task:
+          op: NOT_EQUAL
+          left: ${var.chat_mode}
+          right: "off"
+      - task_key: provision_chat
+        depends_on:
+        - task_key: chat_enabled
+          outcome: "true"
+        spark_python_task:
+          python_file: ../src/provision_chat.py
+          parameters:
+          - --app-name
+          - ${var.app_name}
+          - --target
+          - ${bundle.target}
+          - --catalog
+          - ${var.catalog}
+          - --project-schema
+          - ${var.project_schema}
+          - --table-prefix
+          - ${var.table_prefix}
+          - --source-volume-name
+          - ${var.source_volume_name}
+          - --chat-mode
+          - ${var.chat_mode}
+          - --supervisor-functions-enabled
+          - ${var.supervisor_functions_enabled}
+        max_retries: 0
+        environment_key: default
+      # Runs when chat provisioning succeeded or was skipped because chat_mode is off.
+      - task_key: grant_app_access
+        depends_on:
+        - task_key: bootstrap
+        - task_key: provision_chat
+        run_if: NONE_FAILED
+        run_job_task:
+          job_id: ${resources.jobs.app_access_grants.id}
+      environments:
+      - environment_key: default
+        spec:
+          environment_version: '3'
+          dependencies:
+          - databricks-sdk==0.133.0

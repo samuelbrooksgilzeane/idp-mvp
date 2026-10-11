@@ -39,8 +39,8 @@ resources:
           - ${resources.jobs.work_dispatcher.id}
           - --ka-sync-enabled
           - ${var.ka_sync_enabled}
-          - --ka-id
-          - ${var.ka_id}
+          - --chat-mode
+          - ${var.chat_mode}
         timeout_seconds: 14400
         max_retries: 0
         environment_key: default

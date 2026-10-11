@@ -8,7 +8,8 @@ from idp_app.core.config import IdpMode, Settings
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
     "ka_sync_enabled",
-    "ka_id",
+    "chat_mode",
+    "supervisor_functions_enabled",
     "chat_endpoint",
     "upload_parallel_transfers",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
@@ -37,6 +38,18 @@ EXPECTED_BOOTSTRAP_PARAMETERS = {
     "artifacts_volume_name": "${var.artifacts_volume_name}",
     "import_volume_name": "${var.import_volume_name}",
 }
+# Generated files a copy without .git (a workspace Git folder) would otherwise upload.
+REQUIRED_SYNC_EXCLUDES = [
+    "../**/.venv/**",
+    "../**/node_modules/**",
+    "../**/__pycache__/**",
+    "../**/.cache/**",
+    "../**/.mypy_cache/**",
+    "../**/.pytest_cache/**",
+    "../**/.ruff_cache/**",
+    "../**/.local/**",
+    "../**/.databricks/**",
+]
 EXPECTED_PARSING_MIGRATION_PARAMETERS = {
     "catalog": "${var.catalog}",
     "project_schema": "${var.project_schema}",
@@ -135,6 +148,14 @@ def validate_bundle_config() -> None:
         raise ValueError("Bundle sync must include the repository application source")
     if sync.get("include") != ["../frontend/dist/**"]:
         raise ValueError("Bundle sync must include the built production frontend")
+    missing = [p for p in REQUIRED_SYNC_EXCLUDES if p not in (sync.get("exclude") or [])]
+    if missing:
+        raise ValueError(f"Bundle sync must exclude generated files: {', '.join(missing)}")
+    if ".databricks/" not in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines():
+        raise ValueError(".gitignore must ignore .databricks/ bundle state")
+    chat_mode = variables["chat_mode"].get("default")
+    if chat_mode != "knowledge_assistant":
+        raise ValueError("chat_mode must default to knowledge_assistant")
 
 
 def validate_data_bootstrap() -> None:
@@ -559,9 +580,9 @@ def validate_import_job() -> None:
     # The App and the import Job must sync the same Knowledge Assistant, under one switch.
     if (
         pairs.get("--ka-sync-enabled") != "${var.ka_sync_enabled}"
-        or pairs.get("--ka-id") != "${var.ka_id}"
+        or pairs.get("--chat-mode") != "${var.chat_mode}"
         or env.get("IDP_KA_SYNC_ENABLED") != "${var.ka_sync_enabled}"
-        or env.get("IDP_KA_ID") != "${var.ka_id}"
+        or env.get("IDP_CHAT_MODE") != "${var.chat_mode}"
     ):
         raise ValueError("App and import Job must take KA Sync settings from the bundle variables")
 
@@ -625,6 +646,10 @@ def validate_chat_configuration() -> None:
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
     if env.get("IDP_CHAT_ENDPOINT") != "${var.chat_endpoint}":
         raise ValueError("IDP_CHAT_ENDPOINT must use the chat_endpoint bundle variable")
+    if env.get("IDP_CHAT_MODE") != "${var.chat_mode}":
+        raise ValueError("IDP_CHAT_MODE must use the chat_mode bundle variable")
+    if "IDP_KA_ID" in env:
+        raise ValueError("The App reads the KA id from <prefix>_app_settings, not from a variable")
     bootstrap = load_yaml(ROOT / "databricks_etl/resources/bootstrap.job.yml")
     jobs = bootstrap["resources"]["jobs"]
     tasks = next(iter(jobs.values()))["tasks"]
@@ -640,8 +665,56 @@ def validate_chat_configuration() -> None:
         raise ValueError("Chat functions must come from the source-controlled template")
 
 
+def validate_setup_job() -> None:
+    """One run sets up a workspace: bootstrap, chat provisioning unless chat_mode is off, then
+    the App's grants (also when provisioning was skipped)."""
+    resource = load_yaml(ROOT / "databricks_etl/resources/setup.job.yml")
+    tasks = resource["resources"]["jobs"]["workspace_setup"]["tasks"]
+    by_key = {task["task_key"]: task for task in tasks}
+    if list(by_key) != ["bootstrap", "chat_enabled", "provision_chat", "grant_app_access"]:
+        raise ValueError("workspace_setup must bootstrap, provision chat, then grant")
+    if by_key["bootstrap"].get("run_job_task", {}).get("job_id") != (
+        "${resources.jobs.governed_data_bootstrap.id}"
+    ):
+        raise ValueError("workspace_setup must run the governed data bootstrap first")
+    condition = by_key["chat_enabled"].get("condition_task", {})
+    if condition != {"op": "NOT_EQUAL", "left": "${var.chat_mode}", "right": "off"}:
+        raise ValueError("Chat provisioning must be skipped only when chat_mode is off")
+    provision = by_key["provision_chat"]
+    if provision.get("depends_on") != [{"task_key": "chat_enabled", "outcome": "true"}]:
+        raise ValueError("Chat provisioning must follow the chat_mode condition")
+    parameters = provision["spark_python_task"]["parameters"]
+    pairs = dict(zip(parameters[::2], parameters[1::2], strict=True))
+    if (
+        provision["spark_python_task"]["python_file"] != "../src/provision_chat.py"
+        or pairs.get("--chat-mode") != "${var.chat_mode}"
+        or pairs.get("--table-prefix") != "${var.table_prefix}"
+    ):
+        raise ValueError("Chat provisioning must run the reviewed script for this target")
+    grants = by_key["grant_app_access"]
+    if (
+        grants.get("run_job_task", {}).get("job_id") != "${resources.jobs.app_access_grants.id}"
+        or grants.get("run_if") != "NONE_FAILED"
+        or {d["task_key"] for d in grants.get("depends_on", [])}
+        != {"bootstrap", "provision_chat"}
+    ):
+        raise ValueError("App grants must run last, also when chat provisioning is skipped")
+    resource = load_yaml(ROOT / "databricks_etl/resources/app_access.job.yml")
+    (task,) = resource["resources"]["jobs"]["app_access_grants"]["tasks"]
+    parameters = task["spark_python_task"]["parameters"]
+    pairs = dict(zip(parameters[::2], parameters[1::2], strict=True))
+    if (
+        pairs.get("--import-job-id") != "${resources.jobs.folder_importer.id}"
+        or pairs.get("--dispatch-job-id") != "${resources.jobs.work_dispatcher.id}"
+        or pairs.get("--export-job-id") != "${resources.jobs.results_exporter.id}"
+        or pairs.get("--chat-mode") != "${var.chat_mode}"
+    ):
+        raise ValueError("App grants must cover every Job the App starts and the chat mode")
+
+
 def main() -> None:
     validate_chat_configuration()
+    validate_setup_job()
     validate_app_config()
     validate_bundle_config()
     validate_data_bootstrap()

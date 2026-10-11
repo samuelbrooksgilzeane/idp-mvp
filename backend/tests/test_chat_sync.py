@@ -1,8 +1,11 @@
 """KA Sync coalescing with a fake clock and a manual scheduler; no threads or workspace."""
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
-from idp_app.core.config import IdpMode, Settings
+from idp_app.core.config import ChatMode, IdpMode, Settings
 from idp_app.services import chat_sync
 from idp_app.services.chat_sync import MIN_INTERVAL_SECONDS, QUIET_SECONDS, KnowledgeSync
 
@@ -91,37 +94,47 @@ def test_a_failed_sync_is_logged_not_raised(caplog: pytest.LogCaptureFixture) ->
     assert "sync request failed" in caplog.text
 
 
-def test_databricks_sync_posts_to_the_sync_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_databricks_sync_posts_to_the_recorded_knowledge_assistant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls = []
 
     class Client:
         api_client = type("Api", (), {"do": lambda self, *a, **k: calls.append((a, k))})()
 
     monkeypatch.setattr("databricks.sdk.WorkspaceClient", lambda: Client())
-    chat_sync.databricks_sync(KA)()
+    recorded: list[str | None] = [None]
+    sync = chat_sync.databricks_sync(lambda: recorded[0])
+
+    assert sync() is None  # not provisioned yet: nothing to sync
+    recorded[0] = KA
+    sync()
     assert calls == [
         (("POST", f"/api/2.1/knowledge-assistants/{KA}/knowledge-sources:sync"), {"body": {}})
     ]
+    recorded[0] = "../other"
     with pytest.raises(ValueError):
-        chat_sync.databricks_sync("../other")
+        sync()
 
 
-def test_settings_require_a_ka_id_when_sync_is_enabled() -> None:
-    base = {
-        "_env_file": None,
-        "mode": IdpMode.DATABRICKS,
-        "catalog": "workspace",
-        "project_schema": "idp_mvp",
-        "table_prefix": "idp_dev",
-        "source_volume_name": "idp_source",
-        "artifacts_volume_name": "idp_artifacts",
-        "warehouse_id": "abc",
-        "parse_job_id": 1,
-        "extraction_job_id": 1,
-    }
-    assert Settings(**base, ka_id=" ").ka_id is None
-    assert Settings(**base, ka_sync_enabled=True, ka_id=KA).ka_id == KA
-    with pytest.raises(ValueError, match="IDP_KA_ID"):
-        Settings(**base, ka_sync_enabled=True, ka_id=" ")
-    with pytest.raises(ValueError):
-        Settings(**base, ka_id="not-a-uuid")
+def test_sync_needs_chat_and_the_sync_switch() -> None:
+    from idp_app.api.dependencies import knowledge_sync
+
+    base = Settings(
+        _env_file=None,
+        mode=IdpMode.DATABRICKS,
+        catalog="workspace",
+        project_schema="idp_mvp",
+        table_prefix="idp_dev",
+        source_volume_name="idp_source",
+        artifacts_volume_name="idp_artifacts",
+        warehouse_id="abc",
+        parse_job_id=1,
+        extraction_job_id=1,
+        ka_sync_enabled=True,
+    )
+    registry: Any = SimpleNamespace(execute_sql=lambda statement: [["ka_id", KA]])
+
+    assert knowledge_sync(base, registry) is not None
+    assert knowledge_sync(base.model_copy(update={"chat_mode": ChatMode.OFF}), registry) is None
+    assert knowledge_sync(base.model_copy(update={"ka_sync_enabled": False}), registry) is None

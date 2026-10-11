@@ -22,8 +22,8 @@ Updated: 30 September 2026. Release gates live in [RELEASE_CHECKLIST.md](RELEASE
   warehouses and schedules; it is not a shutdown mechanism for all project compute.
 - The source volume contains uploaded PDFs. App deletion removes the PDF then marks its registry row
   deleted; it does not purge retained results or generated artifacts. Direct SQL deletion is different.
-- Document chat is the app's "Ask documents" page, shown when the bundle variable `chat_endpoint`
-  is set. The bootstrap creates read-only `<prefix>_chat_*` views for its SQL functions.
+- Document chat is the app's "Ask documents" page, shown unless the bundle variable `chat_mode` is
+  `off`. The bootstrap creates read-only `<prefix>_chat_*` views for its SQL functions.
 
 ## Deploying the existing dev target
 
@@ -34,9 +34,10 @@ viewer projections, chat endpoint), so no `--var` flags are needed. The CLI prof
 workspace (default `idp-mvp`; override with `PROFILE=...`).
 
 ```bash
-make deploy        # make check (tests, then rebuilds frontend/dist, which the app serves), deploy, restart the App
-make bootstrap     # only when migrations change: runs the bootstrap (which re-applies the App's direct grants), then deploys
-make grants        # re-applies the App's direct grants on their own; additive and safe to repeat
+make deploy           # make check (tests, then rebuilds frontend/dist, which the app serves), deploy, restart the App
+make workspace-setup  # when migrations or chat settings change: bootstrap, chat provisioning, grants; then deploys
+make bootstrap        # repair: the bootstrap alone (it re-applies the App's direct grants), then deploys
+make grants           # repair: the App's direct grants alone; additive and safe to repeat
 ```
 
 Parse/extract parallelism is set by the bundle variables `parse_concurrency`, `extraction_concurrency`
@@ -46,20 +47,25 @@ applies within one multi-document Job run.
 **Why there is a grants Job.** A Databricks App binds at most 20 resources and this App needs more, so
 the bundle cannot grant everything through the App. The `app_access_grants` Job
 (`databricks_etl/src/grant_app_access.py`) grants the rest as the deploying identity: the viewer
-projection tables, the import volume, the import Job (CAN_MANAGE_RUN), the chat views, functions and
-history table, and, when `chat_endpoint` is set, the Supervisor, its Knowledge Assistant, both
-serving endpoints and the Supervisor's experiment (found from the endpoint name). The bootstrap runs
-it as its last task, because replacing views drops their grants.
+projection tables, the upload, folder-import and work-queue tables, invoice line candidates, the
+`app_settings` table, the import volume, the import, dispatcher and exporter Jobs (CAN_MANAGE_RUN),
+the chat views, functions and history table, and, unless `chat_mode` is `off`, the chat agents:
+the Knowledge Assistant (CAN_MANAGE, for Sync), its serving endpoint and experiment, and when chat
+goes to a Supervisor, the Supervisor, its experiment and its sub-agents' endpoints. The bootstrap
+runs it as its last task, because replacing views drops their grants, and `workspace_setup` runs it
+again after chat provisioning. A test fails when a table in `core/data_objects.py` is neither bound
+nor granted.
 
 ## Deploying to another workspace
 
 The bundle has no fixed workspace host; the CLI profile chooses the workspace. A new workspace needs
 its own tables, grants and deployment state: `make deploy-first` deploys (the App step fails the
-first time: its bound grants name tables the bootstrap creates), runs the bootstrap, deploys again,
-runs the grants Job and starts the App. Because the `dev` target holds the original dev workspace's
-values, every command for another workspace passes that workspace's values in `BUNDLE_VARS`,
-including `chat_endpoint` (blank until its agents exist). The full commands, from a new machine to
-chat, are in the [deployment guide](DEPLOYMENT_GUIDE.md). For prod use `TARGET=prod` (tables
+first time: its bound grants name tables the bootstrap creates), runs `workspace_setup` (bootstrap,
+chat provisioning, grants), deploys again, runs the grants Job and starts the App. Because the
+`dev` target holds the original dev workspace's values, every command for another workspace passes
+that workspace's values in `BUNDLE_VARS`, including `--var chat_endpoint=' '` (the dev target's
+override names a dev-only endpoint). The full commands, from a new machine to chat, are in the
+[deployment guide](DEPLOYMENT_GUIDE.md). For prod use `TARGET=prod` (tables
 `idp_*`, production mode).
 
 Who may drop folders in for import stays a manual grant, because it is an access decision (guide,
@@ -78,40 +84,35 @@ Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pe
 
 ## Document chat: Knowledge Assistant and Supervisor
 
-The bootstrap creates five read-only UC functions (`<prefix>_chat_document_fields`,
-`_chat_find_documents`, `_chat_invoices`, `_chat_invoice_totals`, `_chat_case_documents`) after the
-chat views. `scripts/provision_chat.py` then creates or updates, by name, the Knowledge Assistant
-`<app>-<target>-documents-ka` (files source: the source volume's `incoming/` folder) and the
-Supervisor `<app>-<target>-chat-supervisor` (the KA plus the five functions as tools). It is
-idempotent, never deletes, and prints both serving endpoint names, which Databricks generates.
-Agent Bricks APIs are Beta.
+The bundle variable `chat_mode` chooses the chat: `knowledge_assistant` (default: fast, answers
+with page citations), `supervisor` (the KA plus SQL tools for totals and extracted values; slower)
+or `off`. The `workspace_setup` Job's `provision_chat` task (`databricks_etl/src/provision_chat.py`)
+creates or updates, by name, the Knowledge Assistant `<app>-<target>-documents-ka` (files source:
+the source volume's `incoming/` folder) and, in `supervisor` mode, the Supervisor
+`<app>-<target>-chat-supervisor` with the KA and, unless `supervisor_functions_enabled` is
+`"false"`, the five read-only UC functions the bootstrap creates (`<prefix>_chat_document_fields`,
+`_chat_find_documents`, `_chat_invoices`, `_chat_invoice_totals`, `_chat_case_documents`). It is
+idempotent and never deletes. It requests one KA Sync, so documents uploaded before chat existed
+are indexed, and records the KA id and the chat's serving endpoint (names Databricks generates) in
+`<prefix>_app_settings`; the App reads them from there (cached five minutes), so no deploy variable
+or redeploy is needed after provisioning. If Agent Bricks is off in the workspace, the task fails
+with a message naming the admin setting. Agent Bricks APIs are Beta.
+
+`chat_endpoint` (blank by default) overrides the provisioned endpoint: chat then goes to exactly
+that serving endpoint (a Supervisor, another agent or a specific KA), and the grants Job gives the
+App CAN_QUERY on it, plus the Supervisor and sub-agent permissions when it is a Supervisor. The
+`dev` target uses it for the Free Edition Supervisor from gate G7. With `ka_sync_enabled` (default
+`"true"`), uploads, imports and deletions request a coalesced KA Sync.
 
 ```bash
-# After the first deployment above. Read-only preview first.
-PROFILE=idp-mvp; TARGET=dev; CATALOG=workspace; SCHEMA=idp_mvp
-cd scripts
-uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
-  --target $TARGET --catalog $CATALOG --project-schema $SCHEMA --dry-run
-uv run --project ../backend python provision_chat.py --host https://<workspace-host> --profile $PROFILE \
-  --target $TARGET --catalog $CATALOG --project-schema $SCHEMA
-# Free Edition allows ONE Supervisor Agent (delete the G7 probe first) and its KA indexes but
-# cannot answer (G7), so provision the Supervisor alone:
-#   ... --no-knowledge-assistant
+make workspace-setup   # provisions chat, grants it and deploys; repeat after changing chat_mode
 ```
 
-Then turn the chat page on in the IDP App (**Ask documents** in the sidebar). The App calls the
-Supervisor itself, keeps per-user history in `<prefix>_chat_messages` (created by the bootstrap's
-`migrate_chat_history` task) and shows citations and extracted values as plain text, with
-`<document_id>.pdf` rewritten to the original file name. No separate chat app or Lakebase is needed.
-Set the Supervisor's endpoint (and, for automatic KA Sync, the KA id) and deploy; the grants Job
-then gives the App everything chat needs:
-
-```bash
-# dev: edit chat_endpoint (and optionally ka_sync_enabled: "true", ka_id) under targets.dev in
-# databricks_etl/databricks.yml; another workspace: add them to BUNDLE_VARS
-make deploy
-make grants
-```
+The App calls the chat endpoint itself, keeps per-user history in `<prefix>_chat_messages`
+(created by the bootstrap's `migrate_chat_history` task) and shows citations and extracted values as
+plain text, with `<document_id>.pdf` rewritten to the original file name. No separate chat app or
+Lakebase is needed. Free Edition allows one Supervisor Agent and its KA indexes but cannot answer
+(G7).
 
 Answers can take up to a minute when several tools run.
 

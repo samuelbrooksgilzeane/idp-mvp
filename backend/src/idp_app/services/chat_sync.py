@@ -85,14 +85,19 @@ def _daemon_timer(delay: float, callback: Callable[[], None]) -> object:
     return timer
 
 
-def databricks_sync(knowledge_assistant_id: str) -> Callable[[], object]:
-    if KA_ID.fullmatch(knowledge_assistant_id) is None:
-        raise ValueError("IDP_KA_ID must be a Knowledge Assistant UUID")
-    path = f"/api/2.1/knowledge-assistants/{knowledge_assistant_id}/knowledge-sources:sync"
+def databricks_sync(knowledge_assistant_id: Callable[[], str | None]) -> Callable[[], object]:
+    """Sync the KA that ``knowledge_assistant_id`` names at sync time (None: not provisioned)."""
 
     def sync() -> object:
+        ka_id = knowledge_assistant_id()
+        if ka_id is None:
+            logger.info("No Knowledge Assistant is recorded yet; sync skipped")
+            return None
+        if KA_ID.fullmatch(ka_id) is None:
+            raise ValueError("The recorded ka_id must be a Knowledge Assistant UUID")
         from databricks.sdk import WorkspaceClient
 
+        path = f"/api/2.1/knowledge-assistants/{ka_id}/knowledge-sources:sync"
         return WorkspaceClient().api_client.do("POST", path, body={})
 
     return sync
@@ -102,11 +107,14 @@ _shared: dict[str, KnowledgeSync] = {}
 _shared_lock = threading.Lock()
 
 
-def shared_knowledge_sync(knowledge_assistant_id: str) -> KnowledgeSync:
-    """One coalescer per KA per process, shared by every service that changes documents."""
+def shared_knowledge_sync(
+    key: str, knowledge_assistant_id: Callable[[], str | None]
+) -> KnowledgeSync:
+    """One coalescer per settings table per process, shared by every service that changes
+    documents."""
     with _shared_lock:
-        existing = _shared.get(knowledge_assistant_id)
+        existing = _shared.get(key)
         if existing is None:
             existing = KnowledgeSync(databricks_sync(knowledge_assistant_id))
-            _shared[knowledge_assistant_id] = existing
+            _shared[key] = existing
         return existing

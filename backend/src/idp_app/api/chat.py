@@ -1,4 +1,4 @@
-"""Document chat API: questions to the chat Supervisor and the caller's own history."""
+"""Document chat API: questions to the chat endpoint and the caller's own history."""
 
 from typing import Annotated, Any
 
