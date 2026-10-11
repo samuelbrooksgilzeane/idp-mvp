@@ -135,8 +135,10 @@ exist to make the next workspace need none of the steps below.
   `IDP_DISPATCH_JOB_ID` points at the new job, and give the app's service principal
   `CAN_MANAGE_RUN` on it (the hand-made grant was on the old job; Batch 9's grants job covers this).
   Until then automatic preparation cannot start parsing.
-- **To verify in Batch 9:** whether `mode: development` pauses the dispatcher's schedule despite
-  `recovery_schedule_status=UNPAUSED` (bundle docs say development mode pauses schedules).
+- **Schedules (settled in 9b from the CLI source, `resourcemutator/apply_presets.go`):** development
+  mode's pause preset only fills an *empty* `pause_status`, so the dispatcher's explicit
+  `${var.recovery_schedule_status}` is kept. Settings-file targets use `mode: production` anyway,
+  which requires an explicit `workspace.root_path` and nothing else (`validate_target_mode.go`).
 
 ## Progress
 
@@ -150,7 +152,7 @@ exist to make the next workspace need none of the steps below.
 | 6 | US workspace deployment | 1 | Done by hand 10–11 Oct (see Facts from the US deployment); Batch 9 makes it repeatable |
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
-| 9 | Repeatable deployment: one settings file, one command | 2 | 9a done (11 Oct); 9b next |
+| 9 | Repeatable deployment: one settings file, one command | 2 | 9a, 9b done (11 Oct); live check L8 open |
 | 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Not started (after 9) |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
@@ -187,7 +189,7 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | L5 | Batch 7 live | L1, G7, 7a, 7b | Provision, deploy, 10 set questions, restart and per-user history checks (see Batch 7). | Open |
 | L6 | Batch 7 live | L5 | Automatic KA Sync after upload and delete. | Open |
 | L7 | Batch 10 step 1 | US workspace, user's CLI | Save one KA reply about a public document (`databricks api post /serving-endpoints/<ka endpoint>/invocations`) and record each annotation's keys, especially `start_index`/`end_index`, and the exact URL shape after `.pdf`. Commit the reply under `docs/evidence/` only if the document is public. | Done 11 Oct: `type`, `url`, `title` only, no offsets; URL carries `#page=N` and the encoded passage |
-| L8 | Batch 9 live | Batch 9 code | Deploy to a workspace with only the new settings file and one command, from a fresh Git folder; then a non-admin user uploads, parses and chats. | Open |
+| L8 | Batch 9 live | Batch 9 code | Deploy to a workspace with only the new settings file and one command, from a fresh Git folder; then a non-admin user uploads, parses and chats. Command: `python3 scripts/deploy_workspace.py <name>` in a cluster web terminal (DEPLOYMENT_GUIDE sections 3–4). Record: the script's validation summary is right, the first deploy's app error is tolerated, `workspace_setup` succeeds, chat cites pages, and what the bundle UI's Deploy button does (fill in DEPLOYMENT_GUIDE section 4). | Open |
 
 ## Batch 1 — Branch and Genie removal
 
@@ -516,7 +518,16 @@ Status: Ready: the US workspace is deployed (Batch 6 done by hand)
 
 ## Batch 9 — Repeatable deployment: one settings file, one command (2 sessions)
 
-Status: 9a done 11 October on `feat/batch-9-repeatable-deploy` (no workspace calls). Notes for 9b:
+Status: 9a and 9b done 11 October on `feat/batch-9-repeatable-deploy` (no workspace calls); L8
+open. Notes for L8 and Batch 10: settings files are `databricks_etl/targets/<name>.yml`
+(`mode: production`, explicit `root_path`); `scripts/deploy_workspace.py <name>` deploys; a new
+variable `app_users_group` (default `users`) gets CAN_USE on the App from the grants Job, so a
+non-admin can open it without a hand grant. The template turns on `auto_prepare_enabled` and an
+UNPAUSED recovery schedule (L8 expects automatic parsing). Moving the hand-deployed US workspace
+to a settings file creates a new app, jobs and KA (DEPLOYMENT_GUIDE 3.5); its `us.yml` is not in
+the repository (host and warehouse unknown here). Unverified until L8: the CLI's `bundle validate
+-o json` shape the script reads (`variables.<name>.value`, resolved app name), `run_if:
+NONE_FAILED` after a skipped condition branch, and the Deploy button. Notes from 9a:
 the table `<prefix>_app_settings` (`name`, `value`, `updated_at`) holds `chat_endpoint` and
 `ka_id`; the App reads it, and an `IDP_CHAT_ENDPOINT` override wins. `ka_id` is gone from the
 variables; new `chat_mode` and `supervisor_functions_enabled`; `ka_sync_enabled` now defaults to

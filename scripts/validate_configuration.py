@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,7 @@ TRUSTED_VARIABLES = {
     "import_concurrency",
     "warehouse_id",
     "app_name",
+    "app_users_group",
     "batch_concurrency",
     "auto_prepare_enabled",
     "recovery_schedule_status",
@@ -50,6 +52,17 @@ REQUIRED_SYNC_EXCLUDES = [
     "../**/.local/**",
     "../**/.databricks/**",
 ]
+# Per-workspace settings files (databricks_etl/targets/<name>.yml) must set these.
+REQUIRED_TARGET_VARIABLES = {
+    "catalog",
+    "project_schema",
+    "table_prefix",
+    "source_volume_name",
+    "artifacts_volume_name",
+    "warehouse_id",
+}
+TARGET_NAME = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 EXPECTED_PARSING_MIGRATION_PARAMETERS = {
     "catalog": "${var.catalog}",
     "project_schema": "${var.project_schema}",
@@ -140,8 +153,10 @@ def validate_bundle_config() -> None:
         raise ValueError("databricks.yml must not hardcode workspace configuration")
 
     includes = config.get("include")
-    if includes != ["resources/*.yml"]:
-        raise ValueError("databricks.yml must include the reviewed bundle resources")
+    if includes != ["resources/*.yml", "targets/*.yml"]:
+        raise ValueError(
+            "databricks.yml must include the reviewed bundle resources and workspace settings"
+        )
 
     sync = config.get("sync")
     if not isinstance(sync, dict) or sync.get("paths") != [".."]:
@@ -712,7 +727,64 @@ def validate_setup_job() -> None:
         raise ValueError("App grants must cover every Job the App starts and the chat mode")
 
 
+def validate_target_file(path: Path) -> None:
+    """One workspace's settings: one non-development target named after the file, with the
+    required values, known variables only, and text values (YAML reads unquoted off/true/false
+    as booleans)."""
+    where = path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+    name = path.name.split(".")[0]
+    config = load_yaml(path)
+    targets = config.get("targets")
+    if set(config) != {"targets"} or not isinstance(targets, dict) or list(targets) != [name]:
+        raise ValueError(f"{where} must define only the target {name!r}, named after the file")
+    if TARGET_NAME.fullmatch(name) is None or name in ("dev", "prod"):
+        raise ValueError(
+            f"{where}: target names are lowercase letters, digits and hyphens, not dev or prod"
+        )
+    target = targets[name]
+    if target.get("mode") != "production" or target.get("default"):
+        raise ValueError(f"{where} must use mode: production and must not be the default")
+    workspace = target.get("workspace") or {}
+    if not str(workspace.get("host", "")).startswith("https://") or not workspace.get(
+        "root_path"
+    ):
+        raise ValueError(f"{where} must set workspace.host (https://...) and workspace.root_path")
+    variables = target.get("variables") or {}
+    unknown = set(variables) - TRUSTED_VARIABLES
+    missing = REQUIRED_TARGET_VARIABLES - set(variables)
+    if unknown or missing:
+        raise ValueError(f"{where}: unknown variables {sorted(unknown)}, missing {sorted(missing)}")
+    for key, value in variables.items():
+        if isinstance(value, bool) or not isinstance(value, str | int):
+            raise ValueError(f"{where}: {key} must be text; quote values like \"off\" and \"true\"")
+    for key in (REQUIRED_TARGET_VARIABLES - {"warehouse_id"}) | {"import_volume_name"}:
+        if key in variables and SIMPLE_IDENTIFIER.fullmatch(str(variables[key])) is None:
+            raise ValueError(f"{where}: {key} must be a simple identifier")
+    if variables.get("chat_mode", "knowledge_assistant") not in (
+        "off",
+        "knowledge_assistant",
+        "supervisor",
+    ):
+        raise ValueError(f"{where}: chat_mode must be off, knowledge_assistant or supervisor")
+    defaults = {
+        key: value.get("default")
+        for key, value in load_yaml(ROOT / "databricks_etl/databricks.yml")["variables"].items()
+    }
+    concurrency = {**defaults, **variables}
+    if int(concurrency["parse_concurrency"]) + int(concurrency["extraction_concurrency"]) > int(
+        concurrency["combined_inference_concurrency"]
+    ):
+        raise ValueError(f"{where}: parse plus extraction concurrency exceeds the combined budget")
+
+
+def validate_workspace_targets() -> None:
+    folder = ROOT / "databricks_etl/targets"
+    for path in [folder / "example.yml.template", *sorted(folder.glob("*.yml"))]:
+        validate_target_file(path)
+
+
 def main() -> None:
+    validate_workspace_targets()
     validate_chat_configuration()
     validate_setup_job()
     validate_app_config()

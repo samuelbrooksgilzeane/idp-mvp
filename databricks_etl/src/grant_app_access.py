@@ -1,4 +1,5 @@
-"""Grant the IDP App's service principal what it uses beyond its 20 bound resources.
+"""Grant the IDP App's service principal what it uses beyond its 20 bound resources, and let the
+app users group open the App.
 
 A Databricks App binds at most 20 resources and this App needs more, so the rest is granted here by
 the deploying identity, which owns the tables, volumes, Jobs and chat agents. Everything only adds
@@ -42,6 +43,7 @@ class Parameters:
     export_job_id: int
     chat_mode: str = "knowledge_assistant"
     chat_endpoint: str = ""
+    app_users_group: str = ""
 
     def table(self, name: str) -> str:
         return f"`{self.catalog}`.`{self.project_schema}`.`{self.table_prefix}_{name}`"
@@ -64,6 +66,7 @@ def parse_arguments() -> Parameters:
         parser.add_argument(f"--{name}", type=int, required=True)
     parser.add_argument("--chat-mode", choices=CHAT_MODES, default="knowledge_assistant")
     parser.add_argument("--chat-endpoint", default=" ")
+    parser.add_argument("--app-users-group", default=" ")
     args = parser.parse_args()
     parameters = Parameters(
         app_name=args.app_name,
@@ -76,6 +79,7 @@ def parse_arguments() -> Parameters:
         export_job_id=args.export_job_id,
         chat_mode=args.chat_mode,
         chat_endpoint=args.chat_endpoint.strip(),
+        app_users_group=args.app_users_group.strip(),
     )
     identifiers = (
         parameters.catalog,
@@ -205,15 +209,13 @@ def recorded_settings(parameters: Parameters) -> dict[str, str]:
     return {row["name"]: row["value"] for row in rows if row["value"]}
 
 
-def apply_permission(api: Any, permission: Permission, principal: str) -> None:
+def apply_permission(
+    api: Any, permission: Permission, principal: str, kind: str = "service_principal_name"
+) -> None:
     api.do(
         "PATCH",
         f"/api/2.0/permissions/{permission.object_type}/{permission.object_id}",
-        body={
-            "access_control_list": [
-                {"service_principal_name": principal, "permission_level": permission.level}
-            ]
-        },
+        body={"access_control_list": [{kind: principal, "permission_level": permission.level}]},
     )
 
 
@@ -249,6 +251,15 @@ def main() -> None:
     for permission in permissions:
         apply_permission(api, permission, principal)
         print(f"{permission.level} on {permission.object_type}/{permission.object_id}")
+    if parameters.app_users_group:
+        # PATCH only adds: owners and other grants on the App are kept.
+        apply_permission(
+            api,
+            Permission("apps", parameters.app_name, "CAN_USE"),
+            parameters.app_users_group,
+            "group_name",
+        )
+        print(f"CAN_USE on apps/{parameters.app_name} for group {parameters.app_users_group}")
 
 
 if __name__ == "__main__":

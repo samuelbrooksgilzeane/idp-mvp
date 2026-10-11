@@ -3,6 +3,8 @@ bundle:
 
 include:
   - resources/*.yml
+  # One settings file per workspace (copy targets/example.yml.template).
+  - targets/*.yml
 
 sync:
   include:
@@ -88,8 +90,11 @@ variables:
   warehouse_id:
     description: SQL warehouse identifier
   app_name:
-    description: Databricks App name
+    description: Databricks App name prefix; the App is <app_name>-<target>
     default: idp-mvp
+  app_users_group:
+    description: Group granted CAN_USE on the App by the grants Job ("users" is everyone); blank grants nobody
+    default: users
   batch_concurrency:
     description: Documents processed in parallel within one batch job run
     default: 16

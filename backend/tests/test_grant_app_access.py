@@ -160,3 +160,16 @@ def test_override_endpoint_is_granted_besides_the_provisioned_knowledge_assistan
 def test_unknown_knowledge_assistant_fails_instead_of_granting_nothing() -> None:
     with pytest.raises(ValueError, match="not found"):
         task.chat_permissions(FakeApi(), None, "0a1b2c3d-0000-4000-8000-000000000999")
+
+
+def test_app_users_group_gets_can_use_through_an_additive_patch() -> None:
+    calls = []
+    api = type("Api", (), {"do": lambda self, *a, **k: calls.append((a, k))})()
+    permission = task.Permission("apps", "idp-mvp-us", "CAN_USE")
+    task.apply_permission(api, permission, "users", "group_name")
+    assert calls == [(
+        ("PATCH", "/api/2.0/permissions/apps/idp-mvp-us"),
+        {"body": {"access_control_list": [
+            {"group_name": "users", "permission_level": "CAN_USE"}
+        ]}},
+    )]

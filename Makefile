@@ -1,4 +1,4 @@
-.PHONY: setup dev-mock test check backend-test frontend-test deploy workspace-setup bootstrap grants deploy-first
+.PHONY: setup dev-mock test check backend-test frontend-test deploy workspace-setup bootstrap grants deploy-first deploy-workspace
 
 UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export UV_CACHE_DIR
@@ -24,6 +24,9 @@ check: test
 	npm --prefix frontend run lint
 	npm --prefix frontend run typecheck
 	npm --prefix frontend run build
+	@# The App serves the committed frontend/dist, and CLI-only deploys skip this build.
+	@git diff --quiet -- frontend/dist && test -z "$$(git ls-files --others --exclude-standard -- frontend/dist)" \
+		|| { echo "frontend/dist differs from a fresh build of frontend/: commit frontend/dist"; exit 1; }
 	uv run --project backend python scripts/validate_configuration.py
 
 # Deploys. TARGET=dev needs no variables (the dev target holds the live values); another target or
@@ -59,3 +62,8 @@ deploy-first: check
 	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) app_access_grants
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) idp_app
+
+# Any workspace with a settings file databricks_etl/targets/<name>.yml, needing only Python and the
+# Databricks CLI: make deploy-workspace TARGET=<name> [PROFILE=<cli profile>].
+deploy-workspace:
+	python3 scripts/deploy_workspace.py $(TARGET) $(if $(filter command line environment,$(origin PROFILE)),--profile $(PROFILE))

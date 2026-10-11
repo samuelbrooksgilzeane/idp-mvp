@@ -58,15 +58,18 @@ nor granted.
 
 ## Deploying to another workspace
 
-The bundle has no fixed workspace host; the CLI profile chooses the workspace. A new workspace needs
-its own tables, grants and deployment state: `make deploy-first` deploys (the App step fails the
-first time: its bound grants name tables the bootstrap creates), runs `workspace_setup` (bootstrap,
-chat provisioning, grants), deploys again, runs the grants Job and starts the App. Because the
-`dev` target holds the original dev workspace's values, every command for another workspace passes
-that workspace's values in `BUNDLE_VARS`, including `--var chat_endpoint=' '` (the dev target's
-override names a dev-only endpoint). The full commands, from a new machine to chat, are in the
-[deployment guide](DEPLOYMENT_GUIDE.md). For prod use `TARGET=prod` (tables
-`idp_*`, production mode).
+Each workspace has one settings file, `databricks_etl/targets/<name>.yml` (a copy of
+`targets/example.yml.template`, included by `databricks.yml`), holding its host, catalog, schema,
+table prefix, warehouse, volumes, `chat_mode`, feature switches and concurrency. Its target uses
+`mode: production` with an explicit `workspace.root_path`, so names carry no `[dev user]` prefix
+and the dispatcher's schedule follows `recovery_schedule_status`. (Development mode would not
+override it either: per the CLI source, its pause preset only fills an empty pause status.)
+`python3 scripts/deploy_workspace.py <name>` (or `make deploy-workspace TARGET=<name>`) needs only
+Python and the Databricks CLI: it deploys, tolerating the first deployment's expected App error,
+runs `workspace_setup`, deploys again, grants a new App, starts it and prints its address. The
+grants Job also gives `app_users_group` (default `users`, everyone) CAN_USE on the App.
+`make check` fails when `frontend/dist` differs from a fresh build, because CLI-only deploys ship
+the committed build. The full steps are in the [deployment guide](DEPLOYMENT_GUIDE.md).
 
 Who may drop folders in for import stays a manual grant, because it is an access decision (guide,
 step 3.4).

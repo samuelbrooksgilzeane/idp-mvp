@@ -4,7 +4,8 @@ resources:
       name: ${var.app_name}-${bundle.target}-app-access-grants
       description: >-
         Grants the App's service principal the tables, volume, Jobs and chat agents it uses beyond
-        its 20 bound resources. Additive and safe to re-run; workspace_setup runs it last.
+        its 20 bound resources, and the app users group CAN_USE on the App. Additive and safe to
+        re-run; workspace_setup runs it last.
       tasks:
       - task_key: grant_app_access
         spark_python_task:
@@ -30,6 +31,8 @@ resources:
           - ${var.chat_mode}
           - --chat-endpoint
           - ${var.chat_endpoint}
+          - --app-users-group
+          - ${var.app_users_group}
         environment_key: default
       environments:
       - environment_key: default
