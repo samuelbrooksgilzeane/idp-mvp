@@ -66,11 +66,12 @@ cp databricks_etl/targets/example.yml.template databricks_etl/targets/us.yml
 `us` is the target name: lowercase letters, digits and hyphens, up to 20 characters, not `dev` or
 `prod`. In the copy, replace `example:` with the same name and fill in the values marked `YOUR_`:
 the workspace URL, the catalog and the SQL warehouse id (**SQL Warehouses** > your warehouse, or
-`databricks warehouses list` once signed in). Every other value has a working default and a comment.
-Nothing in the file is secret: commit it, so the next deploy (or a colleague) uses the same values.
+`databricks warehouses list` once signed in), and set `deployment_name`, usually
+`idp-mvp-<target>`. Every other value has a working default and a comment. Nothing in the file is
+secret: commit it, so the next deploy (or a colleague) uses the same values.
 
-The app is named `idp-mvp-<target>` (for example `idp-mvp-us`); the jobs, the Knowledge Assistant
-and the deployment state carry the target name too.
+`deployment_name` names the app, and so its address, plus the jobs and the Knowledge Assistant.
+Changing it later creates a new app at a new address.
 
 ### 3.2 Sign in
 
@@ -120,15 +121,26 @@ GRANT READ VOLUME, WRITE VOLUME ON VOLUME YOUR_CATALOG.idp_mvp.idp_import TO `ac
 Replace `account users` with a narrower group if only some people should import. The import never
 deletes files from the folder; remove a folder once the app shows its files registered.
 
-### 3.5 Moving a hand-deployed workspace to a settings file
+### 3.5 Keeping a hand-deployed app and its address (the US workspace)
 
-The US workspace was deployed by hand on 10–11 October with `-t dev` and `--var` values (app
-`idp-mvp-dev`, jobs named `[dev <user>] ...`). A settings file is a new target, so the first
-one-command deploy there creates a new app (`idp-mvp-<target>`), new jobs and a new Knowledge
-Assistant. Keep `catalog: idp_testing`, `project_schema: idp_mvp` and `table_prefix: idp_dev` to
-reuse the existing documents and results. Once the new app works, delete the old app, the
-`[dev ...]` jobs and the old Knowledge Assistant and Supervisor in the workspace UI, and share the
-new app address.
+The US workspace was deployed by hand on 10–11 October as app `idp-mvp-dev`, with jobs named
+`[dev <user>] ...`. Its settings file, `databricks_etl/targets/us.yml`, keeps that app, its address,
+its tables and its Knowledge Assistant: `deployment_name: idp-mvp-dev`, `catalog: idp_testing`,
+`table_prefix: idp_dev`. Fill in its workspace URL and warehouse id, then deploy **once** with
+`--adopt-app`, which makes this deployment take over the existing app instead of creating one:
+
+```bash
+python3 scripts/deploy_workspace.py us --adopt-app     # first time only
+python3 scripts/deploy_workspace.py us                 # every later deploy
+```
+
+The jobs are created afresh under the new names (`idp-mvp-dev-...`, no `[dev <user>]` prefix). The
+existing Knowledge Assistant `idp-mvp-dev-documents-ka` is found by name and reused, so its index
+is kept. Once the app works, delete the old `[dev <user>] idp-mvp-dev-...` jobs in **Jobs & Pipelines**
+(the old work dispatcher would otherwise keep running hourly), and the unused
+`idp-mvp-dev-chat-supervisor` if it exists. From then on, deploy the US workspace only with the
+script: the old `databricks bundle ... -t dev` commands now point at the Free Edition workspace,
+and `bundle destroy -t dev` against US would delete the app.
 
 ## 4. Deploy from a workspace Git folder (no laptop)
 
@@ -164,7 +176,7 @@ new app address.
 | An app deploy fails with `exporting symlink ... in source format is not supported` | Generated folders (`backend/.venv`) were uploaded from a copy without `.git`. Update to a version whose `databricks.yml` has the `sync.exclude` list. |
 | Jobs fail saying the cluster is not all-purpose | `DATABRICKS_CLUSTER_ID` was set (cluster web terminal) while running `databricks bundle` by hand against the `dev` target. Run `unset DATABRICKS_CLUSTER_ID` first; the deploy script does this itself. |
 | `uv` fails writing its cache under `/Workspace` ("operation not permitted") | Deploying does not need uv. Use the deploy script; `make check` belongs on a development machine. |
-| The first deploy fails with "already exists" for the app | An app with that name exists outside this deployment. Delete it, or adopt it with `databricks bundle deployment bind idp_app <app name> -t <name>`. |
+| The first deploy fails with "already exists" for the app | An app with that name exists outside this deployment. Run the script again with `--adopt-app` to keep it and its address (section 3.5). |
 | A second person's deploy tries to create everything again | Deployment state is kept per deploying user. Deploy each workspace as the same user. |
 | Folder import fails with `Already running asyncio in this thread` | Fixed on 11 October. Deploy again, then press **Retry** on the failed batch. |
 | Pages fail after re-running the bootstrap job on its own | Replacing views drops grants. Run `workspace_setup` (or `make workspace-setup`) rather than the bootstrap alone, then deploy. |

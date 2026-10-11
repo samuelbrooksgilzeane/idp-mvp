@@ -66,8 +66,7 @@ class FakeAgentBricks:
 
 def settings(provision, **overrides):
     values = {
-        "app_name": "idp-mvp",
-        "target": "dev",
+        "deployment_name": "idp-mvp-dev",
         "catalog": "workspace",
         "project_schema": "idp_mvp",
         "table_prefix": "idp_dev",
@@ -252,7 +251,7 @@ def test_duplicate_display_names_stop_the_run() -> None:
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"target": "Dev"},
+        {"deployment_name": "Idp-mvp"},
         {"table_prefix": "idp-dev"},
         {"source_path": "/Volumes/workspace/idp_mvp/idp_source/../other/"},
         {"source_path": "/tmp/incoming/"},

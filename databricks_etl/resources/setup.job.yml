@@ -1,7 +1,7 @@
 resources:
   jobs:
     workspace_setup:
-      name: ${var.app_name}-${bundle.target}-workspace-setup
+      name: ${var.deployment_name}-workspace-setup
       description: >-
         Sets up or upgrades a workspace in one run: creates and migrates the tables, provisions
         document chat (unless chat_mode is off) and grants the App what it uses. Safe to re-run.
@@ -26,10 +26,8 @@ resources:
         spark_python_task:
           python_file: ../src/provision_chat.py
           parameters:
-          - --app-name
-          - ${var.app_name}
-          - --target
-          - ${bundle.target}
+          - --deployment-name
+          - ${var.deployment_name}
           - --catalog
           - ${var.catalog}
           - --project-schema

@@ -1,12 +1,15 @@
 """Deploy the IDP app to one workspace from its settings file, with one command.
 
-    python3 scripts/deploy_workspace.py <target> [--profile NAME]
+    python3 scripts/deploy_workspace.py <target> [--profile NAME] [--adopt-app]
     (Windows: py scripts\\deploy_workspace.py <target>)
 
 <target> names databricks_etl/targets/<target>.yml (a copy of targets/example.yml.template). Needs
 only Python 3.10 or later and the Databricks CLI, signed in to that workspace: no uv, Node or make.
 It deploys, runs the workspace_setup Job (tables, document chat, access), deploys again, starts the
 App and prints its address. Every step is safe to repeat, so after fixing a failure run it again.
+
+--adopt-app, once: an App with the settings' deployment_name already exists, deployed some other
+way (by hand, or from another target); this deployment takes it over, so it keeps its address.
 """
 
 from __future__ import annotations
@@ -73,12 +76,14 @@ class Deployer:
         *,
         profile: str | None,
         executable: str,
+        adopt_app: bool = False,
         runner: Runner = run_command,
         say: Callable[[str], None] = print,
     ) -> None:
         self.target = target
         self.profile = profile
         self.executable = executable
+        self.adopt_app = adopt_app
         self.runner = runner
         self.say = say
         self.steps = 0
@@ -92,6 +97,8 @@ class Deployer:
         config = self.validate()
         app_name = config["resources"]["apps"]["idp_app"]["name"]
         first = not self.app_exists(app_name)
+        if self.adopt_app:
+            self.adopt(app_name, exists=not first)
         self.step(
             "Deploying the Jobs and the App"
             + (" (first deployment of this target)" if first else "")
@@ -101,7 +108,9 @@ class Deployer:
                 raise DeployError(
                     "The deploy failed (details above). Fix the cause, often a value in "
                     f"targets/{self.target}.yml or a missing permission to create Jobs or Apps, "
-                    "then run this command again."
+                    "then run this command again. If it says an App with this name already "
+                    "exists, it was deployed some other way: run again with --adopt-app to keep "
+                    "it and its address."
                 )
             self.say(
                 "  As expected on a first deployment, the App could not be created yet: its access "
@@ -138,6 +147,19 @@ class Deployer:
                 "run this command again."
             )
         return self.app_url(app_name)
+
+    def adopt(self, app_name: str, *, exists: bool) -> None:
+        self.step(f"Taking over the existing App {app_name}, so it keeps its address")
+        if not exists:
+            raise DeployError(
+                f"There is no App named {app_name} in this workspace to take over. Check "
+                f"deployment_name in targets/{self.target}.yml, or run without --adopt-app."
+            )
+        if self.bundle("deployment", "bind", "idp_app", app_name, "--auto-approve").returncode:
+            self.say(
+                "  The CLI did not take it over (details above). If it says this deployment "
+                "already manages the App, that is fine. Continuing."
+            )
 
     def check_cli(self) -> None:
         self.step("Checking the Databricks CLI")
@@ -267,7 +289,7 @@ def check_config(config: dict[str, Any], target: str) -> None:
     if not isinstance(app_name, str) or APP_NAME.fullmatch(app_name) is None:
         raise DeployError(
             f"The App name {app_name!r} must be lowercase letters, digits and hyphens, at most "
-            f"30 characters: shorten app_name or the target name in {where}."
+            f"30 characters: change deployment_name in {where}."
         )
 
 
@@ -275,6 +297,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("target", help="settings file name in databricks_etl/targets, without .yml")
     parser.add_argument("--profile", help="Databricks CLI profile, when several match the host")
+    parser.add_argument(
+        "--adopt-app",
+        action="store_true",
+        help="once: take over an existing App named deployment_name, keeping its address",
+    )
     args = parser.parse_args(argv)
     executable = shutil.which("databricks")
     if executable is None:
@@ -284,7 +311,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
-    deployer = Deployer(args.target, profile=args.profile, executable=executable)
+    deployer = Deployer(
+        args.target, profile=args.profile, executable=executable, adopt_app=args.adopt_app
+    )
     try:
         url = deployer.deploy()
     except DeployError as error:

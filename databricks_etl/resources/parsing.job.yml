@@ -1,7 +1,7 @@
 resources:
   jobs:
     document_parser:
-      name: ${var.app_name}-${bundle.target}-document-parser
+      name: ${var.deployment_name}-document-parser
       description: Parses registered PDFs into retained layout data and page images.
       max_concurrent_runs: 1
       parameters:

@@ -87,8 +87,7 @@ KA_TOOL_DESCRIPTION = "Searches the full text of the IDP documents and answers q
 
 @dataclass(frozen=True)
 class Settings:
-    app_name: str
-    target: str
+    deployment_name: str
     catalog: str
     project_schema: str
     table_prefix: str
@@ -98,11 +97,11 @@ class Settings:
 
     @property
     def ka_name(self) -> str:
-        return f"{self.app_name}-{self.target}-documents-ka"
+        return f"{self.deployment_name}-documents-ka"
 
     @property
     def supervisor_name(self) -> str:
-        return f"{self.app_name}-{self.target}-chat-supervisor"
+        return f"{self.deployment_name}-chat-supervisor"
 
     def function_name(self, suffix: str) -> str:
         return f"{self.catalog}.{self.project_schema}.{self.table_prefix}_{suffix}"
@@ -117,13 +116,8 @@ class AgentBricksUnavailable(RuntimeError):
 
 
 def validate_settings(settings: Settings) -> None:
-    if any(
-        RESOURCE_NAME.fullmatch(value) is None
-        for value in (settings.app_name, settings.target)
-    ):
-        raise ValueError(
-            "App name and target must be lowercase letters, digits and hyphens"
-        )
+    if RESOURCE_NAME.fullmatch(settings.deployment_name) is None:
+        raise ValueError("The deployment name must be lowercase letters, digits and hyphens")
     identifiers = (settings.catalog, settings.project_schema, settings.table_prefix)
     if any(SIMPLE_IDENTIFIER.fullmatch(value) is None for value in identifiers):
         raise ValueError("Catalog, schema and table prefix must be simple identifiers")
@@ -409,8 +403,7 @@ def settings_statement(table: str, values: dict[str, str]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     for name in (
-        "app-name",
-        "target",
+        "deployment-name",
         "catalog",
         "project-schema",
         "table-prefix",
@@ -426,8 +419,7 @@ def main() -> None:
         print("chat_mode is off; nothing to provision")
         return
     settings = Settings(
-        app_name=args.app_name,
-        target=args.target,
+        deployment_name=args.deployment_name,
         catalog=args.catalog,
         project_schema=args.project_schema,
         table_prefix=args.table_prefix,

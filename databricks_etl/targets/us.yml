@@ -1,0 +1,56 @@
+# The US workspace. It was first deployed by hand (10-11 October) as App idp-mvp-dev; this keeps
+# that App, its address and its Knowledge Assistant. Fill in the two YOUR_ values, then run once:
+#   python3 scripts/deploy_workspace.py us --adopt-app
+# and afterwards, for every later deploy:
+#   python3 scripts/deploy_workspace.py us
+# Nothing here is secret. Keep the quotes where they are.
+targets:
+  us:
+    # No "[dev user]" prefixes on names, and the recovery schedule follows recovery_schedule_status.
+    mode: production
+    workspace:
+      host: https://YOUR-WORKSPACE.cloud.databricks.com
+      # Deployment state lives here, so later deploys update this deployment instead of adding a
+      # second one. Deploy each workspace as the same user.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      # Where the data lives. The catalog must exist and you must be allowed to create a schema in
+      # it; the schema, volumes and tables are created by workspace setup.
+      catalog: idp_testing
+      project_schema: idp_mvp
+      table_prefix: idp_dev              # the existing tables and documents
+      source_volume_name: idp_source
+      artifacts_volume_name: idp_artifacts
+      import_volume_name: idp_import     # folder import: users copy PDF folders here
+      # SQL warehouse id: SQL Warehouses > your warehouse > Overview, or `databricks warehouses list`.
+      warehouse_id: YOUR_WAREHOUSE_ID
+
+      # Names the App, which sets its address, plus the Jobs and the chat agents: lowercase letters,
+      # digits and hyphens, at most 30 characters, usually idp-mvp-<target name>. To keep an
+      # existing App's address, use its current name and deploy once with --adopt-app.
+      deployment_name: idp-mvp-dev        # the existing App: keeps its address
+      # Who may open the App: "users" is everyone in the workspace; " " grants nobody (grant by hand).
+      app_users_group: users
+
+      # Document chat: knowledge_assistant (fast, answers cite pages), supervisor (adds SQL tools
+      # for totals and extracted values; slower) or "off". Needs Agent Bricks in the workspace.
+      chat_mode: knowledge_assistant
+      supervisor_functions_enabled: "true"   # supervisor mode only: attach the SQL tools
+      chat_endpoint: " "                     # optional: answer from this serving endpoint instead
+      ka_sync_enabled: "true"                # re-index chat after uploads, imports and deletions
+
+      # Processing switches.
+      auto_prepare_enabled: "true"           # parse documents automatically after upload
+      recovery_schedule_status: UNPAUSED     # hourly run that picks up interrupted work
+      bulk_extraction_enabled: "false"       # durable extraction batches
+      viewer_projection_enabled: "true"      # faster document viewer
+      bulk_export_enabled: "false"           # keep off: setup does not create the export tables yet
+
+      # Concurrency. parse + extraction must not exceed combined_inference_concurrency.
+      upload_parallel_transfers: 3           # browser uploads in flight per batch (1-8)
+      import_concurrency: 8                  # files registered in parallel per folder import (1-32)
+      batch_concurrency: 16                  # documents in parallel within one batch run
+      parse_concurrency: 3
+      extraction_concurrency: 3
+      combined_inference_concurrency: 6
+      parse_dispatch_size: 100               # documents per parse run, at most 100

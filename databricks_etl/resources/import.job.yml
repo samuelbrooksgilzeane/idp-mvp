@@ -1,7 +1,7 @@
 resources:
   jobs:
     folder_importer:
-      name: ${var.app_name}-${bundle.target}-folder-importer
+      name: ${var.deployment_name}-folder-importer
       description: Registers the PDFs of one folder-import batch from the import volume.
       # Each run owns one batch; item claims keep two runs on the same batch safe.
       max_concurrent_runs: 4

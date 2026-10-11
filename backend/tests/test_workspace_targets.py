@@ -39,6 +39,14 @@ def test_a_filled_in_copy_of_the_template_is_valid(tmp_path: Path) -> None:
     validator.validate_target_file(TEMPLATE)
 
 
+def test_the_us_settings_keep_the_hand_deployed_app_and_tables() -> None:
+    path = ROOT / "databricks_etl/targets/us.yml"
+    validator.validate_target_file(path)
+    variables = validator.load_yaml(path)["targets"]["us"]["variables"]
+    assert variables["deployment_name"] == "idp-mvp-dev"
+    assert (variables["catalog"], variables["table_prefix"]) == ("idp_testing", "idp_dev")
+
+
 @pytest.mark.parametrize(
     ("replacements", "message"),
     [
@@ -49,7 +57,8 @@ def test_a_filled_in_copy_of_the_template_is_valid(tmp_path: Path) -> None:
         ({"      root_path:": "      # root_path:"}, "root_path"),
         ({"table_prefix: idp ": "table_prefix: idp-x "}, "simple identifier"),
         ({"      warehouse_id: YOUR_WAREHOUSE_ID\n": ""}, "missing \\['warehouse_id'\\]"),
-        ({"      app_name: idp-mvp\n": "      genie_space: x\n"}, "unknown variables"),
+        ({"      app_users_group: users\n": "      genie_space: x\n"}, "unknown variables"),
+        ({"deployment_name: idp-mvp-example": "deployment_name: idp_mvp"}, "App name"),
         ({"parse_concurrency: 3": "parse_concurrency: 5"}, "combined budget"),
     ],
 )

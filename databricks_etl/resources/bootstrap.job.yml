@@ -1,7 +1,7 @@
 resources:
   jobs:
     governed_data_bootstrap:
-      name: ${var.app_name}-${bundle.target}-governed-data-bootstrap
+      name: ${var.deployment_name}-governed-data-bootstrap
       description: Idempotently creates the IDP project schema, volumes, tables, and views.
       tasks:
         - task_key: create_governed_objects

@@ -181,3 +181,34 @@ def test_cluster_id_is_removed_from_the_cli_environment(monkeypatch: pytest.Monk
     deploy.run_command(["databricks", "--version"], True)
     assert "DATABRICKS_CLUSTER_ID" not in seen["env"]
     assert seen["cwd"] == ROOT / "databricks_etl"
+
+
+def test_adopting_binds_the_existing_app_before_deploying(settings_file) -> None:
+    cli, lines = FakeCli(app_exists=True), []
+    deploy.Deployer(
+        "us", profile=None, executable="databricks", runner=cli, say=lines.append, adopt_app=True
+    ).deploy()
+
+    bundle_commands = [c for c in cli.commands if c.startswith("bundle")]
+    assert bundle_commands[1:3] == [
+        "bundle deployment bind idp_app idp-mvp-us --auto-approve -t us",
+        "bundle deploy -t us",
+    ]
+    assert "bundle run app_access_grants -t us" not in bundle_commands
+
+
+def test_adopting_tolerates_an_app_already_bound(settings_file) -> None:
+    cli, lines = FakeCli(app_exists=True, fail=["bundle deployment bind"]), []
+    deploy.Deployer(
+        "us", profile=None, executable="databricks", runner=cli, say=lines.append, adopt_app=True
+    ).deploy()
+    assert any("already manages the App" in line for line in lines)
+
+
+def test_adopting_a_missing_app_stops_before_deploying(settings_file) -> None:
+    cli = FakeCli(app_exists=False)
+    with pytest.raises(deploy.DeployError, match="no App named idp-mvp-us"):
+        deploy.Deployer(
+            "us", profile=None, executable="databricks", runner=cli, say=print, adopt_app=True
+        ).deploy()
+    assert "bundle deploy -t us" not in cli.commands

@@ -523,9 +523,11 @@ open. Notes for L8 and Batch 10: settings files are `databricks_etl/targets/<nam
 (`mode: production`, explicit `root_path`); `scripts/deploy_workspace.py <name>` deploys; a new
 variable `app_users_group` (default `users`) gets CAN_USE on the App from the grants Job, so a
 non-admin can open it without a hand grant. The template turns on `auto_prepare_enabled` and an
-UNPAUSED recovery schedule (L8 expects automatic parsing). Moving the hand-deployed US workspace
-to a settings file creates a new app, jobs and KA (DEPLOYMENT_GUIDE 3.5); its `us.yml` is not in
-the repository (host and warehouse unknown here). Unverified until L8: the CLI's `bundle validate
+UNPAUSED recovery schedule (L8 expects automatic parsing). Names come from `deployment_name` (dev
+target `idp-mvp-dev`, prod `idp-mvp-prod`), not from the target name. `targets/us.yml` keeps the
+hand-deployed US app (`deployment_name: idp-mvp-dev`, its address and its KA); it needs only the
+host and warehouse id, then one run with `--adopt-app` (binds the existing app; unverified until
+L8). The old `[dev <user>]` US jobs must then be deleted by hand. Unverified until L8: the CLI's `bundle validate
 -o json` shape the script reads (`variables.<name>.value`, resolved app name), `run_if:
 NONE_FAILED` after a skipped condition branch, and the Deploy button. Notes from 9a:
 the table `<prefix>_app_settings` (`name`, `value`, `updated_at`) holds `chat_endpoint` and

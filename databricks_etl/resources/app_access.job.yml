@@ -1,7 +1,7 @@
 resources:
   jobs:
     app_access_grants:
-      name: ${var.app_name}-${bundle.target}-app-access-grants
+      name: ${var.deployment_name}-app-access-grants
       description: >-
         Grants the App's service principal the tables, volume, Jobs and chat agents it uses beyond
         its 20 bound resources, and the app users group CAN_USE on the App. Additive and safe to
@@ -12,7 +12,7 @@ resources:
           python_file: ../src/grant_app_access.py
           parameters:
           - --app-name
-          - ${var.app_name}-${bundle.target}
+          - ${var.deployment_name}
           - --catalog
           - ${var.catalog}
           - --project-schema

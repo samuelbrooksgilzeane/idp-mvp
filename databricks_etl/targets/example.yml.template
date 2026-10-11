@@ -28,8 +28,10 @@ targets:
       # SQL warehouse id: SQL Warehouses > your warehouse > Overview, or `databricks warehouses list`.
       warehouse_id: YOUR_WAREHOUSE_ID
 
-      # The App is named <app_name>-<target name>, at most 30 characters.
-      app_name: idp-mvp
+      # Names the App, which sets its address, plus the Jobs and the chat agents: lowercase letters,
+      # digits and hyphens, at most 30 characters, usually idp-mvp-<target name>. To keep an
+      # existing App's address, use its current name and deploy once with --adopt-app.
+      deployment_name: idp-mvp-example
       # Who may open the App: "users" is everyone in the workspace; " " grants nobody (grant by hand).
       app_users_group: users
 

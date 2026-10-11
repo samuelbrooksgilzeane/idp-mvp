@@ -89,9 +89,10 @@ variables:
     default: 8
   warehouse_id:
     description: SQL warehouse identifier
-  app_name:
-    description: Databricks App name prefix; the App is <app_name>-<target>
-    default: idp-mvp
+  deployment_name:
+    description: >-
+      Names the App (and so its address), the Jobs and the chat agents, e.g. idp-mvp-us. Keep an
+      existing App's name to keep its address.
   app_users_group:
     description: Group granted CAN_USE on the App by the grants Job ("users" is everyone); blank grants nobody
     default: users
@@ -107,6 +108,7 @@ targets:
     # --var flags. The CLI profile still chooses the workspace. Another workspace overrides these
     # with --var; prod keeps every workspace value required.
     variables:
+      deployment_name: idp-mvp-dev
       table_prefix: idp_dev
       catalog: workspace
       project_schema: idp_mvp
@@ -119,4 +121,5 @@ targets:
   prod:
     mode: production
     variables:
+      deployment_name: idp-mvp-prod
       table_prefix: idp

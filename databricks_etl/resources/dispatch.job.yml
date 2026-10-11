@@ -1,7 +1,7 @@
 resources:
   jobs:
     work_dispatcher:
-      name: ${var.app_name}-${bundle.target}-work-dispatcher
+      name: ${var.deployment_name}-work-dispatcher
       description: Finite serialized parse and extraction drains with hourly recovery.
       max_concurrent_runs: 1
       queue:

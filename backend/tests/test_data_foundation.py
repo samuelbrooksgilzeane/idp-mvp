@@ -165,7 +165,7 @@ def test_databricks_app_uses_trusted_configuration_and_resource_bindings() -> No
     app = resource["resources"]["apps"]["idp_app"]
 
     assert app["source_code_path"] == "../.."
-    assert app["name"] == "${var.app_name}-${bundle.target}"
+    assert app["name"] == "${var.deployment_name}"
 
     env = {item["name"]: item for item in app["config"]["env"]}
     assert env["IDP_MODE"]["value"] == "databricks"

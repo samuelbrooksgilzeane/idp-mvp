@@ -1,7 +1,7 @@
 resources:
   jobs:
     results_exporter:
-      name: ${var.app_name}-${bundle.target}-results-exporter
+      name: ${var.deployment_name}-results-exporter
       description: Serialized disk-backed exports of retained results; no AI inference.
       max_concurrent_runs: 1
       queue:

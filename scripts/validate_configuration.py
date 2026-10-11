@@ -22,7 +22,7 @@ TRUSTED_VARIABLES = {
     "import_volume_name",
     "import_concurrency",
     "warehouse_id",
-    "app_name",
+    "deployment_name",
     "app_users_group",
     "batch_concurrency",
     "auto_prepare_enabled",
@@ -54,6 +54,7 @@ REQUIRED_SYNC_EXCLUDES = [
 ]
 # Per-workspace settings files (databricks_etl/targets/<name>.yml) must set these.
 REQUIRED_TARGET_VARIABLES = {
+    "deployment_name",
     "catalog",
     "project_schema",
     "table_prefix",
@@ -62,6 +63,8 @@ REQUIRED_TARGET_VARIABLES = {
     "warehouse_id",
 }
 TARGET_NAME = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+# Databricks App names: lowercase letters, digits and hyphens, at most 30 characters.
+APP_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$")
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 EXPECTED_PARSING_MIGRATION_PARAMETERS = {
     "catalog": "${var.catalog}",
@@ -757,7 +760,14 @@ def validate_target_file(path: Path) -> None:
     for key, value in variables.items():
         if isinstance(value, bool) or not isinstance(value, str | int):
             raise ValueError(f"{where}: {key} must be text; quote values like \"off\" and \"true\"")
-    for key in (REQUIRED_TARGET_VARIABLES - {"warehouse_id"}) | {"import_volume_name"}:
+    if APP_NAME.fullmatch(str(variables["deployment_name"])) is None:
+        raise ValueError(
+            f"{where}: deployment_name is the App name: lowercase letters, digits and hyphens, "
+            "at most 30 characters"
+        )
+    for key in (REQUIRED_TARGET_VARIABLES - {"warehouse_id", "deployment_name"}) | {
+        "import_volume_name"
+    }:
         if key in variables and SIMPLE_IDENTIFIER.fullmatch(str(variables[key])) is None:
             raise ValueError(f"{where}: {key} must be a simple identifier")
     if variables.get("chat_mode", "knowledge_assistant") not in (

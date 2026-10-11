@@ -66,7 +66,8 @@ and the dispatcher's schedule follows `recovery_schedule_status`. (Development m
 override it either: per the CLI source, its pause preset only fills an empty pause status.)
 `python3 scripts/deploy_workspace.py <name>` (or `make deploy-workspace TARGET=<name>`) needs only
 Python and the Databricks CLI: it deploys, tolerating the first deployment's expected App error,
-runs `workspace_setup`, deploys again, grants a new App, starts it and prints its address. The
+runs `workspace_setup`, deploys again, grants a new App, starts it and prints its address. `deployment_name` names the App (its
+address), Jobs and chat agents; `--adopt-app` takes over an existing App of that name once. The
 grants Job also gives `app_users_group` (default `users`, everyone) CAN_USE on the App.
 `make check` fails when `frontend/dist` differs from a fresh build, because CLI-only deploys ship
 the committed build. The full steps are in the [deployment guide](DEPLOYMENT_GUIDE.md).
@@ -90,9 +91,9 @@ Anyone with WRITE VOLUME on `idp_import` can also read or delete other users' pe
 The bundle variable `chat_mode` chooses the chat: `knowledge_assistant` (default: fast, answers
 with page citations), `supervisor` (the KA plus SQL tools for totals and extracted values; slower)
 or `off`. The `workspace_setup` Job's `provision_chat` task (`databricks_etl/src/provision_chat.py`)
-creates or updates, by name, the Knowledge Assistant `<app>-<target>-documents-ka` (files source:
+creates or updates, by name, the Knowledge Assistant `<deployment_name>-documents-ka` (files source:
 the source volume's `incoming/` folder) and, in `supervisor` mode, the Supervisor
-`<app>-<target>-chat-supervisor` with the KA and, unless `supervisor_functions_enabled` is
+`<deployment_name>-chat-supervisor` with the KA and, unless `supervisor_functions_enabled` is
 `"false"`, the five read-only UC functions the bootstrap creates (`<prefix>_chat_document_fields`,
 `_chat_find_documents`, `_chat_invoices`, `_chat_invoice_totals`, `_chat_case_documents`). It is
 idempotent and never deletes. It requests one KA Sync, so documents uploaded before chat existed
