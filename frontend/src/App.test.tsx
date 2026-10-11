@@ -54,7 +54,7 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "Documents" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Upload PDFs" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Sections" })).toHaveTextContent("Documents");
-    await waitFor(() => expect(screen.getByText("Reachable")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Runtime status")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("No documents registered")).toBeInTheDocument());
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/health",

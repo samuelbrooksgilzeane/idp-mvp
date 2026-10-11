@@ -163,9 +163,6 @@ export function App() {
   }, [isRegistryRoute, loadCaseIds]);
 
   const appName = runtime.kind === "ready" ? runtime.health.application_name : "IDP MVP";
-  const runtimeMode = runtime.kind === "ready" ? runtime.health.mode : "unknown";
-  const apiStatus =
-    runtime.kind === "ready" ? "Reachable" : runtime.kind === "loading" ? "Checking" : "Unavailable";
   const heading = HEADINGS[sectionFor(location.pathname)];
 
   const blurb = sectionFor(location.pathname) === "documents" && upload.automaticPreparation
@@ -174,7 +171,7 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} runtimeMode={runtimeMode} apiStatus={apiStatus} chatEnabled={chatEnabled} />
+      <WorkflowHeader appName={appName} chatEnabled={chatEnabled} />
       <div className="app-main">
       <header className="top-bar" aria-label="Location">
         {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1

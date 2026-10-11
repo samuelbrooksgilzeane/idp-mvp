@@ -7,13 +7,10 @@ const NAVIGATION = [
   { label: "Schemas", to: "/schema", end: false, Icon: Braces },
 ];
 
-type WorkflowHeaderProps = {
-  appName: string; runtimeMode?: string; apiStatus?: string;
-  chatEnabled?: boolean;
-};
+type WorkflowHeaderProps = { appName: string; chatEnabled?: boolean };
 
-/** Sidebar navigation; the runtime footer only reports live connection state. */
-export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatEnabled }: WorkflowHeaderProps) {
+/** Sidebar navigation. */
+export function WorkflowHeader({ appName, chatEnabled }: WorkflowHeaderProps) {
   return (
     <aside className="app-sidebar">
       <div className="brand-lockup">
@@ -38,17 +35,6 @@ export function WorkflowHeader({ appName, runtimeMode, apiStatus, chatEnabled }:
           ) : null}
         </ul>
       </nav>
-      {apiStatus ? (
-        <dl className="sidebar-footer" aria-label="Runtime status">
-          <div>
-            <dt>API</dt>
-            <dd className={`status-${apiStatus.toLowerCase()}`}>
-              <span className="status-dot" aria-hidden="true" />{apiStatus}
-            </dd>
-          </div>
-          {runtimeMode === "mock" ? <div><dt>Mode</dt><dd>Local mock</dd></div> : null}
-        </dl>
-      ) : null}
     </aside>
   );
 }
