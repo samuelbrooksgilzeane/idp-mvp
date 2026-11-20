@@ -34,7 +34,7 @@ targets:
 
       # Processing switches.
       auto_prepare_enabled: "true"           # parse documents automatically after upload
-      recovery_schedule_status: UNPAUSED     # hourly run that picks up interrupted work
+      recovery_schedule_status: PAUSED       # hourly run that picks up interrupted work (UNPAUSED to turn on)
       bulk_extraction_enabled: "false"       # durable extraction batches
       viewer_projection_enabled: "true"      # faster document viewer
       bulk_export_enabled: "false"           # keep off: setup does not create the export tables yet
