@@ -118,7 +118,7 @@ deletes files from the folder; remove a folder once the app shows its files regi
 
 The US workspace was deployed by hand on 10–11 October as app `idp-mvp-dev`, with jobs named
 `[dev <user>] ...`. Its settings file, `databricks_etl/targets/us.yml`, keeps that app, its address,
-and its tables: `deployment_name: idp-mvp-dev`, `catalog: idp_testing`,
+and its tables: `deployment_name: idp-mvp-dev`, `catalog: idp_testing_catalog`,
 `table_prefix: idp_dev`. Fill in its workspace URL and warehouse id, then deploy **once** with
 `--adopt-app`, which makes this deployment take over the existing app instead of creating one:
 

@@ -16,7 +16,7 @@ targets:
     variables:
       # Where the data lives. The catalog must exist and you must be allowed to create a schema in
       # it; the schema, volumes and tables are created by workspace setup.
-      catalog: idp_testing
+      catalog: idp_testing_catalog
       project_schema: idp_mvp
       table_prefix: idp_dev              # the existing tables and documents
       source_volume_name: idp_source

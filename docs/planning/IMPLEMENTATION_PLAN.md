@@ -99,7 +99,7 @@ vars), `resources/bootstrap.job.yml` (`create_genie_views` task), `sql/create_ge
 
 ## Facts from the US deployment (10–11 October 2026)
 
-Deployed by hand from `main` (`f24f4cc`) in a cluster's web terminal: catalog `idp_testing`, schema
+Deployed by hand from `main` (`f24f4cc`) in a cluster's web terminal: catalog `idp_testing` (recorded as such; the catalog is `idp_testing_catalog`), schema
 `idp_mvp`, prefix `idp_dev`, `-t dev` with `--var` overrides, app `idp-mvp-dev`. Batches 9 and 10
 exist to make the next workspace need none of the steps below.
 

@@ -44,7 +44,7 @@ def test_the_us_settings_keep_the_hand_deployed_app_and_tables() -> None:
     validator.validate_target_file(path)
     variables = validator.load_yaml(path)["targets"]["us"]["variables"]
     assert variables["deployment_name"] == "idp-mvp-dev"
-    assert (variables["catalog"], variables["table_prefix"]) == ("idp_testing", "idp_dev")
+    assert (variables["catalog"], variables["table_prefix"]) == ("idp_testing_catalog", "idp_dev")
 
 
 @pytest.mark.parametrize(
