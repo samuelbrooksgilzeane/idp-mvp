@@ -11,12 +11,10 @@ import { DocumentsPage } from "./pages/DocumentsPage";
 const ResultDetailPage = lazy(() => import("./pages/ResultDetailPage").then(module => ({ default: module.ResultDetailPage })));
 import { ResultsPage } from "./pages/ResultsPage";
 const SchemaPage = lazy(() => import("./pages/SchemaPage").then(module => ({ default: module.SchemaPage })));
-const ChatPage = lazy(() => import("./pages/ChatPage").then(module => ({ default: module.ChatPage })));
-const SourcePage = lazy(() => import("./pages/SourcePage").then(module => ({ default: module.SourcePage })));
 import { useUploadBatch } from "./hooks/useUploadBatch";
 import { useFolderImport } from "./hooks/useFolderImport";
 import { useDocumentPage } from "./hooks/useDocumentPage";
-import type { AppConfig, HealthResponse } from "./types";
+import type { HealthResponse } from "./types";
 
 export type {
   ApiError,
@@ -45,11 +43,6 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
     blurb: "Every extraction run. Filter, open one to review it beside its source, or export.",
   },
   "result-detail": { crumbs: ["Results", "Extraction run"] },
-  chat: {
-    crumbs: ["Ask documents"],
-    title: "Ask documents",
-    blurb: "Ask about your documents and their extracted data. Extracted values are model output, not approved.",
-  },
   schema: {
     crumbs: ["Schemas"],
     title: "Schemas",
@@ -59,20 +52,7 @@ const HEADINGS: Record<string, { crumbs: string[]; title?: string; blurb?: strin
 
 const viewLoading = <div className="results-state" role="status">Loading view…</div>;
 
-/** A cited source opens in its own tab without the sidebar; every other path is the workspace. */
 export function App() {
-  return (
-    <Routes>
-      <Route
-        path="/sources/:documentId"
-        element={<Suspense fallback={<p className="source-loading" role="status">Loading…</p>}><SourcePage /></Suspense>}
-      />
-      <Route path="*" element={<WorkspaceApp />} />
-    </Routes>
-  );
-}
-
-function WorkspaceApp() {
   const [runtime, setRuntime] = useState<RuntimeState>({ kind: "loading" });
   const [scope, setScope] = useState("initial");
   // Pages wait for the first scope answer (no warehouse work, so it is quick). Rendering them
@@ -81,7 +61,6 @@ function WorkspaceApp() {
   const [scopeSettled, setScopeSettled] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [caseIds, setCaseIds] = useState<string[]>([]);
-  const [chatEnabled, setChatEnabled] = useState(false);
   const location = useLocation();
   const isRegistryRoute = location.pathname === "/";
 
@@ -158,18 +137,6 @@ function WorkspaceApp() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/app-config", { signal: controller.signal })
-      .then((response) => {
-        if (!response.ok) throw new Error("Configuration request failed");
-        return response.json() as Promise<AppConfig>;
-      })
-      .then((config) => setChatEnabled(Boolean(config.chat_enabled)))
-      .catch(() => undefined);
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
     if (!isRegistryRoute) return;
     const controller = new AbortController();
     void loadCaseIds(controller.signal);
@@ -185,7 +152,7 @@ function WorkspaceApp() {
 
   return (
     <div className="app-shell">
-      <WorkflowHeader appName={appName} chatEnabled={chatEnabled} />
+      <WorkflowHeader appName={appName} />
       <div className="app-main">
       <header className="top-bar" aria-label="Location">
         {heading.crumbs.map((crumb, index) => index === heading.crumbs.length - 1
@@ -240,8 +207,6 @@ function WorkspaceApp() {
           <Route path="/results" element={<ResultsPage />} />
           <Route path="/results/:runId" element={<ResultDetailPage />} />
           <Route path="/schema" element={<SchemaPage />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/chat/:conversationId" element={<ChatPage />} />
         </Routes>
         )}
         </Suspense>
@@ -256,6 +221,5 @@ function sectionFor(pathname: string): string {
   if (pathname.startsWith("/results/")) return "result-detail";
   if (pathname.startsWith("/results")) return "results";
   if (pathname.startsWith("/schema")) return "schema";
-  if (pathname.startsWith("/chat")) return "chat";
   return "documents";
 }

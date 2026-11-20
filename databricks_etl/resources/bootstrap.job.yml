@@ -224,32 +224,6 @@ resources:
               catalog: ${var.catalog}
               project_schema: ${var.project_schema}
               table_prefix: ${var.table_prefix}
-        - task_key: create_chat_functions
-          depends_on:
-            - task_key: create_chat_views
-          spark_python_task:
-            python_file: ../src/create_chat_functions.py
-            parameters:
-              - --catalog
-              - ${var.catalog}
-              - --project-schema
-              - ${var.project_schema}
-              - --table-prefix
-              - ${var.table_prefix}
-              - --sql-path
-              - ${workspace.file_path}/databricks_etl/sql/create_chat_functions.sql
-          environment_key: default
-        - task_key: migrate_chat_history
-          depends_on:
-            - task_key: create_governed_objects
-          sql_task:
-            warehouse_id: ${var.warehouse_id}
-            file:
-              path: ../sql/migrate_chat_history.sql
-            parameters:
-              catalog: ${var.catalog}
-              project_schema: ${var.project_schema}
-              table_prefix: ${var.table_prefix}
         - task_key: migrate_work_batches
           depends_on:
             - task_key: create_governed_objects
@@ -286,8 +260,7 @@ resources:
         # Replacing views drops their grants; restore the App's direct grants last.
         - task_key: grant_app_access
           depends_on:
-            - task_key: create_chat_functions
-            - task_key: migrate_chat_history
+            - task_key: create_chat_views
             - task_key: migrate_work_batches
             - task_key: migrate_viewer_projection
             - task_key: migrate_document_extraction_owner

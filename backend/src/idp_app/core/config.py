@@ -14,12 +14,6 @@ class IdpMode(str, Enum):
     DATABRICKS = "databricks"
 
 
-class ChatMode(str, Enum):
-    OFF = "off"
-    KNOWLEDGE_ASSISTANT = "knowledge_assistant"
-    SUPERVISOR = "supervisor"
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -62,13 +56,6 @@ class Settings(BaseSettings):
     import_volume_name: str | None = None
     import_job_id: PositiveInt | None = None
     import_concurrency: int = Field(default=8, ge=1, le=32)
-    # Document chat page. In databricks mode the workspace_setup Job provisions it and records
-    # the serving endpoint and Knowledge Assistant id in <prefix>_app_settings.
-    chat_mode: ChatMode = ChatMode.KNOWLEDGE_ASSISTANT
-    # Optional override: send chat to this serving endpoint instead of the provisioned one.
-    chat_endpoint: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
-    # Document chat: request a Knowledge Assistant Sync after documents are added or deleted.
-    ka_sync_enabled: bool = False
 
     @property
     def folder_import_enabled(self) -> bool:
@@ -101,16 +88,6 @@ class Settings(BaseSettings):
             if value == "":
                 return None
         return value
-
-    @property
-    def chat_enabled(self) -> bool:
-        return self.chat_mode is not ChatMode.OFF
-
-    @field_validator("chat_endpoint", mode="before")
-    @classmethod
-    def blank_is_unset(cls, value: Any) -> Any:
-        # The bundle passes " " for no override (Apps rejects empty environment values).
-        return value.strip() or None if isinstance(value, str) else value
 
     @model_validator(mode="after")
     def require_databricks_configuration(self) -> Self:

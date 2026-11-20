@@ -1,5 +1,6 @@
 -- Run after generic extraction migrations. No inference or raw PDF exposure.
--- Read-only sources for the document chat's UC functions. Older views from the retired chat space stay until Batch 8.
+-- Read-only, flattened views of documents and their extracted data points, for analytics and a
+-- future Genie space. The _chat_ names are historical (they first fed the retired document chat).
 CREATE OR REPLACE VIEW IDENTIFIER(:catalog || '.' || :project_schema || '.' || :table_prefix || '_chat_documents')
 COMMENT 'One row per registered document; workflow status is not approval'
 AS SELECT document_id, case_id, file_name, file_size, status, uploaded_at

@@ -18,11 +18,16 @@ Created 30 September 2026 on `feat/dark-blue-ui`. One chat per batch.
 
 ## Decisions (30 September 2026)
 
+- **Superseded 20 November 2026:** the Knowledge Assistant and Supervisor Agent are being
+  deprecated, so Batch 11 removes the chat. The app's core is upload PDFs to the source volume and
+  extract data points with a schema; a Genie space embedded as an app page (Batch 12) replaces chat.
+  Chat items below (Batches 5, 7, 10; L5, L6) are historical.
+
 - **Workspaces:** develop on the existing Free Edition workspace (profile `idp-mvp`). Production is a
   US paid workspace with all features and no budget cap; heavy tests happen there.
 - **Genie is dropped:** Volume Content Search excludes catalogs with workspace bindings.
 - **Chat:** Knowledge Assistant (KA) + Supervisor Agent + Databricks chat template
-  `e2e-chatbot-app-next` with Lakebase history (option B in `DOCUMENT_CHAT_OPTIONS.md`; its
+  `e2e-chatbot-app-next` with Lakebase history (option B in `docs/archive/DOCUMENT_CHAT_OPTIONS.md`; its
   preference for option A assumed Free Edition only). **Revised 30 September:** the user expects
   KA to work on Free Edition, so Batch 7 builds KA + Supervisor there first, behind gate **G7**
   (Batch 7). The docs checked on 30 September said Free Edition excludes KA; G7 settles it in the
@@ -153,7 +158,9 @@ exist to make the next workspace need none of the steps below.
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
 | 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
 | 9 | Repeatable deployment: one settings file, one command | 2 | 9a, 9b done (11 Oct); live check L8 open |
-| 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Code done (11 Oct, `feat/batch-10-ka-citations`); live check open |
+| 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Code done (11 Oct, `feat/batch-10-ka-citations`); superseded by Batch 11 |
+| 11 | Remove Knowledge Assistant and Supervisor chat | 1 | Done (20 Nov, `feat/remove-managed-chat`, branched from Batch 10) |
+| 12 | Genie space page (iframe) | 1–2 | Not planned in detail yet |
 
 Batches 1–5 need only the Free Edition workspace (and mostly none). A session is sized to about one
 five-hour usage window.
@@ -662,3 +669,26 @@ Decisions (11 October, with the user, from a mockup kept locally at
 
 Live (user): three questions, one answered deep in a document; click each citation as an admin and
 as a non-admin user; confirm the page and highlight. Users need no `READ VOLUME`.
+
+## Batch 11 — Remove Knowledge Assistant and Supervisor chat
+
+Status: Done 20 November 2026 on `feat/remove-managed-chat` (from `feat/batch-10-ka-citations`, so
+Batch 9's deploy work is kept; no workspace calls). Removed: the "Ask documents" page and the
+`/sources/` citation tab, the chat API, services (`document_chat`, `chat_sync`, `app_settings`),
+`provision_chat.py`, the UC functions and their bootstrap task, the chat-history migration, the
+`app_settings` table, the `chat_mode`/`chat_endpoint`/`ka_sync_enabled`/
+`supervisor_functions_enabled` variables, chat grants and the KA Sync hook on upload, import and
+delete. `workspace_setup` is now bootstrap, then grants. `DocumentViewer` is back to its pre-Batch-10
+version. Kept: the four `<prefix>_chat_*` views (flattened documents and extracted data points, for
+Genie). Live leftovers to delete by hand are listed in DEPLOYMENT_NOTES "Retired document chat".
+
+Notes for Batch 12 (Genie page):
+- `main.py` sets `Content-Security-Policy: frame-src 'none'` on every response, which blocks any
+  iframe. Allow exactly the workspace host (`frame-src https://<workspace host>`), not `*`.
+- `/api/app-config` (now `{project_name}` only) is the place to return the Genie space URL, from a
+  new bundle variable passed as an App env var; show the page only when it is set.
+- Genie answers with SQL over Unity Catalog tables. Check whether the workspace's Genie can use the
+  PDFs in the volume directly; if not, expose parsed page text (`<prefix>_parsed_page_elements` or
+  a view over it) as a Genie table next to the `_chat_*` views.
+- Check how the workspace allows embedding (admin approved-domains setting) and that viewers need
+  their own Genie space access and SELECT on its tables: Genie runs as the viewer, not the App.

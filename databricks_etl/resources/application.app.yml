@@ -156,16 +156,6 @@ resources:
             value: ${var.import_volume_name}
           - name: IDP_IMPORT_JOB_ID
             value: ${resources.jobs.folder_importer.id}
-          # Document chat page. workspace_setup provisions the chat, records its endpoint and KA id
-          # in <prefix>_app_settings (read at run time) and grants the App access to both.
-          - name: IDP_CHAT_MODE
-            value: ${var.chat_mode}
-          # Optional override: chat goes to this endpoint instead of the provisioned one.
-          - name: IDP_CHAT_ENDPOINT
-            value: ${var.chat_endpoint}
-          # Document chat: KA Sync after uploads, imports and deletions (needs CAN_MANAGE on the KA).
-          - name: IDP_KA_SYNC_ENABLED
-            value: ${var.ka_sync_enabled}
           - name: IDP_PARSE_DISPATCH_SIZE
             value: ${var.parse_dispatch_size}
           - name: IDP_MODE

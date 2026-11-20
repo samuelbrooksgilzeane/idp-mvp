@@ -40,7 +40,7 @@ deploy: check
 	$(BUNDLE) deploy -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS)
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) idp_app
 
-# Tables and migrations, chat provisioning (unless chat_mode is off) and the App's direct grants in
+# Tables and migrations, then the App's direct grants, in
 # one run. Replacing views also drops the App's bound grants, which the deploy afterwards restores.
 workspace-setup:
 	$(BUNDLE) run -t $(TARGET) -p $(PROFILE) $(BUNDLE_VARS) workspace_setup

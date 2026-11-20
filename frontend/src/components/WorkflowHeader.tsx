@@ -1,4 +1,4 @@
-import { Braces, FileText, MessageSquare, Table2 } from "lucide-react";
+import { Braces, FileText, Table2 } from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 const NAVIGATION = [
@@ -7,10 +7,10 @@ const NAVIGATION = [
   { label: "Schemas", to: "/schema", end: false, Icon: Braces },
 ];
 
-type WorkflowHeaderProps = { appName: string; chatEnabled?: boolean };
+type WorkflowHeaderProps = { appName: string };
 
 /** Sidebar navigation. */
-export function WorkflowHeader({ appName, chatEnabled }: WorkflowHeaderProps) {
+export function WorkflowHeader({ appName }: WorkflowHeaderProps) {
   return (
     <aside className="app-sidebar">
       <div className="brand-lockup">
@@ -26,13 +26,6 @@ export function WorkflowHeader({ appName, chatEnabled }: WorkflowHeaderProps) {
               </NavLink>
             </li>
           ))}
-          {chatEnabled ? (
-            <li>
-              <NavLink to="/chat" className={({ isActive }) => (isActive ? "active" : undefined)}>
-                <MessageSquare size={16} aria-hidden="true" />Ask documents
-              </NavLink>
-            </li>
-          ) : null}
         </ul>
       </nav>
     </aside>

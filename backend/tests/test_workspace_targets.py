@@ -50,9 +50,8 @@ def test_the_us_settings_keep_the_hand_deployed_app_and_tables() -> None:
 @pytest.mark.parametrize(
     ("replacements", "message"),
     [
-        ({'chat_mode: knowledge_assistant': "chat_mode: off"}, "must be text"),
-        ({'ka_sync_enabled: "true"': "ka_sync_enabled: true"}, "must be text"),
-        ({"chat_mode: knowledge_assistant": "chat_mode: auto"}, "chat_mode must be"),
+        ({'auto_prepare_enabled: "true"': "auto_prepare_enabled: true"}, "must be text"),
+        ({'bulk_extraction_enabled: "false"': "bulk_extraction_enabled: off"}, "must be text"),
         ({"mode: production": "mode: development"}, "mode: production"),
         ({"      root_path:": "      # root_path:"}, "root_path"),
         ({"table_prefix: idp ": "table_prefix: idp-x "}, "simple identifier"),

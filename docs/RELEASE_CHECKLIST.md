@@ -46,13 +46,11 @@ export → ask documents, on the live app, without surprises. Order matters: eac
    and shown as failed). Enable Job queueing if it is.
    Done in `5244305`, deployed `01f1bc608256171da1298bb6378073e4`: Databricks documents that such a run is
    skipped, so queueing is now enabled on both Jobs.
-3. [ ] **Agent — document chat.** The earlier embedded question-answering space was retired on
-   30 September because its volume content search excludes catalogs with workspace bindings. Chat is
-   now a separate app linked as "Ask documents" (Batches 5–7 of
-   [the implementation plan](planning/IMPLEMENTATION_PLAN.md)). On Free Edition it cannot answer from
-   documents; demo it on the US workspace or leave it out.
-4. [ ] **Agent — write the demo script and seed plan.** A short click-by-click script, 3–4 prepared
-   chat questions and the documents to use, relying on retained results so a demo rerun does not
+3. [x] **Document chat retired.** The Knowledge Assistant / Supervisor chat was removed in November
+   2026 (both are being deprecated). A Genie space embedded in the app is the planned replacement
+   (section 6); leave chat out of the demo until it exists.
+4. [ ] **Agent — write the demo script and seed plan.** A short click-by-click script, the
+   documents and schemas to use, relying on retained results so a demo rerun does not
    repeat inference. Record the rollback deployment ID (above) with it.
 
 ### Should do
@@ -68,7 +66,7 @@ export → ask documents, on the live app, without surprises. Order matters: eac
 ### Known limits to mention (or avoid) during a demo
 
 - Schema save/publish takes about 5–6 seconds (section 4); create schemas before the demo.
-- Document chat cannot answer from PDF content until the managed chat (Batch 7) is live.
+- There is no question-answering page until the Genie space (section 6) is added.
 - Capacity beyond small batches is unproven until section 3 runs.
 
 ## Responsibility and approval rules
@@ -100,7 +98,7 @@ Execution is underway; completed items require the linked evidence. Live user ac
 - [x] Refresh the (now retired) question-answering space definition before bundle planning; never
       deploy a stale generated overlay.
 - [x] Build, run release checks, inspect deployment changes, deploy and verify authenticated health,
-      actual feature flags, current frontend assets and chat link. Record the deployment ID.
+      actual feature flags and current frontend assets. Record the deployment ID.
 - [x] Enable viewer projections and verify their prerequisites. Prepare queue/extraction/export settings
       and explain which settings start background processing before the user-run smoke test.
 
@@ -197,7 +195,7 @@ Execution is underway; completed items require the linked evidence. Live user ac
 
 ### Agent — independent work
 
-- [ ] Test batch/export ownership restrictions locally and inspect intended chat/source permissions.
+- [ ] Test batch/export ownership restrictions locally and inspect intended source permissions.
 - [x] Document start/stop, retry/recovery, support, known limitations and artifact retention/cleanup.
 - [ ] Prepare the repeatable demo, regression evidence, deployment ID and rollback procedure.
       Deployment and rollback IDs recorded 30 September; demo script is item 4 of "Path to a demo".
@@ -205,28 +203,16 @@ Execution is underway; completed items require the linked evidence. Live user ac
 
 ### User — action or approval
 
-- [ ] Test with an ordinary colleague account: app, documents, viewer, schemas, exports and document chat.
+- [ ] Test with an ordinary colleague account: app, documents, viewer, schemas and exports.
 - [ ] Confirm project-shared visibility is intended; uploader identity is not per-user isolation.
 - [ ] Confirm support ownership/retention policy and sign off the shareable release.
 
-## 6. Document chat — separate US-workspace gate
+## 6. Question answering — Genie space (planned)
 
-May be deferred for a pilot only if users are clearly told document content search is unavailable.
-The embedded question-answering space used until 30 September is retired; its views and live space
-are removed in Batch 8 of [the implementation plan](planning/IMPLEMENTATION_PLAN.md), which now
-tracks this gate (Knowledge Assistant, Supervisor Agent and chat app).
-
-### Agent — independent work
-
-- [ ] Prepare upload → sync → ask and deletion → sync → ask checks; inspect results after the
-      user-operated tests. Do not assume immediate index removal or continuous synchronization.
-- [x] Document sync ownership and how index freshness is communicated.
-
-### User — action or approval
-
-- [ ] Provide the US workspace and approve the Knowledge Assistant source and sync workload.
-- [ ] Run upload/deletion/ask checks with disposable fixtures and verify colleague access.
-- [ ] Confirm ongoing sync ownership, or explicitly defer document chat for the pilot.
+The Knowledge Assistant / Supervisor chat is retired (DEPLOYMENT_NOTES, "Retired document chat").
+The replacement is a Genie space over the `<prefix>_chat_*` flattened views (and the PDFs in the
+source volume), embedded as an app page. Its gate is written when that work is planned in
+[the implementation plan](planning/IMPLEMENTATION_PLAN.md).
 
 ## Deferred unless explicitly added to release scope
 

@@ -1,6 +1,5 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
-from urllib.parse import urlsplit
 
 from idp_app.services.document_models import DocumentRecord
 from idp_app.services.document_registry import DocumentRegistry
@@ -9,10 +8,7 @@ from idp_app.services.preparation import PreparationService
 from idp_app.services.work_batches import WorkRepository
 
 if TYPE_CHECKING:
-    from idp_app.services.app_settings import AppSettingsTable
     from idp_app.services.batch_repository import BatchRepository
-    from idp_app.services.chat_sync import KnowledgeSync
-    from idp_app.services.document_chat import DocumentChatService
     from idp_app.services.folder_import import FolderImportService
     from idp_app.services.upload_batches import UploadBatchService
 
@@ -87,7 +83,6 @@ def build_document_service(settings: Settings) -> DocumentService:
             registry,
             settings.max_upload_bytes,
             _registration_callback(settings, registry),
-            None,
         )
 
     catalog = _required(settings.catalog, "IDP_CATALOG")
@@ -123,37 +118,7 @@ def build_document_service(settings: Settings) -> DocumentService:
         databricks_registry,
         settings.max_upload_bytes,
         _registration_callback(settings, databricks_registry),
-        _source_changed_callback(settings, databricks_registry),
     )
-
-
-def app_settings_table(
-    settings: Settings, registry: DatabricksDocumentRegistry
-) -> "AppSettingsTable":
-    from idp_app.services.app_settings import shared_app_settings
-
-    namespace = f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
-    return shared_app_settings(f"{namespace}_app_settings", registry.execute_sql)
-
-
-def knowledge_sync(
-    settings: Settings, registry: DatabricksDocumentRegistry
-) -> "KnowledgeSync | None":
-    """The process's Knowledge Assistant Sync coalescer, or None when sync or chat is off."""
-    if not (settings.ka_sync_enabled and settings.chat_enabled):
-        return None
-    from idp_app.services.app_settings import KA_ID
-    from idp_app.services.chat_sync import shared_knowledge_sync
-
-    recorded = app_settings_table(settings, registry)
-    return shared_knowledge_sync(recorded.table, lambda: recorded.get(KA_ID))
-
-
-def _source_changed_callback(
-    settings: Settings, registry: DatabricksDocumentRegistry
-) -> Callable[[], object] | None:
-    sync = knowledge_sync(settings, registry)
-    return None if sync is None else sync.request
 
 
 def get_parsing_service(request: Request) -> ParsingService:
@@ -694,78 +659,3 @@ def _registration_callback(
     preparation = _preparation(settings, documents, runs)
     assert preparation is not None
     return lambda document: preparation.request(document.document_id, document.uploaded_by)
-
-
-def get_document_chat_service(request: Request) -> "DocumentChatService":
-    from idp_app.services.document_chat import ChatError, DocumentChatService
-
-    existing = getattr(request.app.state, "document_chat_service", None)
-    if isinstance(existing, DocumentChatService):
-        return existing
-    settings = cast(Settings, request.app.state.settings)
-    if not settings.chat_enabled:
-        raise ChatError("CHAT_DISABLED", "Document chat is not configured for this app.", 404)
-    service = build_document_chat_service(settings, get_document_service(request))
-    request.app.state.document_chat_service = service
-    return service
-
-
-def build_document_chat_service(
-    settings: Settings, documents: DocumentService
-) -> "DocumentChatService":
-    from databricks.sdk.core import Config
-
-    from idp_app.services.document_chat import (
-        ChatClient,
-        ChatRepository,
-        DatabricksChatRepository,
-        DocumentChatService,
-        MockChatClient,
-        ServingEndpointChatClient,
-        SourceLocation,
-        SQLiteChatRepository,
-    )
-
-    registry = documents.registry
-    client: ChatClient
-    repository: ChatRepository
-    sources: SourceLocation | None
-    if settings.mode is IdpMode.MOCK:
-        # Mock answers cite the first registered document, so links work locally.
-        sources = SourceLocation("localhost", "local", "local", "source_volume")
-        client = MockChatClient(
-            sources,
-            lambda: next((d.document_id for d in registry.list_documents()), None),
-        )
-        repository = SQLiteChatRepository(settings.local_data_dir / "registry.sqlite3")
-    else:
-        assert isinstance(registry, DatabricksDocumentRegistry)
-        from idp_app.services.app_settings import CHAT_ENDPOINT
-
-        recorded = app_settings_table(settings, registry)
-        override = settings.chat_endpoint
-        # Supervisor answers can take a minute when several tools run.
-        workspace = WorkspaceClient(config=Config(http_timeout_seconds=170))
-        client = ServingEndpointChatClient(
-            workspace, lambda: override or recorded.get(CHAT_ENDPOINT)
-        )
-        host = urlsplit(str(workspace.config.host or "")).hostname or ""
-        # Knowledge Assistant citations link only to this workspace's source volume.
-        sources = (
-            SourceLocation(
-                host,
-                _required(settings.catalog, "IDP_CATALOG"),
-                _required(settings.project_schema, "IDP_PROJECT_SCHEMA"),
-                _required(settings.source_volume_name, "IDP_SOURCE_VOLUME_NAME"),
-            )
-            if host
-            else None
-        )
-        repository = DatabricksChatRepository(
-            registry, f"{settings.catalog}.{settings.project_schema}.{settings.table_prefix}"
-        )
-
-    def file_names(document_ids: list[str]) -> dict[str, str]:
-        return {key: record.file_name for key, record in registry.get_many(document_ids).items()}
-
-    return DocumentChatService(client, repository, file_names, sources=sources)

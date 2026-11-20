@@ -11,7 +11,7 @@ deployed mode uses Databricks Jobs, SQL, Unity Catalog volumes and governed Delt
 - [Current release checklist](docs/RELEASE_CHECKLIST.md): deployment, performance, sharing and required
   1,000-file upload acceptance gates.
 - [Deployment guide](docs/DEPLOYMENT_GUIDE.md): step-by-step commands to deploy from a new machine,
-  to the dev workspace, or to a new workspace with document chat.
+  to the dev workspace, or to a new workspace.
 - [Deployment notes](docs/DEPLOYMENT_NOTES.md): target configuration, migrations, grants and
   operational constraints.
 - [30 September release record](docs/RELEASE_EVIDENCE_2026-09-30.md): dark blue UI, 3-way parse/extract

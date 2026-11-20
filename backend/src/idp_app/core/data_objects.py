@@ -16,7 +16,6 @@ TABLE_NAMES = (
     "invoice_line_candidates",
     "validation_results",
     "validation_runs",
-    "app_settings",
 )
 
 VIEW_NAMES = (

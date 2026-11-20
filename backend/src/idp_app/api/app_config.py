@@ -1,4 +1,4 @@
-"""Public display configuration only; the chat app authenticates each viewer itself."""
+"""Public display configuration only."""
 
 from typing import Annotated, Any
 
@@ -15,7 +15,4 @@ def app_config(
 ) -> dict[str, Any]:
     del user
     settings = request.app.state.settings
-    return {
-        "project_name": settings.app_name,
-        "chat_enabled": settings.chat_enabled,
-    }
+    return {"project_name": settings.app_name}

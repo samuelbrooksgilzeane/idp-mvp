@@ -17,7 +17,7 @@ Before testing, record the workspace, app URL/deployment ID, release snapshot, t
 catalog/schema/prefix, resource IDs and authenticated identity. Confirm health, required
 migrations/grants and actual deployed settings. Authenticated `/api/upload-batches/limits`
 reports upload limits and automatic preparation/bulk extraction/export flags;
-`/api/app-config` reports whether document chat is enabled (`chat_enabled`). Viewer projections and recovery schedule
+`/api/app-config` reports the display name only. Viewer projections and recovery schedule
 state also require deployment/resource inspection; do not infer them from a visible page.
 
 - `IDP_AUTO_PREPARE_ENABLED` permits upload-triggered background preparation; uploads may consume
@@ -85,7 +85,6 @@ can be regenerated from retained successful results without repeating document i
 | Registry, parse/extraction results, work/batch records | Durable retained data; app stop/start and code rollback do not purge it. | User must confirm retention policy and name a maintainer before release sign-off. Preserve historical provenance. |
 | Page images/viewer artifacts | Retained separately in artifacts volume; deleting a source is not a full purge. | Maintainer performs separately approved scoped cleanup after checking references. |
 | Durable export artifacts | API expiry is calculated from request creation, default 24 hours (`IDP_EXPORT_RETENTION_HOURS`, allowed 1–168). Expired downloads return 410. | Expiry prevents API download; no scheduled artifact purge is established by this implementation. Maintainer owns physical cleanup of expired artifacts and orphan reconciliation. Never describe expiry as guaranteed file deletion. |
-| Chat/index copies | Source deletion does not establish immediate index removal. | Designated chat maintainer owns supported sync, freshness checks and deletion verification. |
 
 Support owner and escalation channel: **to be assigned by the user before release acceptance**.
 For support, record deployment ID/snapshot, sanitized feature flags, timestamp, route, request/
@@ -94,7 +93,7 @@ raw PDFs, SQL credentials and client document content out of logs shared for tri
 
 Batch/export ownership restrictions are distinct from project document visibility: uploader
 identity is audit metadata, not per-user document isolation. An ordinary colleague must verify
-app, documents, viewer, schemas, exports and document chat with their own identity. Do not impersonate
+app, documents, viewer, schemas and exports with their own identity. Do not impersonate
 them or infer colleague access from the deployment service principal's successful test.
 
 ## Rollback and repeatable demonstration
@@ -117,23 +116,11 @@ viewer and citations, open its published schema, review the saved extraction and
 unexpired export. Record the deployment ID and regression evidence alongside the demo. Leave
 upload/inference optional and user-operated so repeated demos do not multiply consumption.
 
-## Document chat handoff
+## Question answering
 
-Document chat is the app's "Ask documents" page, enabled by the `chat_endpoint` bundle variable.
-Its sources and rollout are tracked in [the implementation plan](planning/IMPLEMENTATION_PLAN.md).
-App selections do not filter chat questions. Verify scope and intended colleague grants before
-connecting a document source, and test the link with the ordinary colleague account.
-
-For an approved document-search test, reuse the disposable user fixture with a distinctive
-non-sensitive phrase: upload → record source ID/time → request supported sync → record sync
-completion/freshness → ask about it and inspect its cited source. Then delete the source in the
-app, verify volume/registry outcomes, sync again, and confirm the source is absent from subsequent
-answers. Record observed lag and failed syncs; do not assume continuous synchronization or
-immediate removal. The agent inspects these outcomes after the user-operated test.
-
-Sync owner and cadence: **user to confirm**. Communicate the last verified sync time and known
-coverage in the release handoff. Until configured and verified, tell pilot users: **the chat
-cannot answer from PDF content yet.**
+The Knowledge Assistant / Supervisor chat was removed in November 2026 (DEPLOYMENT_NOTES,
+"Retired document chat"). Until the planned Genie page exists, tell pilot users the app has no
+question-answering page.
 
 ## Evidence boundary
 

@@ -5,7 +5,7 @@
 
 <target> names databricks_etl/targets/<target>.yml (a copy of targets/example.yml.template). Needs
 only Python 3.10 or later and the Databricks CLI, signed in to that workspace: no uv, Node or make.
-It deploys, runs the workspace_setup Job (tables, document chat, access), deploys again, starts the
+It deploys, runs the workspace_setup Job (tables, access), deploys again, starts the
 App and prints its address. Every step is safe to repeat, so after fixing a failure run it again.
 
 --adopt-app, once: an App with the settings' deployment_name already exists, deployed some other
@@ -32,7 +32,6 @@ TARGETS_DIR = BUNDLE_DIR / "targets"
 TARGET_NAME = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
 SIMPLE_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 APP_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$")
-CHAT_MODES = ("off", "knowledge_assistant", "supervisor")
 IDENTIFIER_VARIABLES = (
     "catalog",
     "project_schema",
@@ -117,15 +116,13 @@ class Deployer:
                 "names tables that workspace setup creates next. Continuing."
             )
         self.step(
-            "Running workspace setup: tables and migrations, document chat, access grants. "
+            "Running workspace setup: tables and migrations, access grants. "
             "This takes several minutes; the run link appears below."
         )
         if self.bundle("run", "workspace_setup").returncode != 0:
             raise DeployError(
                 "Workspace setup failed. Open the run link above and the failed task's output "
-                "says why. If provision_chat failed because Agent Bricks is off, a workspace admin "
-                'can turn it on, or set chat_mode: "off" in '
-                f"targets/{self.target}.yml. Then run this command again."
+                "says why. Fix it, then run this command again."
                 + (" The first deploy also reported an error above." if first else "")
             )
         self.step("Deploying again, now that the tables exist")
@@ -219,7 +216,6 @@ class Deployer:
             f"{values['table_prefix']}_*"
         )
         self.say(f"  Warehouse  {values['warehouse_id']}")
-        self.say(f"  Chat       {values['chat_mode']}")
         self.say(f"  App        {app_name}")
         return config
 
@@ -281,10 +277,6 @@ def check_config(config: dict[str, Any], target: str) -> None:
         raise DeployError(f"Set warehouse_id in {where} to your SQL warehouse's id.")
     if values.get("catalog", "").startswith("YOUR"):
         raise DeployError(f"Set catalog in {where} to an existing catalog.")
-    if values.get("chat_mode") not in CHAT_MODES:
-        raise DeployError(
-            f'chat_mode in {where} must be knowledge_assistant, supervisor or "off" (in quotes).'
-        )
     app_name = ((config.get("resources") or {}).get("apps") or {}).get("idp_app", {}).get("name")
     if not isinstance(app_name, str) or APP_NAME.fullmatch(app_name) is None:
         raise DeployError(
@@ -323,7 +315,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("\nStopped. Running this command again is safe.", file=sys.stderr)
         return 130
     print(f"\nDone. The app is at {url}")
-    print("The first chat index can take a while; until then chat may answer that it has no documents.")
     return 0
 
 

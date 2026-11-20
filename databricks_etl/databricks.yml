@@ -28,22 +28,6 @@ variables:
   upload_parallel_transfers:
     description: Browser upload transfers in flight per batch (1-8)
     default: 3
-  chat_mode:
-    description: >-
-      Document chat: off, knowledge_assistant (answers with page citations) or supervisor (the
-      Knowledge Assistant plus SQL tools, slower). workspace_setup provisions it.
-    default: knowledge_assistant
-  supervisor_functions_enabled:
-    description: In supervisor mode, attach the chat UC functions to the Supervisor as tools
-    default: "true"
-  chat_endpoint:
-    description: >-
-      Optional serving endpoint that answers chat instead of the provisioned one (a Supervisor,
-      another agent or a specific Knowledge Assistant); blank uses the provisioned endpoint
-    default: " "
-  ka_sync_enabled:
-    description: Request a Knowledge Assistant Sync after documents are added or deleted
-    default: "true"
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.
     default: "false"
@@ -91,7 +75,7 @@ variables:
     description: SQL warehouse identifier
   deployment_name:
     description: >-
-      Names the App (and so its address), the Jobs and the chat agents, e.g. idp-mvp-us. Keep an
+      Names the App (and so its address) and the Jobs, e.g. idp-mvp-us. Keep an
       existing App's name to keep its address.
   app_users_group:
     description: Group granted CAN_USE on the App by the grants Job ("users" is everyone); blank grants nobody
@@ -116,8 +100,6 @@ targets:
       artifacts_volume_name: idp_artifacts
       warehouse_id: 647704f77f24020a
       viewer_projection_enabled: "true"
-      chat_endpoint: mas-0297dd39-endpoint
-      ka_sync_enabled: "false"
   prod:
     mode: production
     variables:

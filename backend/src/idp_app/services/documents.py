@@ -67,14 +67,11 @@ class DocumentService:
         registry: DocumentRegistry,
         max_upload_bytes: int,
         on_registered: Callable[[DocumentRecord], object] | None = None,
-        on_source_changed: Callable[[], object] | None = None,
     ) -> None:
         self._storage = storage
         self._registry = registry
         self._max_upload_bytes = max_upload_bytes
         self._on_registered = on_registered
-        # Non-blocking notice that the source volume gained or lost a PDF (KA Sync).
-        self._on_source_changed = on_source_changed
 
     @property
     def registry(self) -> DocumentRegistry:
@@ -218,7 +215,6 @@ class DocumentService:
                 "The PDF was stored, but its registry record could not be committed.",
                 502,
             ) from error
-        self._source_changed()
         if self._on_registered is not None:
             try:
                 await run_in_threadpool(self._on_registered, document)
@@ -330,16 +326,6 @@ class DocumentService:
             raise DocumentServiceError(
                 "REGISTRY_WRITE_FAILED", "The document could not be removed from the registry.", 502
             ) from error
-        finally:
-            self._source_changed()  # the PDF is already gone from the volume
-
-    def _source_changed(self) -> None:
-        if self._on_source_changed is None:
-            return
-        try:
-            self._on_source_changed()
-        except Exception:
-            logging.getLogger(__name__).warning("Source change notification failed")
 
 
 def sanitize_pdf_filename(filename: str | None) -> str:

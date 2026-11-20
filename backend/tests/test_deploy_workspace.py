@@ -35,7 +35,6 @@ def validated(**overrides: Any) -> dict[str, Any]:
         "artifacts_volume_name": "idp_artifacts",
         "import_volume_name": "idp_import",
         "warehouse_id": "abc123",
-        "chat_mode": "knowledge_assistant",
         **overrides,
     }
     return {
@@ -121,7 +120,7 @@ def test_later_deployment_skips_the_extra_grants(settings_file) -> None:
 
 def test_failed_setup_names_the_next_step(settings_file) -> None:
     cli = FakeCli(app_exists=True, fail=["bundle run workspace_setup"])
-    with pytest.raises(deploy.DeployError, match="Agent Bricks"):
+    with pytest.raises(deploy.DeployError, match="failed task's output"):
         deployer(cli, []).deploy()
 
 
@@ -147,7 +146,6 @@ def test_reserved_or_invalid_target_names_are_refused(target: str) -> None:
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        ({"chat_mode": "false"}, "chat_mode"),
         ({"warehouse_id": "YOUR_WAREHOUSE_ID"}, "warehouse_id"),
         ({"catalog": "YOUR_CATALOG"}, "catalog"),
         ({"table_prefix": "idp-prod"}, "table_prefix"),

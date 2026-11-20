@@ -3,7 +3,7 @@ resources:
     app_access_grants:
       name: ${var.deployment_name}-app-access-grants
       description: >-
-        Grants the App's service principal the tables, volume, Jobs and chat agents it uses beyond
+        Grants the App's service principal the tables, volume and Jobs it uses beyond
         its 20 bound resources, and the app users group CAN_USE on the App. Additive and safe to
         re-run; workspace_setup runs it last.
       tasks:
@@ -27,10 +27,6 @@ resources:
           - ${resources.jobs.work_dispatcher.id}
           - --export-job-id
           - ${resources.jobs.results_exporter.id}
-          - --chat-mode
-          - ${var.chat_mode}
-          - --chat-endpoint
-          - ${var.chat_endpoint}
           - --app-users-group
           - ${var.app_users_group}
         environment_key: default
