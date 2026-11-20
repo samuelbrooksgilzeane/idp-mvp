@@ -41,6 +41,7 @@ targets:
 
       # Concurrency. parse + extraction must not exceed combined_inference_concurrency.
       upload_parallel_transfers: 3           # browser uploads in flight per batch (1-8)
+      max_upload_bytes: 52428800             # largest PDF in bytes, browser and folder import (50 MiB)
       import_concurrency: 8                  # files registered in parallel per folder import (1-32)
       batch_concurrency: 16                  # documents in parallel within one batch run
       parse_concurrency: 3

@@ -28,6 +28,9 @@ variables:
   upload_parallel_transfers:
     description: Browser upload transfers in flight per batch (1-8)
     default: 3
+  max_upload_bytes:
+    description: Largest PDF accepted, in bytes, by browser upload and folder import (52428800 is 50 MiB)
+    default: 52428800
   viewer_projection_enabled:
     description: Enable after applying viewer projection migration and narrow grants.
     default: "false"

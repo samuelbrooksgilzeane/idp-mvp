@@ -138,6 +138,9 @@ resources:
         env:
           - name: IDP_UPLOAD_PARALLEL_TRANSFERS
             value: ${var.upload_parallel_transfers}
+          # The import Job takes the same limit as an argument (it does not read the App's env).
+          - name: IDP_MAX_UPLOAD_BYTES
+            value: ${var.max_upload_bytes}
           - name: IDP_VIEWER_PROJECTION_ENABLED
             value: ${var.viewer_projection_enabled}
           - name: IDP_BULK_EXPORT_ENABLED

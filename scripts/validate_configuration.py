@@ -9,6 +9,7 @@ from idp_app.core.config import IdpMode, Settings
 ROOT = Path(__file__).resolve().parents[1]
 TRUSTED_VARIABLES = {
     "upload_parallel_transfers",
+    "max_upload_bytes",
     "bulk_extraction_enabled", "bulk_export_enabled", "viewer_projection_enabled",
     "catalog",
     "project_schema",
@@ -586,6 +587,11 @@ def validate_import_job() -> None:
     env = app_yaml_env(resource["resources"]["apps"]["idp_app"]["config"])
     if env.get("IDP_IMPORT_JOB_ID") != "${resources.jobs.folder_importer.id}":
         raise ValueError("The App must start the bundle's import Job")
+    if (
+        env.get("IDP_MAX_UPLOAD_BYTES") != "${var.max_upload_bytes}"
+        or pairs.get("--max-upload-bytes") != "${var.max_upload_bytes}"
+    ):
+        raise ValueError("The App and the import Job must share the max_upload_bytes limit")
 
 
 def validate_application_resource() -> None:

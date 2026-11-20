@@ -37,6 +37,8 @@ resources:
           - ${var.auto_prepare_enabled}
           - --dispatch-job-id
           - ${resources.jobs.work_dispatcher.id}
+          - --max-upload-bytes
+          - ${var.max_upload_bytes}
         timeout_seconds: 14400
         max_retries: 0
         environment_key: default

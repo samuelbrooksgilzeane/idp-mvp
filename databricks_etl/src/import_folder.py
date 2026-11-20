@@ -27,6 +27,7 @@ def main():
         "--auto-prepare-enabled", default="false", choices=["true", "false"]
     )
     parser.add_argument("--dispatch-job-id", type=int)
+    parser.add_argument("--max-upload-bytes", type=int, required=True)
     args = parser.parse_args()
     if not args.batch_id.strip():
         raise ValueError("Start folder imports from the app; the run needs a batch_id")
@@ -58,6 +59,7 @@ def main():
         auto_prepare_enabled=auto_prepare,
         dispatch_job_id=args.dispatch_job_id if auto_prepare else None,
         import_concurrency=args.concurrency,
+        max_upload_bytes=args.max_upload_bytes,
     )
     documents = build_document_service(settings)
     uploads = build_upload_batch_service(settings, documents)

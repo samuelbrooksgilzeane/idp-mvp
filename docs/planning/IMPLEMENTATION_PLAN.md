@@ -681,6 +681,10 @@ Batch 9's deploy work is kept; no workspace calls). Removed: the "Ask documents"
 delete. `workspace_setup` is now bootstrap, then grants. `DocumentViewer` is back to its pre-Batch-10
 version. Kept: the four `<prefix>_chat_*` views (flattened documents and extracted data points, for
 Genie). Live leftovers to delete by hand are listed in DEPLOYMENT_NOTES "Retired document chat".
+Also raised the per-PDF limit from 25 to 50 MiB as bundle variable `max_upload_bytes` (App env
+`IDP_MAX_UPLOAD_BYTES` and the import Job's `--max-upload-bytes`; the validator requires both). Live
+check: one ~45 MB PDF by browser and by folder import; a gateway 413 on the browser path means
+large files go by folder import.
 
 Notes for Batch 12 (Genie page):
 - `main.py` sets `Content-Security-Policy: frame-src 'none'` on every response, which blocks any

@@ -42,7 +42,8 @@ class Settings(BaseSettings):
     parse_claim_seconds: int = Field(default=7200, ge=300, le=86400)
     app_name: str = "IDP MVP"
     local_data_dir: Path = Path(".local/idp")
-    max_upload_bytes: PositiveInt = 25 * 1024 * 1024
+    # Per-PDF limit for browser uploads and folder import; larger documents go programmatic.
+    max_upload_bytes: PositiveInt = 50 * 1024 * 1024
     max_upload_files: PositiveInt = 10
     max_upload_batch_files: PositiveInt = 1000
     max_upload_attempts: PositiveInt = 10
