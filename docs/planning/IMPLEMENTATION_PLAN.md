@@ -156,7 +156,7 @@ exist to make the next workspace need none of the steps below.
 | 5 | Chat foundation on Free Edition | — | Merged into Batch 7 (code) and L5 (live) |
 | 6 | US workspace deployment | 1 | Done by hand 10–11 Oct (see Facts from the US deployment); Batch 9 makes it repeatable |
 | 7 | Managed chat on Free Edition (KA + Supervisor) | G7 + 2 code + live | G7, 7a, 7b done (1 Oct; chat built into the IDP App); L5 next |
-| 8 | US capacity runs, access, retirement | 1 + user test time | Ready (US deployed) |
+| 8 | US capacity runs, access, retirement | 1 + user test time | Browser 100 done 20 Nov (`docs/RELEASE_EVIDENCE_2026-11-20.md`: upload <15 min, parse 43 min, 0 failures); folder import 100+, access next |
 | 9 | Repeatable deployment: one settings file, one command | 2 | 9a, 9b done (11 Oct); live check L8 open |
 | 10 | Knowledge Assistant chat with clickable page citations | 1–2 | Code done (11 Oct, `feat/batch-10-ka-citations`); superseded by Batch 11 |
 | 11 | Remove Knowledge Assistant and Supervisor chat | 1 | Done (20 Nov, `feat/remove-managed-chat`, branched from Batch 10) |
@@ -196,7 +196,7 @@ backend python scripts/live_dml_check.py --host https://dbc-97e4a372-40b1.cloud.
 | L5 | Batch 7 live | L1, G7, 7a, 7b | Provision, deploy, 10 set questions, restart and per-user history checks (see Batch 7). | Open |
 | L6 | Batch 7 live | L5 | Automatic KA Sync after upload and delete. | Open |
 | L7 | Batch 10 step 1 | US workspace, user's CLI | Save one KA reply about a public document (`databricks api post /serving-endpoints/<ka endpoint>/invocations`) and record each annotation's keys, especially `start_index`/`end_index`, and the exact URL shape after `.pdf`. Commit the reply under `docs/evidence/` only if the document is public. | Done 11 Oct: `type`, `url`, `title` only, no offsets; URL carries `#page=N` and the encoded passage |
-| L8 | Batch 9 live | Batch 9 code | Deploy to a workspace with only the new settings file and one command, from a fresh Git folder; then a non-admin user uploads, parses and chats. Command: `python3 scripts/deploy_workspace.py <name>` in a cluster web terminal (DEPLOYMENT_GUIDE sections 3–4). Record: the script's validation summary is right, the first deploy's app error is tolerated, `workspace_setup` succeeds, chat cites pages, and what the bundle UI's Deploy button does (fill in DEPLOYMENT_GUIDE section 4). | Open |
+| L8 | Batch 9 live | Batch 9 code | Deploy to a workspace with only the new settings file and one command, from a fresh Git folder; then a non-admin user uploads, parses and chats. Command: `python3 scripts/deploy_workspace.py <name>` in a cluster web terminal (DEPLOYMENT_GUIDE sections 3–4). Record: the script's validation summary is right, the first deploy's app error is tolerated, `workspace_setup` succeeds, chat cites pages, and what the bundle UI's Deploy button does (fill in DEPLOYMENT_GUIDE section 4). | Deploy done 20 Nov from a Git folder with `--adopt-app` (only fix: the catalog is `idp_testing_catalog`); 100-file browser upload and parse passed. Open: non-admin user, Deploy button. |
 
 ## Batch 1 — Branch and Genie removal
 
